@@ -8,6 +8,7 @@ import {
   loadSessionFromIndexedDB,
   saveSessionToIndexedDB,
   clearSessionFromIndexedDB,
+  getAllSessionsFromIndexedDB,
   urlToDataUrl,
   type SavedSession,
 } from './utils/indexedDb';
@@ -24,6 +25,14 @@ export interface ExtractResponse {
   icons_region_url: string;
   extracted_icons: ExtractedIcon[];
   icon_labels?: Record<string, string>;
+}
+
+export interface BackupProjectMeta {
+  id: string;
+  name: string;
+  savedAt: number;
+  sceneCount: number;
+  session?: SavedSession;
 }
 
 interface ErrorBoundaryProps {
@@ -80,35 +89,135 @@ function App() {
   const [currentPhase, setCurrentPhase] = useState<1 | 2 | 3 | 4>(1);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [iconLabels, setIconLabels] = useState<Record<string, string>>({});
-  const [savedSession, setSavedSession] = useState<SavedSession | null>(null);
+  const [backupProjects, setBackupProjects] = useState<BackupProjectMeta[]>([]);
+  const [storageUsage, setStorageUsage] = useState({ mb: '0.00', percent: 0 });
 
-  // Check for saved session in IndexedDB on load
-  useEffect(() => {
-    (async () => {
-      try {
-        const session = await loadSessionFromIndexedDB();
-        if (session && session.extractedData) {
-          setSavedSession(session);
-        }
-      } catch (e) {
-        console.warn('Could not load session from IndexedDB:', e);
+  // Refresh and load all project backups and storage usage
+  const refreshBackups = async () => {
+    try {
+      // 1. Calculate storage usage from localStorage
+      let totalBytes = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        const v = localStorage.getItem(k) || '';
+        totalBytes += (k.length + v.length) * 2;
       }
-    })();
-  }, []);
+      const maxBytes = 5 * 1024 * 1024;
+      const mb = (totalBytes / (1024 * 1024)).toFixed(2);
+      const percent = Math.min(100, Math.round((totalBytes / maxBytes) * 100));
+      setStorageUsage({ mb, percent });
 
-  const handleRestoreSavedSession = () => {
-    if (!savedSession) return;
-    setFileData(savedSession.fileData);
-    setExtractedData(savedSession.extractedData);
-    setIconLabels(savedSession.iconLabels || {});
-    setSelectedRegions(savedSession.selectedRegions || []);
-    setCurrentPhase((savedSession.currentPhase as 1 | 2 | 3 | 4) || 3);
+      // 2. Fetch all IndexedDB sessions
+      const sessions = await getAllSessionsFromIndexedDB();
+      const metas: BackupProjectMeta[] = [];
+
+      sessions.forEach(sess => {
+        if (!sess.fileData?.file_id) return;
+        const fid = sess.fileData.file_id;
+        let sceneCount = 1;
+        try {
+          const raw = localStorage.getItem(`settingkun_backup_${fid}`);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
+          }
+        } catch { }
+
+        metas.push({
+          id: fid,
+          name: `セッティング図 (${fid.slice(0, 8)})`,
+          savedAt: sess.updatedAt || Date.now(),
+          sceneCount,
+          session: sess,
+        });
+      });
+
+      // Also check any localStorage-only backups
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        if (k.startsWith('settingkun_backup_') && !k.endsWith('_ts')) {
+          const fid = k.replace('settingkun_backup_', '');
+          if (!metas.some(m => m.id === fid)) {
+            try {
+              const raw = localStorage.getItem(k);
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                const ts = parseInt(localStorage.getItem(k + '_ts') || '0', 10) || parsed.savedAt || Date.now();
+                metas.push({
+                  id: fid,
+                  name: `セッティング図 (${fid.slice(0, 8)})`,
+                  savedAt: ts,
+                  sceneCount: Array.isArray(parsed.scenes) ? parsed.scenes.length : 1,
+                });
+              }
+            } catch { }
+          }
+        }
+      }
+
+      metas.sort((a, b) => b.savedAt - a.savedAt);
+      setBackupProjects(metas);
+    } catch (e) {
+      console.warn('Error refreshing backups:', e);
+    }
   };
 
-  const handleDiscardSavedSession = async () => {
-    if (window.confirm("保存されている前回のセッションデータを消去しますか？")) {
-      await clearSessionFromIndexedDB(savedSession?.fileData?.file_id);
-      setSavedSession(null);
+  useEffect(() => {
+    refreshBackups();
+  }, [currentPhase]);
+
+  const handleResumeProject = async (meta: BackupProjectMeta) => {
+    let sess: SavedSession | null | undefined = meta.session;
+    if (!sess) {
+      sess = await loadSessionFromIndexedDB(meta.id);
+    }
+    if (sess) {
+      setFileData(sess.fileData);
+      setExtractedData(sess.extractedData);
+      setIconLabels(sess.iconLabels || {});
+      setSelectedRegions(sess.selectedRegions || []);
+      setCurrentPhase(3);
+    } else {
+      setFileData({
+        file_id: meta.id,
+        image_url: '',
+        width: 1200,
+        height: 800,
+      });
+      setExtractedData({
+        backgroundUrl: '',
+        iconsRegionUrl: '',
+        extractedIcons: [],
+      });
+      setCurrentPhase(3);
+    }
+  };
+
+  const handleDeleteProject = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('このプロジェクトをブラウザから削除しますか？（操作は元に戻せません）')) return;
+    await clearSessionFromIndexedDB(id);
+    localStorage.removeItem(`settingkun_backup_${id}`);
+    localStorage.removeItem(`settingkun_backup_${id}_ts`);
+    await refreshBackups();
+  };
+
+  const handleExportProjectJson = (meta: BackupProjectMeta, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const raw = localStorage.getItem(`settingkun_backup_${meta.id}`);
+      const data = raw ? JSON.parse(raw) : { projectId: meta.id };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${meta.name}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('書き出しに失敗しました');
     }
   };
 
@@ -176,7 +285,6 @@ function App() {
             updatedAt: Date.now(),
           };
           await saveSessionToIndexedDB(newSession);
-          setSavedSession(newSession);
         } catch (e) {
           console.warn('Failed to cache session in IndexedDB:', e);
         }
@@ -213,7 +321,6 @@ function App() {
       if (fileData?.file_id) {
         await clearSessionFromIndexedDB(fileData.file_id);
       }
-      setSavedSession(null);
       setFileData(null);
       setExtractedData(null);
       setSelectedRegions([]);
@@ -320,49 +427,119 @@ function App() {
               </div>
             </div>
           ) : !fileData ? (
-            <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center">
-              {/* Previous session recovery card */}
-              {savedSession && (
-                <div className="w-full max-w-2xl mb-5 p-4.5 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between shadow-xs">
-                  <div className="text-left">
-                    <p className="text-sm font-bold text-blue-900 flex items-center gap-1.5">
-                      <span>💾</span> 前回のセッションデータが保存されています
-                    </p>
-                    <p className="text-xs text-blue-700 mt-0.5">
-                      保存日時: {new Date(savedSession.updatedAt).toLocaleString('ja-JP')}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleRestoreSavedSession}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <span>↩️</span>
-                      <span>続きから再開</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDiscardSavedSession}
-                      className="px-3 py-2 text-slate-500 hover:text-red-600 text-xs font-medium hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
-                    >
-                      破棄
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-md p-8 text-center">
-                <div className="w-14 h-14 mx-auto mb-4 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-2xl shadow-inner">
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-start">
+              {/* PDF Upload Card */}
+              <div className="w-full max-w-2xl bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-8 text-center transition-colors">
+                <div className="w-14 h-14 mx-auto mb-4 bg-blue-50 dark:bg-slate-700 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center text-2xl shadow-inner">
                   📄
                 </div>
-                <h2 className="text-xl font-bold text-slate-800 mb-2">
+                <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">
                   舞台セッティング表のPDFをアップロード
                 </h2>
-                <p className="text-sm text-slate-500 max-w-lg mx-auto mb-6 leading-relaxed">
+                <p className="text-sm text-slate-500 dark:text-slate-400 max-w-lg mx-auto mb-6 leading-relaxed">
                   指定のセッティング用紙PDFを読み込むと、ステージ図面と椅子・譜面台・机などのパーツを自動で切り出し、ドラッグ配置・個数集計・自動丸つけを行えます。
                 </p>
                 <PdfUploader onUploadSuccess={handleUploadSuccess} />
+              </div>
+
+              {/* ===== Backup / Saved Projects Section (Ported from Prototype) ===== */}
+              <div className="w-full max-w-2xl mt-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-xs transition-colors">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-3 px-0.5">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
+                    <span className="text-sm">🕒</span>
+                    <span>自動バックアップ一覧</span>
+                  </div>
+                  {backupProjects.length > 0 && (
+                    <span className="text-[11px] text-slate-400 font-medium">
+                      {backupProjects.length} 件保存中
+                    </span>
+                  )}
+                </div>
+
+                {/* Project List */}
+                <div className="max-h-52 overflow-y-auto flex flex-col gap-2 pr-1">
+                  {backupProjects.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center gap-2 py-6 text-slate-400 dark:text-slate-500 text-xs">
+                      <span className="text-2xl opacity-60">📁</span>
+                      <span>バックアップされたデータはありません</span>
+                    </div>
+                  ) : (
+                    backupProjects.map((proj) => {
+                      const d = new Date(proj.savedAt);
+                      const dateStr = proj.savedAt
+                        ? `${d.toLocaleDateString('ja-JP')} ${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}`
+                        : '不明';
+
+                      return (
+                        <div
+                          key={proj.id}
+                          onClick={() => handleResumeProject(proj)}
+                          className="group flex items-center justify-between bg-slate-50 hover:bg-blue-50/70 dark:bg-slate-700/50 dark:hover:bg-slate-700 border border-slate-200/80 hover:border-blue-300 dark:border-slate-600 dark:hover:border-blue-400 rounded-xl px-3.5 py-2.5 transition-all cursor-pointer shadow-2xs hover:shadow-xs"
+                        >
+                          {/* Info */}
+                          <div className="flex-1 min-w-0 flex flex-col gap-0.5 text-left">
+                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate">
+                              {proj.name}
+                            </span>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-400 flex items-center gap-2">
+                              <span>📑 {proj.sceneCount}場面</span>
+                              <span>•</span>
+                              <span>🕒 {dateStr}</span>
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1.5 ml-3 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => handleExportProjectJson(proj, e)}
+                              title="JSON書き出し"
+                              className="w-7 h-7 rounded-lg bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-600 dark:text-slate-300 hover:text-emerald-600 border border-slate-200 dark:border-slate-600 hover:border-emerald-300 flex items-center justify-center text-xs transition-colors cursor-pointer"
+                            >
+                              📥
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteProject(proj.id, e)}
+                              title="削除"
+                              className="w-7 h-7 rounded-lg bg-white dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-600 dark:text-slate-300 hover:text-rose-600 border border-slate-200 dark:border-slate-600 hover:border-rose-300 flex items-center justify-center text-xs transition-colors cursor-pointer"
+                            >
+                              🗑
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Storage Usage Container */}
+                <div className="mt-3.5 pt-3 border-t border-slate-200/80 dark:border-slate-700/80">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <span>💾</span> ストレージ使用量
+                    </span>
+                    <span className="font-mono">
+                      {storageUsage.mb} MB / 5.00 MB ({storageUsage.percent}%)
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        storageUsage.percent >= 80
+                          ? 'bg-linear-to-r from-rose-500 to-red-600'
+                          : storageUsage.percent >= 50
+                          ? 'bg-linear-to-r from-amber-500 to-orange-500'
+                          : 'bg-linear-to-r from-blue-600 to-indigo-500'
+                      }`}
+                      style={{ width: `${Math.min(100, storageUsage.percent)}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500 text-right mt-1.5">
+                    ※上限(5MB)に達すると自動保存が停止します
+                  </div>
+                </div>
               </div>
             </div>
           ) : !extractedData ? (
