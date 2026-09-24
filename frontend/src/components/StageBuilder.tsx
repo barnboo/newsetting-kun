@@ -1037,24 +1037,15 @@ const StageBuilder: React.FC<Props> = ({
       <header className={`h-14 border-b flex items-center justify-between px-4 shrink-0 shadow-sm z-10 transition-colors ${
         isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
       }`}>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleBack} title="トップ画面に戻る">
-            <span className="text-2xl">🪄</span>
+        <div className="flex items-center gap-4">
+          <div
+            className="flex items-center gap-2 cursor-pointer hover:opacity-75 transition-opacity select-none group"
+            onClick={handleBack}
+            title="最初の画面（PDF読込・バックアップ一覧）に戻る"
+          >
+            <span className="text-2xl group-hover:scale-105 transition-transform">🪄</span>
             <h2 className={`font-bold text-lg hidden sm:block ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>セッティングくん</h2>
           </div>
-          <button
-            type="button"
-            onClick={handleBack}
-            className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
-              isDarkMode
-                ? 'bg-slate-700 hover:bg-slate-600 border-slate-600 text-slate-200'
-                : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
-            }`}
-            title="最初の画面（PDF選択・バックアップ一覧）に戻る"
-          >
-            <span>🏠</span>
-            <span className="hidden md:inline">トップへ</span>
-          </button>
           <div className={`h-6 w-px ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
           <div className="flex items-center gap-1">
             <button
