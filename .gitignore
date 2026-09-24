@@ -1,0 +1,28 @@
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Node dependencies and build
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.log
+
+# Python virtual environment and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+backend/venv/
+.venv/
+
+# Backend uploads and temporary runtime files
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/static/*
+!backend/static/.gitkeep
+
+# Environment variables
+.env
+.env.local
