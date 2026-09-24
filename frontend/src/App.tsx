@@ -283,6 +283,7 @@ function App() {
 
       // Check if there are any matching templates — modal will auto-skip if none
       setShowTemplateModal(true);
+      setCurrentPhase(3);
 
       // Asynchronously cache session in IndexedDB with standalone DataURLs
       (async () => {

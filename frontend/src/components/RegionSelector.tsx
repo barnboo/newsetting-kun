@@ -97,9 +97,9 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
           <button
             onClick={handleFinish}
             disabled={!regions.some(r => r.type === 'background') || !regions.some(r => r.type === 'icons')}
-            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            Proceed to Next Phase
+            次の段階に進む (ステージ配置へ)
           </button>
         </div>
 
