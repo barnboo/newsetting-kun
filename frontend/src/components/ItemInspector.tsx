@@ -417,6 +417,17 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
   }
 
   if (selectedCurve) {
+    const refX = centerPos?.x ?? 0;
+    const refY = centerPos?.y ?? 0;
+
+    const handleCurveCoordChange = (field: 'x' | 'y', value: string) => {
+      const num = parseFloat(value);
+      if (!isNaN(num)) {
+        const base = field === 'x' ? refX : refY;
+        onUpdateCurve(selectedCurve.id, { [field]: base + num });
+      }
+    };
+
     const isPercussion = selectedCurve.itemType === 'percussion';
     const hasCurveStands = selectedCurve.itemType === 'ensembleStand' ||
                            selectedCurve.itemType === 'conductorStand' ||
@@ -435,10 +446,34 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
           </h3>
           <button
             onClick={() => onDeleteCurve(selectedCurve.id)}
-            className="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded"
+            className="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded cursor-pointer"
           >
             削除
           </button>
+        </div>
+
+        {/* Coordinates (X, Y) relative to center */}
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-500 font-medium">X座標</span>
+            <input
+              type="number"
+              step="1"
+              value={Math.round(selectedCurve.x - refX)}
+              onChange={(e) => handleCurveCoordChange('x', e.target.value)}
+              className="px-2 py-1 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 rounded text-sm w-full font-mono"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-500 font-medium">Y座標</span>
+            <input
+              type="number"
+              step="1"
+              value={Math.round(selectedCurve.y - refY)}
+              onChange={(e) => handleCurveCoordChange('y', e.target.value)}
+              className="px-2 py-1 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 rounded text-sm w-full font-mono"
+            />
+          </label>
         </div>
 
         <div className="flex flex-col gap-3">
