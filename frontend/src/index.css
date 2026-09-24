@@ -1,3 +1,19 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* ReactCrop Selection Outline Styles by Mode */
+.crop-mode-background .ReactCrop__crop-selection {
+  border: 2.5px solid #2563eb !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8), 0 0 12px rgba(37, 99, 235, 0.4) !important;
+}
+
+.crop-mode-icons .ReactCrop__crop-selection {
+  border: 2.5px solid #059669 !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8), 0 0 12px rgba(5, 150, 105, 0.4) !important;
+}
+
+.crop-mode-quantities .ReactCrop__crop-selection {
+  border: 2.5px solid #ea580c !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8), 0 0 12px rgba(234, 88, 12, 0.4) !important;
+}

@@ -25,7 +25,7 @@ const MODES = [
     bgOverlay: 'bg-blue-500/20',
     tagColor: 'bg-blue-600 text-white',
     dotColor: 'bg-blue-500',
-    cropColor: '#2563eb',
+    btnBg: 'bg-blue-600 hover:bg-blue-700',
   },
   {
     type: 'icons' as const,
@@ -38,7 +38,7 @@ const MODES = [
     bgOverlay: 'bg-emerald-500/20',
     tagColor: 'bg-emerald-600 text-white',
     dotColor: 'bg-emerald-500',
-    cropColor: '#059669',
+    btnBg: 'bg-emerald-600 hover:bg-emerald-700',
   },
   {
     type: 'quantities' as const,
@@ -51,7 +51,7 @@ const MODES = [
     bgOverlay: 'bg-orange-500/25',
     tagColor: 'bg-orange-600 text-white',
     dotColor: 'bg-orange-500',
-    cropColor: '#ea580c',
+    btnBg: 'bg-orange-600 hover:bg-orange-700',
   },
 ];
 
@@ -142,17 +142,10 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
 
   const currentCfg = MODES.find(m => m.type === currentMode)!;
   const currentSaved = regions.find(r => r.type === currentMode);
+  const hasValidCrop = Boolean(crop && crop.width && crop.height && crop.width > 0 && crop.height > 0);
 
   return (
     <div className="flex flex-col items-center w-full max-w-5xl mx-auto">
-      {/* Dynamic Crop Border Color for active mode */}
-      <style>{`
-        .ReactCrop__crop-selection {
-          border: 2.5px solid ${currentCfg.cropColor} !important;
-          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8), 0 0 12px ${currentCfg.cropColor}66 !important;
-        }
-      `}</style>
-
       {/* ── Compact Header & Toolbar ── */}
       <div className="w-full bg-white rounded-xl shadow-xs border border-slate-200 p-3 mb-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -179,13 +172,17 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
                 >
                   <span className={`w-2.5 h-2.5 rounded-full ${m.dotColor}`} />
                   <span>{m.label}</span>
-                  {isSaved ? (
-                    <span className="text-emerald-600 font-bold text-xs">✓</span>
-                  ) : (
-                    <span className={`text-[10px] ${m.required ? 'text-rose-500 font-bold' : 'text-slate-400'}`}>
-                      {m.requiredLabel}
-                    </span>
-                  )}
+                  <span
+                    className={`text-xs ${
+                      isSaved
+                        ? 'text-emerald-600 font-bold'
+                        : m.required
+                        ? 'text-rose-500 font-bold text-[10px]'
+                        : 'text-slate-400 text-[10px]'
+                    }`}
+                  >
+                    {isSaved ? '✓' : m.requiredLabel}
+                  </span>
                 </button>
               );
             })}
@@ -193,18 +190,21 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
-            {crop && crop.width > 0 && crop.height > 0 ? (
+            {hasValidCrop ? (
               <button
+                key="confirm-btn"
                 type="button"
                 onClick={handleSaveRegion}
-                style={{ backgroundColor: currentCfg.cropColor }}
-                className="px-4 py-1.5 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all hover:opacity-90"
+                className={`px-4 py-1.5 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all hover:opacity-90 ${currentCfg.btnBg}`}
               >
                 <span>💾</span>
                 <span>{currentCfg.label} を確定する</span>
               </button>
-            ) : currentSaved ? (
+            ) : null}
+
+            {!hasValidCrop && currentSaved ? (
               <button
+                key="redo-btn"
                 type="button"
                 onClick={() => handleClearRegion(currentMode)}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
@@ -217,6 +217,7 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
             <div className="h-4 w-px bg-slate-200 mx-1" />
 
             <button
+              key="proceed-btn"
               type="button"
               onClick={() => onComplete(regions)}
               disabled={!canProceed}
@@ -263,7 +264,7 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
       </div>
 
       {/* ── Image Workspace ── */}
-      <div className="w-full bg-slate-100 rounded-xl border border-slate-200 p-2 flex justify-center overflow-auto max-h-[78vh]">
+      <div className={`w-full bg-slate-100 rounded-xl border border-slate-200 p-2 flex justify-center overflow-auto max-h-[78vh] crop-mode-${currentMode}`}>
         <div className="relative inline-block select-none bg-white shadow-xs rounded">
           <ReactCrop
             crop={crop}
