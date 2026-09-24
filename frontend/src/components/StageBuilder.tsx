@@ -11,6 +11,7 @@ import { TEMPLATE_SHAPES, getTemplateDataUrl, getPercussionInfo } from '../utils
 import { createDefaultCurveObject, type CurveObject, type CurveItem } from '../utils/bezierUtils';
 import { ContextMenu } from './ContextMenu';
 import { copyStageObjects, pasteStageObjects, duplicateStageObjects, hasStageObjectsInClipboard } from '../utils/clipboard';
+import { updateSessionTimestampInIndexedDB } from '../utils/indexedDb';
 
 export interface Scene {
   id: string;
@@ -71,11 +72,39 @@ const StageBuilder: React.FC<Props> = ({
     return null;
   });
 
+  const initialScenes: Scene[] = (initialBackup?.scenes && initialBackup.scenes.length > 0)
+    ? initialBackup.scenes
+    : [
+        {
+          id: `scene_${Date.now()}`,
+          name: '場面 1',
+          placedItems: initialBackup?.placedItems || [],
+          curveObjects: initialBackup?.curveObjects || [],
+        },
+      ];
+
+  const initialCurrentSceneId: string =
+    initialBackup?.currentSceneId && initialScenes.some(s => s.id === initialBackup.currentSceneId)
+      ? initialBackup.currentSceneId
+      : initialScenes[0].id;
+
+  const activeInitialScene = initialScenes.find(s => s.id === initialCurrentSceneId) || initialScenes[0];
+
+  const initialPlacedItems: PlacedItem[] =
+    activeInitialScene.placedItems && activeInitialScene.placedItems.length > 0
+      ? activeInitialScene.placedItems
+      : (initialBackup?.placedItems || []);
+
+  const initialCurveObjects: CurveObject[] =
+    activeInitialScene.curveObjects && activeInitialScene.curveObjects.length > 0
+      ? activeInitialScene.curveObjects
+      : (initialBackup?.curveObjects || []);
+
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [stageImageUrl, setStageImageUrl] = useState<string | null>(null);
-  const [placedItems, setPlacedItems] = useState<PlacedItem[]>(() => initialBackup?.placedItems || []);
-  const [curveObjects, setCurveObjects] = useState<CurveObject[]>(() => initialBackup?.curveObjects || []);
+  const [placedItems, setPlacedItems] = useState<PlacedItem[]>(initialPlacedItems);
+  const [curveObjects, setCurveObjects] = useState<CurveObject[]>(initialCurveObjects);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedCurveIds, setSelectedCurveIds] = useState<string[]>([]);
 
@@ -116,15 +145,8 @@ const StageBuilder: React.FC<Props> = ({
   }, [extractedIcons]);
 
   // Scenes management (Phase 3 scenes logic ported from prototype)
-  const [scenes, setScenes] = useState<Scene[]>(() => initialBackup?.scenes || [
-    {
-      id: `scene_${Date.now()}`,
-      name: '場面 1',
-      placedItems: [],
-      curveObjects: [],
-    },
-  ]);
-  const [currentSceneId, setCurrentSceneId] = useState<string>(() => initialBackup?.currentSceneId || initialBackup?.scenes?.[0]?.id || 'scene_1');
+  const [scenes, setScenes] = useState<Scene[]>(initialScenes);
+  const [currentSceneId, setCurrentSceneId] = useState<string>(initialCurrentSceneId);
   const [drawerSubmenu, setDrawerSubmenu] = useState<'scenes' | 'settings' | null>(null);
 
   const [snapSettings, setSnapSettings] = useState<SnapSettings>(() => initialBackup?.snapSettings || {
@@ -221,6 +243,9 @@ const StageBuilder: React.FC<Props> = ({
       }
       localStorage.setItem(BACKUP_KEY, json);
       localStorage.setItem(BACKUP_KEY + '_ts', Date.now().toString());
+      if (fileId) {
+        updateSessionTimestampInIndexedDB(fileId);
+      }
     } catch {
       setBackupWarning('バックアップの保存に失敗しました（ストレージ容量不足の可能性）。');
     }
@@ -237,6 +262,11 @@ const StageBuilder: React.FC<Props> = ({
     currentSceneId,
     snapSettings,
   });
+
+  const handleBack = () => {
+    saveBackup(buildSnapshot());
+    onBack();
+  };
 
   // Push current state onto history (called after every meaningful user action)
   const pushHistory = () => {
@@ -1007,11 +1037,24 @@ const StageBuilder: React.FC<Props> = ({
       <header className={`h-14 border-b flex items-center justify-between px-4 shrink-0 shadow-sm z-10 transition-colors ${
         isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
       }`}>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={onBack} title="戻る">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleBack} title="トップ画面に戻る">
             <span className="text-2xl">🪄</span>
             <h2 className={`font-bold text-lg hidden sm:block ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>セッティングくん</h2>
           </div>
+          <button
+            type="button"
+            onClick={handleBack}
+            className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+              isDarkMode
+                ? 'bg-slate-700 hover:bg-slate-600 border-slate-600 text-slate-200'
+                : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
+            }`}
+            title="最初の画面（PDF選択・バックアップ一覧）に戻る"
+          >
+            <span>🏠</span>
+            <span className="hidden md:inline">トップへ</span>
+          </button>
           <div className={`h-6 w-px ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
           <div className="flex items-center gap-1">
             <button

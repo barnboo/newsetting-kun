@@ -91,6 +91,31 @@ export async function saveSessionToIndexedDB(session: SavedSession): Promise<voi
 }
 
 /**
+ * Update session timestamp in IndexedDB
+ */
+export async function updateSessionTimestampInIndexedDB(fileId: string): Promise<void> {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.get(`session_${fileId}`);
+      req.onsuccess = () => {
+        const sess = req.result as SavedSession | undefined;
+        if (sess) {
+          sess.updatedAt = Date.now();
+          store.put(sess, `session_${fileId}`);
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch {
+    // Ignore error
+  }
+}
+
+/**
  * Load a session from IndexedDB. If fileId is provided, loads that specific project;
  * otherwise loads the most recently active project session.
  */

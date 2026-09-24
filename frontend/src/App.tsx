@@ -171,26 +171,49 @@ function App() {
     if (!sess) {
       sess = await loadSessionFromIndexedDB(meta.id);
     }
-    if (sess) {
-      setFileData(sess.fileData);
-      setExtractedData(sess.extractedData);
-      setIconLabels(sess.iconLabels || {});
-      setSelectedRegions(sess.selectedRegions || []);
-      setCurrentPhase(3);
-    } else {
-      setFileData({
-        file_id: meta.id,
-        image_url: '',
-        width: 1200,
-        height: 800,
-      });
-      setExtractedData({
-        backgroundUrl: '',
-        iconsRegionUrl: '',
-        extractedIcons: [],
-      });
-      setCurrentPhase(3);
+
+    let backgroundUrl = sess?.extractedData?.backgroundUrl || '';
+    let iconsRegionUrl = sess?.extractedData?.iconsRegionUrl || '';
+    let extractedIcons = sess?.extractedData?.extractedIcons || [];
+    let pageImageUrl = sess?.fileData?.image_url || '';
+    let selectedRegions = sess?.selectedRegions || [];
+    let iconLabels = sess?.iconLabels || {};
+
+    // If backgroundUrl is missing, attempt to probe backend static files
+    if (!backgroundUrl) {
+      try {
+        const testBgUrl = `/static/${meta.id}_bg.png`;
+        const testRes = await fetch(testBgUrl, { method: 'HEAD' });
+        if (testRes.ok) {
+          backgroundUrl = testBgUrl;
+          const testPageUrl = `/static/${meta.id}_page1.png`;
+          const testPageRes = await fetch(testPageUrl, { method: 'HEAD' });
+          if (testPageRes.ok) pageImageUrl = testPageUrl;
+        }
+      } catch (err) {
+        console.warn('Backend probe error:', err);
+      }
     }
+
+    if (!backgroundUrl) {
+      alert(`プロジェクト「${meta.name}」の図面画像データ（IndexedDB/サーバー）が見つかりませんでした。\n（古いデータまたは一時キャッシュが削除された可能性があります）`);
+      return;
+    }
+
+    setFileData({
+      file_id: meta.id,
+      image_url: pageImageUrl,
+      width: sess?.fileData?.width || 1200,
+      height: sess?.fileData?.height || 800,
+    });
+    setExtractedData({
+      backgroundUrl,
+      iconsRegionUrl,
+      extractedIcons,
+    });
+    setIconLabels(iconLabels);
+    setSelectedRegions(selectedRegions);
+    setCurrentPhase(3);
   };
 
   const handleDeleteProject = async (id: string, e: React.MouseEvent) => {
@@ -316,16 +339,20 @@ function App() {
   };
 
 
-  const handleReset = async () => {
-    if (window.confirm("作業内容を破棄して、新しくPDFを読み込み直しますか？")) {
-      if (fileData?.file_id) {
-        await clearSessionFromIndexedDB(fileData.file_id);
-      }
+  const handleReset = () => {
+    if (window.confirm("作業を中断して、最初の画面（PDF読込・バックアップ一覧）に戻りますか？")) {
       setFileData(null);
       setExtractedData(null);
       setSelectedRegions([]);
       setCurrentPhase(1);
     }
+  };
+
+  const handleBackToHome = () => {
+    setFileData(null);
+    setExtractedData(null);
+    setSelectedRegions([]);
+    setCurrentPhase(1);
   };
 
   const backgroundCrop = selectedRegions.find(r => r.type === 'background')?.crop || null;
@@ -403,11 +430,11 @@ function App() {
               <button
                 type="button"
                 onClick={handleReset}
-                className="text-xs text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5"
-                title="別のPDFを読み込む"
+                className="text-xs text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5 cursor-pointer"
+                title="最初の画面（PDF読込・バックアップ一覧）に戻る"
               >
-                <span>🔄</span>
-                <span>新規読込</span>
+                <span>🏠</span>
+                <span>トップに戻る</span>
               </button>
             )}
           </div>
@@ -426,7 +453,7 @@ function App() {
                 </p>
               </div>
             </div>
-          ) : !fileData ? (
+          ) : currentPhase === 1 || !fileData ? (
             <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-start">
               {/* PDF Upload Card */}
               <div className="w-full max-w-2xl bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-8 text-center transition-colors">
@@ -542,13 +569,14 @@ function App() {
                 </div>
               </div>
             </div>
-          ) : !extractedData ? (
+          ) : currentPhase === 2 || !extractedData ? (
             <div className="flex-1 overflow-y-auto p-4 flex flex-col items-center justify-center">
               <RegionSelector imageUrl={fileData.image_url} onComplete={handleRegionsComplete} />
             </div>
           ) : (
             <>
               <StageBuilder 
+                key={fileData.file_id}
                 backgroundUrl={extractedData.backgroundUrl} 
                 iconsRegionUrl={extractedData.iconsRegionUrl}
                 extractedIcons={extractedData.extractedIcons} 
@@ -557,10 +585,7 @@ function App() {
                 pageImageUrl={fileData.image_url}
                 initialIconLabels={iconLabels}
                 onIconsUpdated={(icons) => setExtractedData(prev => prev ? { ...prev, extractedIcons: icons } : null)}
-                onBack={() => {
-                  setExtractedData(null);
-                  setCurrentPhase(2);
-                }}
+                onBack={handleBackToHome}
                 onPhaseChange={(p) => setCurrentPhase(p)}
               />
               {/* Template replacement modal (shown right after extraction) */}
