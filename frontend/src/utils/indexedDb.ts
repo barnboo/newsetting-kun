@@ -1,7 +1,7 @@
 /**
  * IndexedDB storage engine for Setting-kun
  * Stores large binary data (PDF background image, cropped icons as DataURLs, and session state)
- * allowing full offline recovery and persistence across browser sessions.
+ * with complete project separation (keyed by file_id).
  */
 
 export interface SavedSession {
@@ -30,7 +30,7 @@ export interface SavedSession {
 const DB_NAME = 'settingkun_indexeddb';
 const DB_VERSION = 1;
 const STORE_NAME = 'sessions';
-const SESSION_KEY = 'active_session';
+const ACTIVE_ID_KEY = '__active_project_id__';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -69,18 +69,21 @@ export async function urlToDataUrl(url: string): Promise<string> {
 }
 
 /**
- * Save active session to IndexedDB with all images converted to standalone DataURLs
+ * Save session to IndexedDB, keyed by project file_id for strict project separation
  */
 export async function saveSessionToIndexedDB(session: SavedSession): Promise<void> {
   try {
+    const fileId = session.fileData?.file_id || 'default';
+    const key = `session_${fileId}`;
     const db = await openDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.put(session, SESSION_KEY);
+      store.put(session, key);
+      store.put(fileId, ACTIVE_ID_KEY);
 
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   } catch (err) {
     console.error('Failed to save session to IndexedDB:', err);
@@ -88,18 +91,52 @@ export async function saveSessionToIndexedDB(session: SavedSession): Promise<voi
 }
 
 /**
- * Load the active session from IndexedDB
+ * Load a session from IndexedDB. If fileId is provided, loads that specific project;
+ * otherwise loads the most recently active project session.
  */
-export async function loadSessionFromIndexedDB(): Promise<SavedSession | null> {
+export async function loadSessionFromIndexedDB(fileId?: string): Promise<SavedSession | null> {
   try {
     const db = await openDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.get(SESSION_KEY);
 
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
+      if (fileId) {
+        const req = store.get(`session_${fileId}`);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+        return;
+      }
+
+      // Check active project id first
+      const activeReq = store.get(ACTIVE_ID_KEY);
+      activeReq.onsuccess = () => {
+        const activeId = activeReq.result;
+        if (activeId) {
+          const req = store.get(`session_${activeId}`);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => reject(req.error);
+        } else {
+          // Fallback: search all records for the most recently updated
+          const allReq = store.openCursor();
+          let latestSession: SavedSession | null = null;
+          allReq.onsuccess = (e) => {
+            const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+            if (cursor) {
+              if (cursor.key !== ACTIVE_ID_KEY && cursor.value?.updatedAt) {
+                if (!latestSession || cursor.value.updatedAt > latestSession.updatedAt) {
+                  latestSession = cursor.value;
+                }
+              }
+              cursor.continue();
+            } else {
+              resolve(latestSession);
+            }
+          };
+          allReq.onerror = () => resolve(null);
+        }
+      };
+      activeReq.onerror = () => resolve(null);
     });
   } catch (err) {
     console.warn('IndexedDB is not available or empty:', err);
@@ -108,18 +145,68 @@ export async function loadSessionFromIndexedDB(): Promise<SavedSession | null> {
 }
 
 /**
- * Clear the saved session from IndexedDB
+ * Get all saved project sessions from IndexedDB
  */
-export async function clearSessionFromIndexedDB(): Promise<void> {
+export async function getAllSessionsFromIndexedDB(): Promise<SavedSession[]> {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const allReq = store.openCursor();
+      const sessions: SavedSession[] = [];
+
+      allReq.onsuccess = (e) => {
+        const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          if (cursor.key !== ACTIVE_ID_KEY && cursor.value?.fileData) {
+            sessions.push(cursor.value);
+          }
+          cursor.continue();
+        } else {
+          // Sort by latest updated first
+          sessions.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          resolve(sessions);
+        }
+      };
+      allReq.onerror = () => resolve([]);
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Clear a specific project session from IndexedDB (or the active session)
+ */
+export async function clearSessionFromIndexedDB(fileId?: string): Promise<void> {
   try {
     const db = await openDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.delete(SESSION_KEY);
 
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      if (fileId) {
+        store.delete(`session_${fileId}`);
+        const activeReq = store.get(ACTIVE_ID_KEY);
+        activeReq.onsuccess = () => {
+          if (activeReq.result === fileId) {
+            store.delete(ACTIVE_ID_KEY);
+          }
+        };
+      } else {
+        const activeReq = store.get(ACTIVE_ID_KEY);
+        activeReq.onsuccess = () => {
+          const activeId = activeReq.result;
+          if (activeId) {
+            store.delete(`session_${activeId}`);
+          }
+          store.delete(ACTIVE_ID_KEY);
+        };
+      }
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   } catch (err) {
     console.error('Failed to clear session from IndexedDB:', err);

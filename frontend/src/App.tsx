@@ -107,7 +107,7 @@ function App() {
 
   const handleDiscardSavedSession = async () => {
     if (window.confirm("保存されている前回のセッションデータを消去しますか？")) {
-      await clearSessionFromIndexedDB();
+      await clearSessionFromIndexedDB(savedSession?.fileData?.file_id);
       setSavedSession(null);
     }
   };
@@ -210,7 +210,9 @@ function App() {
 
   const handleReset = async () => {
     if (window.confirm("作業内容を破棄して、新しくPDFを読み込み直しますか？")) {
-      await clearSessionFromIndexedDB();
+      if (fileData?.file_id) {
+        await clearSessionFromIndexedDB(fileData.file_id);
+      }
       setSavedSession(null);
       setFileData(null);
       setExtractedData(null);
