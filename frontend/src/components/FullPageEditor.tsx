@@ -44,8 +44,11 @@ interface SingleSceneCanvasProps {
   bgImage: HTMLImageElement | undefined;
   nodes: OverlayNode[];
   selectedId: string | null;
+  editingId?: string | null;
   onSelectNode: (id: string | null) => void;
+  onStartEditingNode?: (id: string) => void;
   onUpdateNodePos: (id: string, x: number, y: number) => void;
+  onCanvasDblClick?: (docX: number, docY: number) => void;
 }
 
 const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
@@ -55,8 +58,11 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
   bgImage,
   nodes,
   selectedId,
+  editingId,
   onSelectNode,
+  onStartEditingNode,
   onUpdateNodePos,
+  onCanvasDblClick,
 }, ref) => {
   const [stageImg] = useImage(scene.stageImageUrl, 'anonymous');
 
@@ -70,6 +76,42 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
       onMouseDown={(e) => {
         if (e.target === e.target.getStage()) {
           onSelectNode(null);
+        }
+      }}
+      onDblClick={(e) => {
+        const stage = e.target.getStage();
+        if (!stage) return;
+        const pointerPos = stage.getPointerPosition();
+        if (!pointerPos) return;
+
+        const target = e.target;
+        const isBg = target === stage || 
+                     target.id() === 'bgImage' || 
+                     target.getLayer()?.id() === 'bgLayer' || 
+                     target.getLayer()?.id() === 'stageLayoutLayer';
+
+        if (isBg) {
+          const docX = Math.round(pointerPos.x / dimensions.scale);
+          const docY = Math.round(pointerPos.y / dimensions.scale);
+          onCanvasDblClick?.(docX, docY);
+        }
+      }}
+      onDblTap={(e) => {
+        const stage = e.target.getStage();
+        if (!stage) return;
+        const pointerPos = stage.getPointerPosition();
+        if (!pointerPos) return;
+
+        const target = e.target;
+        const isBg = target === stage || 
+                     target.id() === 'bgImage' || 
+                     target.getLayer()?.id() === 'bgLayer' || 
+                     target.getLayer()?.id() === 'stageLayoutLayer';
+
+        if (isBg) {
+          const docX = Math.round(pointerPos.x / dimensions.scale);
+          const docY = Math.round(pointerPos.y / dimensions.scale);
+          onCanvasDblClick?.(docX, docY);
         }
       }}
     >
@@ -121,6 +163,20 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
               onTap={(e) => {
                 e.cancelBubble = true;
                 onSelectNode(t.id);
+              }}
+              onDblClick={(e) => {
+                e.cancelBubble = true;
+                onSelectNode(t.id);
+                if (t.type === 'text') {
+                  onStartEditingNode?.(t.id);
+                }
+              }}
+              onDblTap={(e) => {
+                e.cancelBubble = true;
+                onSelectNode(t.id);
+                if (t.type === 'text') {
+                  onStartEditingNode?.(t.id);
+                }
               }}
               onDragStart={(e) => {
                 e.cancelBubble = true;
@@ -179,6 +235,7 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
                   fontFamily="'Hiragino Sans', 'Meiryo', sans-serif"
                   fill={isSelected ? '#1d4ed8' : '#111827'}
                   padding={2}
+                  opacity={editingId === t.id ? 0 : 1}
                 />
               )}
             </Group>
@@ -245,6 +302,16 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   // Overlay Nodes State per Scene
   const [sceneNodesMap, setSceneNodesMap] = useState<Record<string, OverlayNode[]>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Focus inline textarea on editing start
+  useEffect(() => {
+    if (editingNodeId && inlineTextareaRef.current) {
+      inlineTextareaRef.current.focus();
+      inlineTextareaRef.current.select();
+    }
+  }, [editingNodeId]);
 
   // Initialize nodes for all scenes
   useEffect(() => {
@@ -255,31 +322,30 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
       effectiveScenes.forEach((sc, idx) => {
         if (!newMap[sc.sceneId] || newMap[sc.sceneId].length === 0) {
-          const defaultTitleNode: OverlayNode = {
-            id: 'text_org',
-            type: 'text',
-            text: '〇〇吹奏楽団',
-            x: 230,
-            y: 65,
-            fontSize: 22,
-            radius: 15,
-          };
-          const defaultSceneNode: OverlayNode = {
+          const defaultSceneNode: OverlayNode | null = effectiveScenes.length > 1 ? {
             id: 'text_scene_name',
             type: 'text',
-            text: effectiveScenes.length > 1 ? `【${sc.name}】` : '',
+            text: `【${sc.name}】`,
             x: 650,
             y: 65,
             fontSize: 20,
             radius: 15,
-          };
+          } : null;
 
-          const scInitial = sc.initialNodes || (idx === 0 ? initialNodes : []);
-          if (scInitial && scInitial.length > 0) {
-            newMap[sc.sceneId] = [defaultTitleNode, defaultSceneNode, ...scInitial];
-          } else {
-            newMap[sc.sceneId] = [defaultTitleNode, defaultSceneNode];
+          const scInitial = (sc.initialNodes || (idx === 0 ? initialNodes : []) || []).filter(
+            n => n.id !== 'text_org' && !n.text?.includes('〇〇吹奏楽団')
+          );
+          const initialList: OverlayNode[] = [];
+          if (defaultSceneNode) {
+            initialList.push(defaultSceneNode);
           }
+          initialList.push(...scInitial);
+          newMap[sc.sceneId] = initialList;
+        } else {
+          // If nodes exist, filter out any default 'text_org' or '〇〇吹奏楽団'
+          newMap[sc.sceneId] = newMap[sc.sceneId].filter(
+            n => n.id !== 'text_org' && !n.text?.includes('〇〇吹奏楽団')
+          );
         }
       });
 
@@ -400,13 +466,23 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     let isSpaceDown = false;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.code === 'Space') {
         if (!isSpaceDown) {
           isSpaceDown = true;
           if (!isPanning) {
             container.style.cursor = 'grab';
           }
         }
+      } else if (e.key === '+' || e.key === '=' || (e.ctrlKey && e.key === '=')) {
+        e.preventDefault();
+        setZoomMultiplier(prev => Math.min(Number((prev + 0.1).toFixed(2)), 3.0));
+      } else if (e.key === '-' || (e.ctrlKey && e.key === '-')) {
+        e.preventDefault();
+        setZoomMultiplier(prev => Math.max(Number((prev - 0.1).toFixed(2)), 0.3));
+      } else if (e.key === '0' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setZoomMultiplier(1.0);
       }
     };
 
@@ -475,8 +551,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     };
   }, []);
 
-  const handleZoomIn = () => setZoomMultiplier(prev => Math.min(Number((prev + 0.15).toFixed(2)), 2.5));
-  const handleZoomOut = () => setZoomMultiplier(prev => Math.max(Number((prev - 0.15).toFixed(2)), 0.5));
+  const handleZoomIn = () => setZoomMultiplier(prev => Math.min(Number((prev + 0.1).toFixed(2)), 3.0));
+  const handleZoomOut = () => setZoomMultiplier(prev => Math.max(Number((prev - 0.1).toFixed(2)), 0.3));
   const handleZoomReset = () => setZoomMultiplier(1.0);
 
   const scrollToScene = (idx: number) => {
@@ -491,7 +567,16 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   const activeSceneId = activeScene.sceneId;
   const currentNodes = sceneNodesMap[activeSceneId] || [];
 
-  const handleAddText = (defaultText = '新規テキスト', x = 300, y = 150, fontSize = 22) => {
+  const handleUpdateNodeText = (sceneId: string, nodeId: string, newText: string) => {
+    setSceneNodesMap(prev => ({
+      ...prev,
+      [sceneId]: (prev[sceneId] || []).map(t =>
+        t.id === nodeId ? { ...t, text: newText } : t
+      ),
+    }));
+  };
+
+  const handleAddText = (defaultText = '新規テキスト', x = 300, y = 150, fontSize = 22, startEditing = false) => {
     const newId = `text_${Date.now()}`;
     setSceneNodesMap(prev => ({
       ...prev,
@@ -509,6 +594,9 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
       ],
     }));
     setSelectedId(newId);
+    if (startEditing) {
+      setEditingNodeId(newId);
+    }
   };
 
   const handleAddCircle = () => {
@@ -681,7 +769,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         )}
 
         {/* Right: Controls & Actions */}
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-nowrap">
           {/* View Controls: Fit Mode Switcher */}
           <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
             <button
@@ -690,7 +778,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                 setFitMode('page');
                 setZoomMultiplier(1.0);
               }}
-              className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
+              className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
                 fitMode === 'page'
                   ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -705,7 +793,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                 setFitMode('width');
                 setZoomMultiplier(1.0);
               }}
-              className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
+              className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
                 fitMode === 'width'
                   ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -720,27 +808,36 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
             <button
               type="button"
-              onClick={handleZoomOut}
-              className="p-1 hover:bg-white rounded text-slate-600 font-bold transition-colors"
-              title="ズームアウト"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleZoomOut();
+              }}
+              className="w-7 h-7 flex items-center justify-center hover:bg-white rounded text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
+              title="ズームアウト (-10%)"
             >
-              ➖
+              −
             </button>
             <button
               type="button"
-              onClick={handleZoomReset}
-              className="px-2 py-0.5 text-[11px] font-bold text-slate-700 hover:bg-white rounded transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleZoomReset();
+              }}
+              className="px-2 py-0.5 text-xs font-mono font-bold text-slate-800 hover:bg-white rounded transition-colors cursor-pointer select-none min-w-[3.5rem] text-center"
               title="拡大率を100%にリセット"
             >
               {Math.round(zoomMultiplier * 100)}%
             </button>
             <button
               type="button"
-              onClick={handleZoomIn}
-              className="p-1 hover:bg-white rounded text-slate-600 font-bold transition-colors"
-              title="ズームイン"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleZoomIn();
+              }}
+              className="w-7 h-7 flex items-center justify-center hover:bg-white rounded text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
+              title="ズームイン (+10%)"
             >
-              ➕
+              +
             </button>
           </div>
 
@@ -893,12 +990,60 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                     bgImage={bgImage}
                     nodes={currentSceneNodes}
                     selectedId={isActive ? selectedId : null}
+                    editingId={isActive ? editingNodeId : null}
                     onSelectNode={(id) => {
                       setActiveSceneIdx(idx);
                       setSelectedId(id);
+                      if (id !== editingNodeId) {
+                        setEditingNodeId(null);
+                      }
+                    }}
+                    onStartEditingNode={(id) => {
+                      setActiveSceneIdx(idx);
+                      setSelectedId(id);
+                      setEditingNodeId(id);
                     }}
                     onUpdateNodePos={(nodeId, x, y) => handleUpdateNodePos(sc.sceneId, nodeId, x, y)}
+                    onCanvasDblClick={(docX, docY) => {
+                      setActiveSceneIdx(idx);
+                      handleAddText('新規テキスト', docX, docY, 22, true);
+                    }}
                   />
+
+                  {/* Inline Text Editor Overlay */}
+                  {isActive && (() => {
+                    const editingNode = currentSceneNodes.find(t => t.id === editingNodeId);
+                    if (!editingNode || editingNode.type !== 'text') return null;
+
+                    return (
+                      <textarea
+                        ref={inlineTextareaRef}
+                        value={editingNode.text}
+                        onChange={(e) => handleUpdateNodeText(sc.sceneId, editingNode.id, e.target.value)}
+                        onBlur={() => setEditingNodeId(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            setEditingNodeId(null);
+                          } else if (e.key === 'Escape') {
+                            setEditingNodeId(null);
+                          }
+                        }}
+                        style={{
+                          position: 'absolute',
+                          left: `${editingNode.x * dimensions.scale}px`,
+                          top: `${editingNode.y * dimensions.scale}px`,
+                          fontSize: `${Math.max(12, editingNode.fontSize * dimensions.scale)}px`,
+                          lineHeight: 1.25,
+                          width: `${Math.max(130, (editingNode.text.length * editingNode.fontSize * 0.95 + 32) * dimensions.scale)}px`,
+                          minHeight: `${(editingNode.fontSize * 1.5 + 8) * dimensions.scale}px`,
+                          zIndex: 40,
+                        }}
+                        className="bg-white/95 border-2 border-blue-600 rounded px-1.5 py-1 text-blue-900 shadow-2xl outline-none resize font-sans"
+                        autoFocus
+                      />
+                    );
+                  })()}
                 </div>
               </div>
             );
@@ -1119,25 +1264,6 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                   ))
                 )}
               </div>
-            </div>
-
-            {/* Quick Export CTA inside Sidebar */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={handleExport}
-                disabled={isExporting}
-                className="w-full py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs hover:shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                <span>📥</span>
-                <span>
-                  {isExporting
-                    ? 'PDF書き出し中...'
-                    : effectiveScenes.length > 1
-                    ? `全${effectiveScenes.length}場面を一括PDF出力`
-                    : 'PDFをダウンロード (完成)'}
-                </span>
-              </button>
             </div>
           </div>
         </aside>
