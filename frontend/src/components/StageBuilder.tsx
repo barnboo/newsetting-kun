@@ -149,14 +149,24 @@ const StageBuilder: React.FC<Props> = ({
   const [currentSceneId, setCurrentSceneId] = useState<string>(initialCurrentSceneId);
   const [drawerSubmenu, setDrawerSubmenu] = useState<'scenes' | 'settings' | null>(null);
 
-  const [snapSettings, setSnapSettings] = useState<SnapSettings>(() => initialBackup?.snapSettings || {
-    showGrid: false,
-    gridSize: 50,
-    showCenterMarker: true,
-    centerOffset: { x: 0, y: 0 },
-    snapToCenter: true,
-    snapToGrid: false,
-    snapAngle: true,
+  const [snapSettings, setSnapSettings] = useState<SnapSettings>(() => {
+    const defaultSettings: SnapSettings = {
+      showGrid: false,
+      gridSize: 50,
+      showCenterMarker: false,
+      centerOffset: { x: 0, y: 0 },
+      snapToCenter: true,
+      snapToGrid: false,
+      snapAngle: true,
+    };
+    if (initialBackup?.snapSettings) {
+      return {
+        ...defaultSettings,
+        ...initialBackup.snapSettings,
+        showCenterMarker: false, // Default to hidden for clean view
+      };
+    }
+    return defaultSettings;
   });
 
   const [isMovingCenter, setIsMovingCenter] = useState(false);

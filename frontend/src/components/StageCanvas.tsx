@@ -1611,8 +1611,8 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
             </Layer>
           )}
 
-          {/* Center Marker Layer */}
-          {snapSettings?.showCenterMarker && (
+          {/* Center Marker Layer (Hidden by default; shown only if enabled in settings or in move mode) */}
+          {(snapSettings?.showCenterMarker || isMovingCenter) && (
             <Layer ref={centerMarkerLayerRef}>
               {(() => {
                 const bgCenterX = Math.round(baseWidth / 2);
