@@ -1,10 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import ReactCrop, { type Crop, type PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
 export interface Region {
   type: 'background' | 'icons' | 'quantities';
   crop: PixelCrop;
+  percentCrop?: { x: number; y: number; width: number; height: number };
 }
 
 interface RegionSelectorProps {
@@ -17,31 +18,40 @@ const MODES = [
     type: 'background' as const,
     label: '① ステージ図面',
     required: true,
+    requiredLabel: '*必須',
     hint: '舞台全体の枠をドラッグで囲んでください',
-    color: 'blue',
+    activeClass: 'bg-blue-50 text-blue-800 border-blue-500 ring-2 ring-blue-500/20 font-bold',
     borderColor: 'border-blue-500',
     bgOverlay: 'bg-blue-500/20',
     tagColor: 'bg-blue-600 text-white',
+    dotColor: 'bg-blue-500',
+    cropColor: '#2563eb',
   },
   {
     type: 'icons' as const,
     label: '② 記号一覧',
-    required: true,
-    hint: '譜面台や椅子などの記号一覧をドラッグで囲んでください',
-    color: 'emerald',
+    required: false,
+    requiredLabel: '任意',
+    hint: '譜面台や椅子の記号一覧をドラッグで囲んでください（用紙にない場合はスキップ可）',
+    activeClass: 'bg-emerald-50 text-emerald-800 border-emerald-500 ring-2 ring-emerald-500/20 font-bold',
     borderColor: 'border-emerald-500',
     bgOverlay: 'bg-emerald-500/20',
     tagColor: 'bg-emerald-600 text-white',
+    dotColor: 'bg-emerald-500',
+    cropColor: '#059669',
   },
   {
     type: 'quantities' as const,
     label: '③ 個数欄',
     required: false,
-    hint: '個数記入表をドラッグで囲んでください（なければ省略可）',
-    color: 'amber',
-    borderColor: 'border-amber-500',
-    bgOverlay: 'bg-amber-500/20',
-    tagColor: 'bg-amber-600 text-white',
+    requiredLabel: '任意',
+    hint: '個数記入表をドラッグで囲んでください（用紙にない場合はスキップ可）',
+    activeClass: 'bg-orange-50 text-orange-800 border-orange-500 ring-2 ring-orange-500/25 font-bold',
+    borderColor: 'border-orange-500',
+    bgOverlay: 'bg-orange-500/25',
+    tagColor: 'bg-orange-600 text-white',
+    dotColor: 'bg-orange-500',
+    cropColor: '#ea580c',
   },
 ];
 
@@ -52,6 +62,19 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
   const [imgNaturalSize, setImgNaturalSize] = useState<{ width: number; height: number } | null>(null);
 
   const imageRef = useRef<HTMLImageElement>(null);
+
+  const checkNaturalSize = () => {
+    if (imageRef.current && imageRef.current.naturalWidth > 0) {
+      setImgNaturalSize({
+        width: imageRef.current.naturalWidth,
+        height: imageRef.current.naturalHeight,
+      });
+    }
+  };
+
+  useEffect(() => {
+    checkNaturalSize();
+  }, [imageUrl]);
 
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const { naturalWidth, naturalHeight } = e.currentTarget;
@@ -78,17 +101,30 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
       height: crop.height * scaleY,
     };
 
+    const percentCrop = {
+      x: (crop.x / image.width) * 100,
+      y: (crop.y / image.height) * 100,
+      width: (crop.width / image.width) * 100,
+      height: (crop.height / image.height) * 100,
+    };
+
     setRegions(prev => [
       ...prev.filter(r => r.type !== currentMode),
-      { type: currentMode, crop: pixelCrop },
+      { type: currentMode, crop: pixelCrop, percentCrop },
     ]);
 
     setCrop(undefined);
 
-    // Auto-advance to next needed step
+    // Auto-advance to next mode to prevent accidental overwrites
     if (currentMode === 'background') {
       if (!regions.some(r => r.type === 'icons')) {
         setCurrentMode('icons');
+      } else if (!regions.some(r => r.type === 'quantities')) {
+        setCurrentMode('quantities');
+      }
+    } else if (currentMode === 'icons') {
+      if (!regions.some(r => r.type === 'quantities')) {
+        setCurrentMode('quantities');
       }
     }
   };
@@ -100,15 +136,23 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
     }
   };
 
+  // Only ① background is strictly required; ② icons and ③ quantities are optional!
   const hasBackground = regions.some(r => r.type === 'background');
-  const hasIcons = regions.some(r => r.type === 'icons');
-  const canProceed = hasBackground && hasIcons;
+  const canProceed = hasBackground;
 
   const currentCfg = MODES.find(m => m.type === currentMode)!;
   const currentSaved = regions.find(r => r.type === currentMode);
 
   return (
     <div className="flex flex-col items-center w-full max-w-5xl mx-auto">
+      {/* Dynamic Crop Border Color for active mode */}
+      <style>{`
+        .ReactCrop__crop-selection {
+          border: 2.5px solid ${currentCfg.cropColor} !important;
+          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8), 0 0 12px ${currentCfg.cropColor}66 !important;
+        }
+      `}</style>
+
       {/* ── Compact Header & Toolbar ── */}
       <div className="w-full bg-white rounded-xl shadow-xs border border-slate-200 p-3 mb-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -123,22 +167,25 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
                 <button
                   key={m.type}
                   type="button"
-                  onClick={() => setCurrentMode(m.type)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  onClick={() => {
+                    setCrop(undefined);
+                    setCurrentMode(m.type);
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs transition-all flex items-center gap-1.5 cursor-pointer border ${
                     isSelected
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      ? m.activeClass
+                      : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 font-medium'
                   }`}
                 >
-                  <span className={`w-2 h-2 rounded-full ${
-                    m.type === 'background' ? 'bg-blue-500' : m.type === 'icons' ? 'bg-emerald-500' : 'bg-amber-500'
-                  }`} />
+                  <span className={`w-2.5 h-2.5 rounded-full ${m.dotColor}`} />
                   <span>{m.label}</span>
                   {isSaved ? (
-                    <span className="text-emerald-600 text-xs">✓</span>
-                  ) : m.required ? (
-                    <span className="text-[10px] text-rose-500 font-semibold">*必須</span>
-                  ) : null}
+                    <span className="text-emerald-600 font-bold text-xs">✓</span>
+                  ) : (
+                    <span className={`text-[10px] ${m.required ? 'text-rose-500 font-bold' : 'text-slate-400'}`}>
+                      {m.requiredLabel}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -150,10 +197,11 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
               <button
                 type="button"
                 onClick={handleSaveRegion}
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                style={{ backgroundColor: currentCfg.cropColor }}
+                className="px-4 py-1.5 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all hover:opacity-90"
               >
                 <span>💾</span>
-                <span>確定する</span>
+                <span>{currentCfg.label} を確定する</span>
               </button>
             ) : currentSaved ? (
               <button
@@ -172,9 +220,10 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
               type="button"
               onClick={() => onComplete(regions)}
               disabled={!canProceed}
+              title={!canProceed ? '① ステージ図面を指定してください' : 'ステージ配置へ進む'}
               className={`px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                 canProceed
-                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer'
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer'
                   : 'bg-slate-100 text-slate-400 cursor-not-allowed'
               }`}
             >
@@ -188,22 +237,26 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
         {/* 1-Line Instruction Hint */}
         <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-600 px-1">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-800">{currentCfg.label}:</span>
+            <span className={`font-bold ${
+              currentMode === 'background' ? 'text-blue-700' : currentMode === 'icons' ? 'text-emerald-700' : 'text-orange-700'
+            }`}>
+              {currentCfg.label}:
+            </span>
             <span>{currentCfg.hint}</span>
           </div>
 
           <div className="flex items-center gap-3 text-[11px] text-slate-400">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-blue-500" />
-              <span>図面</span>
+              <span>図面 (必須)</span>
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>記号</span>
+              <span>記号 (任意)</span>
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-amber-500" />
-              <span>個数(任意)</span>
+              <span className="w-2 h-2 rounded-full bg-orange-500" />
+              <span>個数 (任意)</span>
             </span>
           </div>
         </div>
@@ -228,13 +281,24 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
           </ReactCrop>
 
           {/* Overlaid Saved Regions */}
-          {imgNaturalSize && regions.map(reg => {
+          {regions.map(reg => {
             const cfg = MODES.find(m => m.type === reg.type)!;
-            const leftPct = (reg.crop.x / imgNaturalSize.width) * 100;
-            const topPct = (reg.crop.y / imgNaturalSize.height) * 100;
-            const widthPct = (reg.crop.width / imgNaturalSize.width) * 100;
-            const heightPct = (reg.crop.height / imgNaturalSize.height) * 100;
             const isActive = currentMode === reg.type;
+
+            // Prefer precomputed percentCrop, fallback to image natural size
+            let leftPct = reg.percentCrop?.x;
+            let topPct = reg.percentCrop?.y;
+            let widthPct = reg.percentCrop?.width;
+            let heightPct = reg.percentCrop?.height;
+
+            if (leftPct === undefined && imgNaturalSize && imgNaturalSize.width > 0) {
+              leftPct = (reg.crop.x / imgNaturalSize.width) * 100;
+              topPct = (reg.crop.y / imgNaturalSize.height) * 100;
+              widthPct = (reg.crop.width / imgNaturalSize.width) * 100;
+              heightPct = (reg.crop.height / imgNaturalSize.height) * 100;
+            }
+
+            if (leftPct === undefined || widthPct === undefined) return null;
 
             return (
               <div
@@ -245,11 +309,11 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
                   width: `${widthPct}%`,
                   height: `${heightPct}%`,
                 }}
-                className={`absolute pointer-events-none border-2 ${cfg.borderColor} ${cfg.bgOverlay} ${
-                  isActive ? 'ring-2 ring-white/90 z-20' : 'opacity-85 z-10'
+                className={`absolute pointer-events-none border-[2.5px] ${cfg.borderColor} ${cfg.bgOverlay} ${
+                  isActive ? 'ring-2 ring-white/90 shadow-md z-20' : 'opacity-90 z-10'
                 }`}
               >
-                <span className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${cfg.tagColor}`}>
+                <span className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-bold shadow-xs ${cfg.tagColor}`}>
                   {cfg.label} ✓
                 </span>
               </div>
