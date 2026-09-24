@@ -1,9 +1,16 @@
-import { useState, Component, type ErrorInfo, type ReactNode } from 'react';
+import { useState, useEffect, Component, type ErrorInfo, type ReactNode } from 'react';
 import axios from 'axios';
 import { PdfUploader } from './components/PdfUploader';
 import { RegionSelector } from './components/RegionSelector';
 import StageBuilder from './components/StageBuilder';
 import TemplateMatchModal, { type MatchingDecision } from './components/TemplateMatchModal';
+import {
+  loadSessionFromIndexedDB,
+  saveSessionToIndexedDB,
+  clearSessionFromIndexedDB,
+  urlToDataUrl,
+  type SavedSession,
+} from './utils/indexedDb';
 
 export interface ExtractedIcon {
   id: string;
@@ -73,6 +80,37 @@ function App() {
   const [currentPhase, setCurrentPhase] = useState<1 | 2 | 3 | 4>(1);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [iconLabels, setIconLabels] = useState<Record<string, string>>({});
+  const [savedSession, setSavedSession] = useState<SavedSession | null>(null);
+
+  // Check for saved session in IndexedDB on load
+  useEffect(() => {
+    (async () => {
+      try {
+        const session = await loadSessionFromIndexedDB();
+        if (session && session.extractedData) {
+          setSavedSession(session);
+        }
+      } catch (e) {
+        console.warn('Could not load session from IndexedDB:', e);
+      }
+    })();
+  }, []);
+
+  const handleRestoreSavedSession = () => {
+    if (!savedSession) return;
+    setFileData(savedSession.fileData);
+    setExtractedData(savedSession.extractedData);
+    setIconLabels(savedSession.iconLabels || {});
+    setSelectedRegions(savedSession.selectedRegions || []);
+    setCurrentPhase((savedSession.currentPhase as 1 | 2 | 3 | 4) || 3);
+  };
+
+  const handleDiscardSavedSession = async () => {
+    if (window.confirm("保存されている前回のセッションデータを消去しますか？")) {
+      await clearSessionFromIndexedDB();
+      setSavedSession(null);
+    }
+  };
 
 
   const handleUploadSuccess = (data: { file_id: string; image_url: string; width: number; height: number }) => {
@@ -113,6 +151,36 @@ function App() {
 
       // Check if there are any matching templates — modal will auto-skip if none
       setShowTemplateModal(true);
+
+      // Asynchronously cache session in IndexedDB with standalone DataURLs
+      (async () => {
+        try {
+          const bgDataUrl = await urlToDataUrl(data.background_url);
+          const iconsRegionDataUrl = await urlToDataUrl(data.icons_region_url);
+          const iconsWithDataUrls = await Promise.all(
+            data.extracted_icons.map(async (ic) => ({
+              ...ic,
+              url: await urlToDataUrl(ic.url),
+            }))
+          );
+          const newSession: SavedSession = {
+            fileData: fileData,
+            extractedData: {
+              backgroundUrl: bgDataUrl,
+              iconsRegionUrl: iconsRegionDataUrl,
+              extractedIcons: iconsWithDataUrls,
+            },
+            iconLabels: detectedLabels,
+            selectedRegions: regions,
+            currentPhase: 3,
+            updatedAt: Date.now(),
+          };
+          await saveSessionToIndexedDB(newSession);
+          setSavedSession(newSession);
+        } catch (e) {
+          console.warn('Failed to cache session in IndexedDB:', e);
+        }
+      })();
     } catch (err) {
       console.error("Extraction failed", err);
       alert("PDFからのパーツ抽出に失敗しました。");
@@ -140,8 +208,10 @@ function App() {
   };
 
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (window.confirm("作業内容を破棄して、新しくPDFを読み込み直しますか？")) {
+      await clearSessionFromIndexedDB();
+      setSavedSession(null);
       setFileData(null);
       setExtractedData(null);
       setSelectedRegions([]);
@@ -249,6 +319,37 @@ function App() {
             </div>
           ) : !fileData ? (
             <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center">
+              {/* Previous session recovery card */}
+              {savedSession && (
+                <div className="w-full max-w-2xl mb-5 p-4.5 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between shadow-xs">
+                  <div className="text-left">
+                    <p className="text-sm font-bold text-blue-900 flex items-center gap-1.5">
+                      <span>💾</span> 前回のセッションデータが保存されています
+                    </p>
+                    <p className="text-xs text-blue-700 mt-0.5">
+                      保存日時: {new Date(savedSession.updatedAt).toLocaleString('ja-JP')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRestoreSavedSession}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>↩️</span>
+                      <span>続きから再開</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDiscardSavedSession}
+                      className="px-3 py-2 text-slate-500 hover:text-red-600 text-xs font-medium hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+                    >
+                      破棄
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-md p-8 text-center">
                 <div className="w-14 h-14 mx-auto mb-4 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-2xl shadow-inner">
                   📄

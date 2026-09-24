@@ -21,6 +21,14 @@ export interface Scene {
 }
 
 
+export interface StageSnapshot {
+  placedItems: PlacedItem[];
+  curveObjects: CurveObject[];
+  scenes: Scene[];
+  currentSceneId: string;
+  snapSettings: SnapSettings;
+}
+
 interface Props {
   backgroundUrl: string | null;
   iconsRegionUrl: string | null;
@@ -48,11 +56,26 @@ const StageBuilder: React.FC<Props> = ({
   onBack,
   onPhaseChange,
 }) => {
+  const BACKUP_KEY = `settingkun_backup_${fileId || 'default'}`;
+
+  // Load initial backup from localStorage if available
+  const [initialBackup] = useState<StageSnapshot | null>(() => {
+    try {
+      const saved = localStorage.getItem(BACKUP_KEY);
+      if (saved) {
+        return JSON.parse(saved) as StageSnapshot;
+      }
+    } catch (e) {
+      console.warn('Failed to parse backup:', e);
+    }
+    return null;
+  });
+
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [stageImageUrl, setStageImageUrl] = useState<string | null>(null);
-  const [placedItems, setPlacedItems] = useState<PlacedItem[]>([]);
-  const [curveObjects, setCurveObjects] = useState<CurveObject[]>([]);
+  const [placedItems, setPlacedItems] = useState<PlacedItem[]>(() => initialBackup?.placedItems || []);
+  const [curveObjects, setCurveObjects] = useState<CurveObject[]>(() => initialBackup?.curveObjects || []);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedCurveIds, setSelectedCurveIds] = useState<string[]>([]);
 
@@ -93,7 +116,7 @@ const StageBuilder: React.FC<Props> = ({
   }, [extractedIcons]);
 
   // Scenes management (Phase 3 scenes logic ported from prototype)
-  const [scenes, setScenes] = useState<Scene[]>(() => [
+  const [scenes, setScenes] = useState<Scene[]>(() => initialBackup?.scenes || [
     {
       id: `scene_${Date.now()}`,
       name: '場面 1',
@@ -101,10 +124,10 @@ const StageBuilder: React.FC<Props> = ({
       curveObjects: [],
     },
   ]);
-  const [currentSceneId, setCurrentSceneId] = useState<string>(() => scenes[0]?.id || 'scene_1');
+  const [currentSceneId, setCurrentSceneId] = useState<string>(() => initialBackup?.currentSceneId || initialBackup?.scenes?.[0]?.id || 'scene_1');
   const [drawerSubmenu, setDrawerSubmenu] = useState<'scenes' | 'settings' | null>(null);
 
-  const [snapSettings, setSnapSettings] = useState<SnapSettings>({
+  const [snapSettings, setSnapSettings] = useState<SnapSettings>(() => initialBackup?.snapSettings || {
     showGrid: false,
     gridSize: 50,
     showCenterMarker: true,
@@ -175,16 +198,6 @@ const StageBuilder: React.FC<Props> = ({
     return () => window.removeEventListener('wheel', handleWheel);
   }, [isExportModalOpen]);
 
-  // ─── History (Undo / Redo) ───────────────────────────────────────────────────
-  // A snapshot stores the full stage state so Undo/Redo can restore it exactly.
-  type StageSnapshot = {
-    placedItems: PlacedItem[];
-    curveObjects: CurveObject[];
-    scenes: Scene[];
-    currentSceneId: string;
-    snapSettings: SnapSettings;
-  };
-
   const HISTORY_MAX = 15;
   const historyRef = useRef<StageSnapshot[]>([]);      // past snapshots (oldest first)
   const redoStackRef = useRef<StageSnapshot[]>([]);    // future snapshots for redo
@@ -194,7 +207,6 @@ const StageBuilder: React.FC<Props> = ({
   const [canRedo, setCanRedo] = useState(false);
 
   // ─── Backup (localStorage auto-save + 5 MB warning) ─────────────────────────
-  const BACKUP_KEY = `settingkun_backup_${fileId || 'default'}`;
   const [backupWarning, setBackupWarning] = useState<string | null>(null);
 
   const saveBackup = (snapshot: StageSnapshot) => {

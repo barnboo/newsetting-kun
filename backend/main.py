@@ -30,10 +30,34 @@ STATIC_DIR = "static"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
+def cleanup_old_files(max_age_seconds: int = 7200):
+    """Automatically delete temporary files older than 2 hours."""
+    now = time.time()
+    for directory in [UPLOAD_DIR, STATIC_DIR]:
+        if not os.path.exists(directory):
+            continue
+        for fname in os.listdir(directory):
+            if fname.startswith("."):
+                continue
+            fpath = os.path.join(directory, fname)
+            try:
+                if os.path.isfile(fpath):
+                    file_age = now - os.path.getmtime(fpath)
+                    if file_age > max_age_seconds:
+                        os.remove(fpath)
+            except Exception as e:
+                print(f"Error removing {fpath}: {e}")
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+@app.on_event("startup")
+def startup_cleanup():
+    cleanup_old_files()
 
 @app.post("/api/upload-pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
+    cleanup_old_files()
+
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
     
