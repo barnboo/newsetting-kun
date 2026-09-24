@@ -1666,7 +1666,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
       }`}
     >
       {isMeasuringScale && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-full shadow-xl flex items-center gap-2.5 border border-indigo-400 animate-in fade-in slide-in-from-top-2 duration-150">
+        <div key="measuring-banner" className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-full shadow-xl flex items-center gap-2.5 border border-indigo-400 animate-in fade-in slide-in-from-top-2 duration-150">
           <span className="text-sm">📏</span>
           <span>
             {measureStartPos
@@ -1688,7 +1688,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
         </div>
       )}
       {isMovingCenter && !isMeasuringScale && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 backdrop-blur-sm text-white text-xs font-medium px-4 py-2 rounded-full shadow-lg flex items-center gap-2.5 border border-slate-700 pointer-events-none">
+        <div key="moving-center-banner" className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 backdrop-blur-sm text-white text-xs font-medium px-4 py-2 rounded-full shadow-lg flex items-center gap-2.5 border border-slate-700 pointer-events-none">
           <span className="w-2.5 h-2.5 rounded-full bg-[#ff00ff] animate-pulse shrink-0" />
           <span>基準点移動モード：ピンクのマーカーをドラッグして位置を移動できます</span>
         </div>
@@ -1696,7 +1696,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
 
       {/* Floating Multi-Selection Action Pill */}
       {(activeItemIds.length + activeCurveIds.length) > 1 && (
-        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-full shadow-2xl flex items-center gap-3 border border-slate-700/80 animate-in fade-in slide-in-from-bottom-2 duration-150">
+        <div key="multi-select-action-pill" className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-full shadow-2xl flex items-center gap-3 border border-slate-700/80 animate-in fade-in slide-in-from-bottom-2 duration-150">
           <div className="flex items-center gap-1.5 text-xs font-bold text-blue-300">
             <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
             <span>{activeItemIds.length + activeCurveIds.length} 個選択中</span>
@@ -1741,6 +1741,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
         </div>
       )}
       <div
+        key="stage-konva-wrapper"
         className="bg-white dark:bg-slate-900 shadow-xl ring-1 ring-slate-900/10 dark:ring-white/10 rounded-sm relative m-auto transition-colors"
         style={{ width: stageDimensions.width, height: stageDimensions.height }}
       >

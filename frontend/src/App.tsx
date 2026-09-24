@@ -56,6 +56,12 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
+    // ブラウザの翻訳拡張機能やDOM不整合による一時的な removeChild エラーの場合は自動復帰を試みる
+    if (error?.message?.includes('removeChild') || error?.message?.includes('not a child of this node')) {
+      setTimeout(() => {
+        this.setState({ hasError: false, error: null });
+      }, 50);
+    }
   }
 
   render() {

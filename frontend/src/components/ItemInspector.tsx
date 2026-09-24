@@ -40,7 +40,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
 }) => {
   if (selectedCount > 1) {
     return (
-      <div className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors">
+      <div key="multi-selection-inspector" className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors">
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
           <h3 className="font-semibold text-slate-800 dark:text-slate-100">複数選択</h3>
           <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
@@ -50,28 +50,34 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         <p className="text-xs text-slate-500 leading-relaxed">
           キャンバス上でまとめてドラッグ移動や回転が可能です。
         </p>
-        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
-          <p className="font-semibold text-slate-700">ショートカット操作:</p>
-          <p>• <kbd className="px-1 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px]">Ctrl</kbd>+<kbd className="px-1 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px]">C</kbd> / <kbd className="px-1 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px]">V</kbd>: 複製貼り付け</p>
-          <p>• <kbd className="px-1 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px]">Ctrl</kbd>+<kbd className="px-1 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px]">D</kbd>: 複製</p>
-          <p>• <kbd className="px-1.5 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px]">Delete</kbd>: 一括削除</p>
-          <p>• <kbd className="px-1.5 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px]">矢印キー</kbd>: 微調整移動</p>
+        <div className="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+          <p className="font-semibold text-slate-700 dark:text-slate-200">ショートカット操作:</p>
+          <div className="space-y-1 text-[11px]">
+            <div>• <kbd className="px-1 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">Ctrl</kbd>+<kbd className="px-1 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">C</kbd> / <kbd className="px-1 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">V</kbd>: 複製貼り付け</div>
+            <div>• <kbd className="px-1 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">Ctrl</kbd>+<kbd className="px-1 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">D</kbd>: 複製</div>
+            <div>• <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">Delete</kbd>: 一括削除</div>
+            <div>• <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">矢印キー</kbd>: 微調整移動</div>
+          </div>
         </div>
         <div className="flex flex-col gap-2 mt-auto">
           {onDuplicateSelected && (
             <button
+              type="button"
               onClick={onDuplicateSelected}
-              className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-200 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+              className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
             >
-              📑 選択したオブジェクトを複製
+              <span>📑</span>
+              <span>選択したオブジェクトを複製</span>
             </button>
           )}
           {onDeleteSelected && (
             <button
+              type="button"
               onClick={onDeleteSelected}
-              className="w-full py-2.5 px-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-semibold border border-red-200 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+              className="w-full py-2.5 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-300 rounded-lg text-xs font-semibold border border-red-200 dark:border-red-800 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
             >
-              🗑️ 選択したアイテムを一括削除
+              <span>🗑️</span>
+              <span>選択したアイテムを一括削除</span>
             </button>
           )}
         </div>
@@ -107,7 +113,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                          selectedItem.templateType === 'turnerChair';
 
     return (
-      <div className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors">
+      <div
+        key={`item-inspector-${selectedItem.id}`}
+        className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors"
+      >
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
           <h3 className="font-semibold text-slate-800 dark:text-slate-100">
             {TEMPLATE_SHAPES.find(t => t.type === selectedItem.templateType)?.label || 'パーツ'} 設定
@@ -443,7 +452,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                              (Array.isArray(selectedCurve.items) && selectedCurve.items.some(it => it.type === 'ensembleChairAndStand'));
 
     return (
-      <div className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors">
+      <div
+        key={`curve-inspector-${selectedCurve.id}`}
+        className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors"
+      >
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
           <h3 className="font-semibold text-slate-800 dark:text-slate-100">
             ベジェ曲線 設定

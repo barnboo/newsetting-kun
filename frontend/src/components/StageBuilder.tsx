@@ -1886,6 +1886,9 @@ const StageBuilder: React.FC<Props> = ({
         {/* Right Panel: Tally / Inspector */}
         {(selectedIds.length + selectedCurveIds.length) > 0 ? (
           <ItemInspector
+            key={(selectedIds.length + selectedCurveIds.length) > 1
+              ? `multi-inspect-${selectedIds.length + selectedCurveIds.length}`
+              : (selectedId ? `item-${selectedId}` : (selectedCurveId ? `curve-${selectedCurveId}` : 'single'))}
             selectedItem={placedItems.find(i => i.id === selectedId) || null}
             selectedCurve={curveObjects.find(c => c.id === selectedCurveId) || null}
             selectedCurveItemId={selectedCurveItemId}
@@ -1903,9 +1906,12 @@ const StageBuilder: React.FC<Props> = ({
             onUpdateAllOfType={handleUpdateAllOfType}
           />
         ) : (
-          <div className={`w-64 shrink-0 h-full border-l overflow-hidden flex flex-col transition-colors ${
-            isDarkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
-          }`}>
+          <div
+            key="tally-table-panel"
+            className={`w-64 shrink-0 h-full border-l overflow-hidden flex flex-col transition-colors ${
+              isDarkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+            }`}
+          >
             <TallyTable
               extractedIcons={extractedIcons}
               placedItems={placedItems}
