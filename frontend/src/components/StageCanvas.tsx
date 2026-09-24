@@ -51,6 +51,8 @@ interface StageCanvasProps {
   selectedCurveId: string | null;
   selectedIds?: string[];
   selectedCurveIds?: string[];
+  selectedCurveItemId?: string | null;
+  onSelectCurveItem?: (curveId: string, itemId: string) => void;
   snapSettings?: SnapSettings;
   zoomMultiplier?: number;
   onZoomChange?: (multiplier: number) => void;
@@ -430,7 +432,9 @@ const CurveItemRenderer: React.FC<{
   rotation: number;
   size: number;
   color?: string;
-}> = ({ item, x, y, rotation, size, color }) => {
+  isSelected?: boolean;
+  onSelect?: () => void;
+}> = ({ item, x, y, rotation, size, color, isSelected, onSelect }) => {
   const tmpl = TEMPLATE_SHAPES.find(t => t.type === item.type || t.id === item.type || t.id === `tmpl_${item.type}`);
   const isPerc = item.type === 'percussion' || Boolean(item.percussionType) || (tmpl && tmpl.type === 'percussion');
   const percInfo = isPerc ? getPercussionInfo(item.percussionType) : null;
@@ -463,8 +467,52 @@ const CurveItemRenderer: React.FC<{
         x={x}
         y={y}
         rotation={rotation}
-        listening={false}
+        onClick={(e) => {
+          if (onSelect) {
+            e.cancelBubble = true;
+            onSelect();
+          }
+        }}
+        onTap={(e) => {
+          if (onSelect) {
+            e.cancelBubble = true;
+            onSelect();
+          }
+        }}
+        onMouseEnter={(e) => {
+          const c = e.target.getStage()?.container();
+          if (c) c.style.cursor = 'pointer';
+        }}
+        onMouseLeave={(e) => {
+          const c = e.target.getStage()?.container();
+          if (c) c.style.cursor = 'default';
+        }}
       >
+        {/* Transparent hit area */}
+        <Rect
+          x={-halfW}
+          y={-halfH}
+          width={itemW}
+          height={itemH}
+          fill="transparent"
+        />
+
+        {/* Selection indicator on the curve item */}
+        {isSelected && (
+          <Rect
+            x={-halfW - 3}
+            y={-halfH - 3}
+            width={itemW + 6}
+            height={itemH + 6}
+            stroke="#2563eb"
+            strokeWidth={2}
+            fill="rgba(37, 99, 235, 0.2)"
+            cornerRadius={4}
+            dash={[4, 3]}
+            listening={false}
+          />
+        )}
+
         <KonvaImage
           image={img}
           x={-halfW}
@@ -500,13 +548,46 @@ const CurveItemRenderer: React.FC<{
     );
   }
   return (
-    <Circle
+    <Group
       x={x}
       y={y}
-      radius={halfW}
-      fill="#374151"
-      listening={false}
-    />
+      onClick={(e) => {
+        if (onSelect) {
+          e.cancelBubble = true;
+          onSelect();
+        }
+      }}
+      onTap={(e) => {
+        if (onSelect) {
+          e.cancelBubble = true;
+          onSelect();
+        }
+      }}
+      onMouseEnter={(e) => {
+        const c = e.target.getStage()?.container();
+        if (c) c.style.cursor = 'pointer';
+      }}
+      onMouseLeave={(e) => {
+        const c = e.target.getStage()?.container();
+        if (c) c.style.cursor = 'default';
+      }}
+    >
+      {isSelected && (
+        <Circle
+          radius={halfW + 4}
+          stroke="#2563eb"
+          strokeWidth={2}
+          fill="rgba(37, 99, 235, 0.2)"
+          dash={[4, 3]}
+          listening={false}
+        />
+      )}
+      <Circle
+        radius={halfW}
+        fill="#374151"
+        listening={false}
+      />
+    </Group>
   );
 };
 
@@ -514,7 +595,9 @@ const CurveItemRenderer: React.FC<{
 const CurveCanvas: React.FC<{
   curve: CurveObject;
   isSelected: boolean;
+  selectedCurveItemId?: string | null;
   onSelect: () => void;
+  onSelectCurveItem?: (curveId: string, itemId: string) => void;
   onUpdatePoints: (points: [number, number, number, number, number, number]) => void;
   onUpdateCurvePos: (x: number, y: number) => void;
   scale: number;
@@ -525,7 +608,9 @@ const CurveCanvas: React.FC<{
 }> = ({
   curve,
   isSelected,
+  selectedCurveItemId,
   onSelect,
+  onSelectCurveItem,
   onUpdatePoints,
   onUpdateCurvePos,
   scale,
@@ -618,6 +703,11 @@ const CurveCanvas: React.FC<{
           rotation={p.rotation}
           size={p.item.size || curve.itemSize}
           color={curve.color}
+          isSelected={selectedCurveItemId === p.item.id}
+          onSelect={() => {
+            onSelect();
+            onSelectCurveItem?.(curve.id, p.item.id);
+          }}
         />
       ))}
 
@@ -926,6 +1016,8 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     selectedCurveId,
     selectedIds,
     selectedCurveIds,
+    selectedCurveItemId,
+    onSelectCurveItem,
     snapSettings,
     zoomMultiplier = 1.0,
     onZoomChange,
@@ -1857,6 +1949,8 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   key={curve.id}
                   curve={curve}
                   isSelected={activeCurveIds.includes(curve.id)}
+                  selectedCurveItemId={selectedCurveItemId}
+                  onSelectCurveItem={onSelectCurveItem}
                   onSelect={() => {
                     onSelectCurve(curve.id);
                     onSelectItem(null);

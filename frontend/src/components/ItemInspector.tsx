@@ -6,6 +6,8 @@ import { TEMPLATE_SHAPES, PERCUSSION_DATA } from '../utils/templateShapes';
 interface ItemInspectorProps {
   selectedItem: PlacedItem | null;
   selectedCurve: CurveObject | null;
+  selectedCurveItemId?: string | null;
+  onSelectCurveItem?: (itemId: string | null) => void;
   selectedCount?: number;
   centerPos?: { x: number; y: number };
   onUpdateItem: (id: string, updates: Partial<PlacedItem>) => void;
@@ -22,6 +24,8 @@ interface ItemInspectorProps {
 export const ItemInspector: React.FC<ItemInspectorProps> = ({
   selectedItem,
   selectedCurve,
+  selectedCurveItemId,
+  onSelectCurveItem,
   selectedCount = 0,
   centerPos,
   onUpdateItem,
@@ -477,57 +481,195 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         </div>
 
         <div className="flex flex-col gap-3">
-          {Array.isArray(selectedCurve.items) ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-700">
-                  曲線上のアイテム ({selectedCurve.items.length})
-                </span>
-                {selectedCurve.items.length > 0 && (
-                  <button
-                    onClick={() => onUpdateCurve(selectedCurve.id, { items: [], itemCount: 0 })}
-                    className="text-[11px] text-red-600 hover:text-red-700 hover:underline"
-                  >
-                    全クリア
-                  </button>
-                )}
-              </div>
+          {Array.isArray(selectedCurve.items) ? (() => {
+            const curveItems = selectedCurve.items || [];
+            const activeItemIndex = selectedCurveItemId ? curveItems.findIndex(it => it.id === selectedCurveItemId) : -1;
+            const activeItem = activeItemIndex >= 0 ? curveItems[activeItemIndex] : null;
 
-              {selectedCurve.items.length === 0 ? (
-                <div className="p-3 bg-purple-50/70 border border-dashed border-purple-200 rounded-lg text-xs text-purple-700 text-center leading-relaxed">
-                  <p className="font-semibold">アイテムがありません</p>
-                  <p className="text-[11px] text-purple-600/80 mt-1">
-                    上部パレットのアイテムをクリックすると、この曲線上に次々追加されます。
-                  </p>
-                </div>
-              ) : (
-                <div className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-slate-200 rounded-lg p-1.5 bg-slate-50/60">
-                  {selectedCurve.items.map((it, idx) => (
-                    <div
-                      key={it.id || idx}
-                      className="flex items-center justify-between px-2 py-1 bg-white rounded border border-slate-200 text-xs text-slate-700 shadow-2xs group"
+            const handleUpdateItemGap = (itemId: string, newGap: number | undefined) => {
+              const nextItems = curveItems.map(it => {
+                if (it.id === itemId) {
+                  const copy = { ...it };
+                  if (newGap === undefined) {
+                    delete copy.gap;
+                  } else {
+                    copy.gap = Math.max(0, newGap);
+                  }
+                  return copy;
+                }
+                return it;
+              });
+              onUpdateCurve(selectedCurve.id, { items: nextItems });
+            };
+
+            return (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    曲線上のアイテム ({curveItems.length})
+                  </span>
+                  {curveItems.length > 0 && (
+                    <button
+                      onClick={() => {
+                        onSelectCurveItem?.(null);
+                        onUpdateCurve(selectedCurve.id, { items: [], itemCount: 0 });
+                      }}
+                      className="text-[11px] text-red-600 hover:text-red-700 hover:underline cursor-pointer"
                     >
+                      全クリア
+                    </button>
+                  )}
+                </div>
+
+                {/* 選択中アイテムの個別間隔設定パネル */}
+                {activeItem && (
+                  <div className="p-2.5 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-lg flex flex-col gap-2 shadow-2xs">
+                    <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="font-mono text-[10px] text-slate-400 font-bold shrink-0">{idx + 1}.</span>
-                        <span className="truncate">{it.label || it.type}</span>
+                        <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0"></span>
+                        <span className="text-xs font-bold text-blue-900 dark:text-blue-200 truncate">
+                          選択中: {activeItemIndex + 1}. {activeItem.label || activeItem.type}
+                        </span>
                       </div>
                       <button
-                        onClick={() => {
-                          const next = [...(selectedCurve.items || [])];
-                          next.splice(idx, 1);
-                          onUpdateCurve(selectedCurve.id, { items: next, itemCount: next.length });
-                        }}
-                        className="text-slate-400 hover:text-red-600 px-1 py-0.5 rounded shrink-0 group-hover:visible"
-                        title="このアイテムを削除"
+                        onClick={() => onSelectCurveItem?.(null)}
+                        className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
                       >
-                        ✕
+                        選択解除
                       </button>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
+
+                    {activeItemIndex === curveItems.length - 1 ? (
+                      <div className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded border border-amber-200 dark:border-amber-800 leading-snug">
+                        ※ 末尾のアイテムのため、右隣に配置アイテムはありません
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5 pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                            右隣との間隔
+                          </span>
+                          {activeItem.gap !== undefined && (
+                            <button
+                              onClick={() => handleUpdateItemGap(activeItem.id, undefined)}
+                              className="text-[10px] text-slate-500 hover:text-blue-700 dark:text-slate-400 dark:hover:text-blue-300 underline cursor-pointer"
+                              title="曲線全体の標準間隔に戻す"
+                            >
+                              標準 ({Math.round(selectedCurve.itemGap)}px) に戻す
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            max="500"
+                            value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val) && val >= 0) {
+                                handleUpdateItemGap(activeItem.id, val);
+                              }
+                            }}
+                            className="w-20 px-2 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono"
+                          />
+                          <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
+                          <div className="flex items-center gap-1 ml-auto">
+                            {[-5, -1, 1, 5].map((delta) => (
+                              <button
+                                key={delta}
+                                type="button"
+                                onClick={() => {
+                                  const cur = activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap;
+                                  handleUpdateItemGap(activeItem.id, Math.max(0, cur + delta));
+                                }}
+                                className="px-1.5 py-0.5 text-[11px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
+                              >
+                                {delta > 0 ? `+${delta}` : delta}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <input
+                          type="range"
+                          min="0"
+                          max="200"
+                          value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
+                          onChange={(e) => handleUpdateItemGap(activeItem.id, parseFloat(e.target.value))}
+                          className="w-full accent-blue-600 mt-0.5 cursor-pointer"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {curveItems.length === 0 ? (
+                  <div className="p-3 bg-purple-50/70 dark:bg-purple-950/40 border border-dashed border-purple-200 dark:border-purple-800 rounded-lg text-xs text-purple-700 dark:text-purple-300 text-center leading-relaxed">
+                    <p className="font-semibold">アイテムがありません</p>
+                    <p className="text-[11px] text-purple-600/80 dark:text-purple-400/80 mt-1">
+                      上部パレットのアイテムをクリックすると、この曲線上に次々追加されます。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-slate-200 dark:border-slate-700 rounded-lg p-1.5 bg-slate-50/60 dark:bg-slate-900/40">
+                    {curveItems.map((it, idx) => {
+                      const isSelected = selectedCurveItemId === it.id;
+                      const isLast = idx === curveItems.length - 1;
+                      return (
+                        <div
+                          key={it.id || idx}
+                          onClick={() => onSelectCurveItem?.(isSelected ? null : it.id)}
+                          className={`flex items-center justify-between px-2 py-1.5 rounded border text-xs cursor-pointer transition-colors shadow-2xs group ${
+                            isSelected
+                              ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-900 dark:text-blue-200 ring-1 ring-blue-300 dark:ring-blue-500 font-semibold'
+                              : 'bg-white dark:bg-slate-750 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className={`font-mono text-[10px] shrink-0 ${isSelected ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-400 font-bold'}`}>
+                              {idx + 1}.
+                            </span>
+                            <span className="truncate">{it.label || it.type}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {!isLast && (
+                              it.gap !== undefined ? (
+                                <span className="text-[10px] bg-blue-100 dark:bg-blue-850 text-blue-800 dark:text-blue-200 px-1 py-0.5 rounded font-mono font-semibold" title="個別設定の間隔">
+                                  間隔: {Math.round(it.gap)}px
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {Math.round(selectedCurve.itemGap)}px
+                                </span>
+                              )
+                            )}
+                            {isLast && (
+                              <span className="text-[10px] text-slate-400 font-mono">末尾</span>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const next = [...curveItems];
+                                next.splice(idx, 1);
+                                if (isSelected) onSelectCurveItem?.(null);
+                                onUpdateCurve(selectedCurve.id, { items: next, itemCount: next.length });
+                              }}
+                              className="text-slate-400 hover:text-red-600 px-1 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                              title="このアイテムを削除"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })() : (
             <label className="flex flex-col gap-1">
               <span className="text-xs text-slate-500 font-medium">配置アイテム数: {selectedCurve.itemCount}</span>
               <input

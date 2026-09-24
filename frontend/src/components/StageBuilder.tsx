@@ -107,6 +107,7 @@ const StageBuilder: React.FC<Props> = ({
   const [curveObjects, setCurveObjects] = useState<CurveObject[]>(initialCurveObjects);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedCurveIds, setSelectedCurveIds] = useState<string[]>([]);
+  const [selectedCurveItemId, setSelectedCurveItemId] = useState<string | null>(null);
 
   // Derived single selections for inspector compatibility
   const selectedId = selectedIds.length === 1 && selectedCurveIds.length === 0 ? selectedIds[0] : null;
@@ -114,10 +115,18 @@ const StageBuilder: React.FC<Props> = ({
 
   const setSelectedId = (id: string | null) => {
     setSelectedIds(id ? [id] : []);
+    if (id) setSelectedCurveItemId(null);
   };
   const setSelectedCurveId = (id: string | null) => {
     setSelectedCurveIds(id ? [id] : []);
+    if (!id) setSelectedCurveItemId(null);
   };
+
+  useEffect(() => {
+    if (!selectedCurveId) {
+      setSelectedCurveItemId(null);
+    }
+  }, [selectedCurveId]);
 
   const [paletteTab, setPaletteTab] = useState<PaletteTab>('pdf');
   const [iconLabels, setIconLabels] = useState<Record<string, string>>(() => {
@@ -1837,11 +1846,17 @@ const StageBuilder: React.FC<Props> = ({
           selectedCurveId={selectedCurveId}
           selectedIds={selectedIds}
           selectedCurveIds={selectedCurveIds}
+          selectedCurveItemId={selectedCurveItemId}
+          onSelectCurveItem={(curveId, itemId) => {
+            setSelectedCurveId(curveId);
+            setSelectedId(null);
+            setSelectedCurveItemId(itemId);
+          }}
           snapSettings={snapSettings}
           zoomMultiplier={zoomMultiplier}
           onZoomChange={setZoomMultiplier}
-          onSelectItem={id => { setSelectedId(id); if (id) setSelectedCurveId(null); }}
-          onSelectCurve={id => { setSelectedCurveId(id); if (id) setSelectedId(null); }}
+          onSelectItem={id => { setSelectedId(id); if (id) { setSelectedCurveId(null); setSelectedCurveItemId(null); } }}
+          onSelectCurve={id => { setSelectedCurveId(id); if (id) setSelectedId(null); if (!id) setSelectedCurveItemId(null); }}
           onSelectItems={setSelectedIds}
           onSelectCurves={setSelectedCurveIds}
           onUpdateItem={handleUpdateItem}
@@ -1873,6 +1888,8 @@ const StageBuilder: React.FC<Props> = ({
           <ItemInspector
             selectedItem={placedItems.find(i => i.id === selectedId) || null}
             selectedCurve={curveObjects.find(c => c.id === selectedCurveId) || null}
+            selectedCurveItemId={selectedCurveItemId}
+            onSelectCurveItem={setSelectedCurveItemId}
             selectedCount={selectedIds.length + selectedCurveIds.length}
             centerPos={stageCanvasRef.current?.getStageCenter()}
             onUpdateItem={handleUpdateItem}
