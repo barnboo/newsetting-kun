@@ -308,7 +308,11 @@ const StageBuilder: React.FC<Props> = ({
     setCurrentSceneId(safeSnap.currentSceneId);
     setPlacedItems(safeSnap.placedItems);
     setCurveObjects(safeSnap.curveObjects);
-    setSnapSettings(safeSnap.snapSettings);
+    setSnapSettings(prev => ({
+      ...prev,
+      ...safeSnap.snapSettings,
+      showCenterMarker: prev.showCenterMarker,
+    }));
     setSelectedIds([]);
     setSelectedCurveIds([]);
     saveBackup(safeSnap);
@@ -570,7 +574,7 @@ const StageBuilder: React.FC<Props> = ({
     pushHistory();
     setSnapSettings(prev => ({
       ...prev,
-      showCenterMarker: true,
+      showCenterMarker: false,
       centerOffset: {
         x: Math.round(canvasX - bgCenterX),
         y: Math.round(canvasY - bgCenterY),
@@ -580,7 +584,7 @@ const StageBuilder: React.FC<Props> = ({
 
   const handleUpdateCenterOffset = (offset: { x: number; y: number }) => {
     pushHistory();
-    setSnapSettings(prev => ({ ...prev, centerOffset: offset }));
+    setSnapSettings(prev => ({ ...prev, centerOffset: offset, showCenterMarker: false }));
   };
 
   const addItemToSelectedCurve = (iconId: string) => {
@@ -807,7 +811,11 @@ const StageBuilder: React.FC<Props> = ({
       setPlacedItems(target.placedItems || []);
       setCurveObjects(target.curveObjects || []);
       if (target.snapSettings) {
-        setSnapSettings(target.snapSettings);
+        setSnapSettings(prev => ({
+          ...prev,
+          ...target.snapSettings,
+          showCenterMarker: prev.showCenterMarker,
+        }));
       }
     }
 
@@ -1717,8 +1725,8 @@ const StageBuilder: React.FC<Props> = ({
                       onClick={() => {
                         setIsMovingCenter(prev => {
                           const next = !prev;
-                          if (next && !snapSettings.showCenterMarker) {
-                            setSnapSettings(s => ({ ...s, showCenterMarker: true }));
+                          if (!next) {
+                            setSnapSettings(s => ({ ...s, showCenterMarker: false }));
                           }
                           return next;
                         });
