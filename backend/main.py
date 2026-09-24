@@ -928,3 +928,8 @@ async def export_pdf(req: ExportPdfRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+# Mount built frontend files if available (for production deployments like Render.com)
+FRONTEND_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+if os.path.exists(FRONTEND_DIST):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
+

@@ -191,7 +191,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
         rects: validRects
       };
 
-      const res = await fetch('http://127.0.0.1:8000/api/crop-icons/', {
+      const res = await fetch('/api/crop-icons/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -203,7 +203,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
       
       const updatedIcons = data.extracted_icons.map((icon: any) => ({
         ...icon,
-        url: `http://127.0.0.1:8000${icon.url}`
+        url: icon.url
       }));
       
       onSave(updatedIcons);
