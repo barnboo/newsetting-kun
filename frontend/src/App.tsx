@@ -571,7 +571,7 @@ function App() {
               </div>
             </div>
           ) : currentPhase === 2 || !extractedData ? (
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col items-center justify-center">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col items-center justify-start">
               <RegionSelector imageUrl={fileData.image_url} onComplete={handleRegionsComplete} />
             </div>
           ) : (
