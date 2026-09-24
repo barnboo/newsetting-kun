@@ -156,6 +156,10 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
               x={t.x}
               y={t.y}
               draggable
+              onMouseDown={(e) => {
+                e.cancelBubble = true;
+                onSelectNode(t.id);
+              }}
               onClick={(e) => {
                 e.cancelBubble = true;
                 onSelectNode(t.id);
@@ -224,9 +228,15 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
               {isCircle ? (
                 <Circle
                   radius={t.radius}
-                  stroke="#111827"
+                  stroke={isSelected ? '#2563eb' : '#111827'}
                   strokeWidth={2}
-                  fill="transparent"
+                  fill="rgba(0, 0, 0, 0.001)"
+                  hitFunc={(context, shape) => {
+                    context.beginPath();
+                    context.arc(0, 0, t.radius, 0, Math.PI * 2, true);
+                    context.closePath();
+                    context.fillStrokeShape(shape);
+                  }}
                 />
               ) : (
                 <Text
@@ -303,6 +313,10 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   const [sceneNodesMap, setSceneNodesMap] = useState<Record<string, OverlayNode[]>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
+  const editingNodeIdRef = useRef<string | null>(null);
+  editingNodeIdRef.current = editingNodeId;
   const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Focus inline textarea on editing start
@@ -620,14 +634,53 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   };
 
   const handleDeleteSelected = () => {
-    if (selectedId) {
-      setSceneNodesMap(prev => ({
-        ...prev,
-        [activeSceneId]: (prev[activeSceneId] || []).filter(t => t.id !== selectedId),
-      }));
+    const targetId = selectedIdRef.current || selectedId;
+    if (targetId) {
+      setSceneNodesMap(prev => {
+        const next: Record<string, OverlayNode[]> = {};
+        for (const [sId, nodes] of Object.entries(prev)) {
+          next[sId] = nodes.filter(t => t.id !== targetId);
+        }
+        return next;
+      });
       setSelectedId(null);
+      setEditingNodeId(null);
     }
   };
+
+  // Keyboard shortcut: Backspace / Delete to remove selected node (unless typing in input/textarea)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const targetTag = (e.target as HTMLElement)?.tagName;
+      const isInput =
+        targetTag === 'INPUT' ||
+        targetTag === 'TEXTAREA' ||
+        activeEl?.tagName === 'INPUT' ||
+        activeEl?.tagName === 'TEXTAREA' ||
+        (activeEl as HTMLElement)?.isContentEditable;
+
+      if (isInput) return;
+
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        const curSelectedId = selectedIdRef.current;
+        const curEditingId = editingNodeIdRef.current;
+        if (curSelectedId && !curEditingId) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleDeleteSelected();
+        }
+      } else if (e.key === 'Escape') {
+        if (selectedIdRef.current) {
+          setSelectedId(null);
+          setEditingNodeId(null);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleUpdateSelectedText = (newText: string) => {
     if (!selectedId) return;
@@ -680,6 +733,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   };
 
   const handleExport = () => {
+    setSelectedId(null);
+    setEditingNodeId(null);
     setIsExporting(true);
 
     try {
@@ -1101,9 +1156,11 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                   <button
                     type="button"
                     onClick={handleDeleteSelected}
-                    className="text-red-600 hover:text-red-700 hover:bg-red-50 p-1 rounded font-semibold text-[11px] transition-colors"
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded font-semibold text-[11px] transition-colors cursor-pointer flex items-center gap-1"
+                    title="BackspaceまたはDeleteキーでも削除できます"
                   >
-                    🗑 削除
+                    <span>🗑</span>
+                    <span>削除 (Backspace)</span>
                   </button>
                 </div>
 
@@ -1175,8 +1232,10 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                   </div>
                 )}
 
-                <p className="text-[10px] text-slate-500 leading-tight">
-                  ※キャンバス上の{selectedNode.type === 'circle' ? '丸' : '文字'}を直接ドラッグして移動できます。
+                <p className="text-[10px] text-slate-500 leading-tight space-y-0.5">
+                  <span>※キャンバス上の{selectedNode.type === 'circle' ? '丸' : '文字'}を直接ドラッグして移動できます。</span>
+                  <br />
+                  <span className="text-slate-600 font-medium">※選択中にBackspaceまたはDeleteキーで削除できます。</span>
                 </p>
               </div>
             )}
