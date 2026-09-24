@@ -299,6 +299,96 @@ const CanvasItem: React.FC<{
         height={effectiveHeight}
         fill="transparent"
       />
+
+      {/* Visual selection outline & highlight on every selected item */}
+      {isSelected && (
+        <>
+          <Rect
+            x={-3}
+            y={-3}
+            width={effectiveWidth + 6}
+            height={effectiveHeight + 6}
+            fill={activeItemIds && activeItemIds.length > 1 ? 'rgba(37, 99, 235, 0.18)' : 'rgba(37, 99, 235, 0.08)'}
+            stroke="#2563eb"
+            strokeWidth={1.8}
+            cornerRadius={4}
+            dash={activeItemIds && activeItemIds.length > 1 ? [5, 3] : undefined}
+            listening={false}
+          />
+          {activeItemIds && activeItemIds.length > 1 && (
+            <>
+              {/* Corner mini handles */}
+              <Rect
+                x={-5}
+                y={-5}
+                width={5}
+                height={5}
+                fill="#ffffff"
+                stroke="#2563eb"
+                strokeWidth={1.2}
+                cornerRadius={1}
+                listening={false}
+              />
+              <Rect
+                x={effectiveWidth}
+                y={-5}
+                width={5}
+                height={5}
+                fill="#ffffff"
+                stroke="#2563eb"
+                strokeWidth={1.2}
+                cornerRadius={1}
+                listening={false}
+              />
+              <Rect
+                x={-5}
+                y={effectiveHeight}
+                width={5}
+                height={5}
+                fill="#ffffff"
+                stroke="#2563eb"
+                strokeWidth={1.2}
+                cornerRadius={1}
+                listening={false}
+              />
+              <Rect
+                x={effectiveWidth}
+                y={effectiveHeight}
+                width={5}
+                height={5}
+                fill="#ffffff"
+                stroke="#2563eb"
+                strokeWidth={1.2}
+                cornerRadius={1}
+                listening={false}
+              />
+              {/* Distinct Checkmark Badge on top-right */}
+              <Group x={effectiveWidth + 2} y={-5} listening={false}>
+                <Circle
+                  radius={7}
+                  fill="#2563eb"
+                  stroke="#ffffff"
+                  strokeWidth={1.5}
+                />
+                <Text
+                  text="✓"
+                  x={-5}
+                  y={-5}
+                  width={10}
+                  height={10}
+                  fontSize={8}
+                  fontFamily="sans-serif"
+                  fontStyle="bold"
+                  align="center"
+                  verticalAlign="middle"
+                  fill="#ffffff"
+                />
+              </Group>
+            </>
+          )}
+        </>
+      )}
+
       <KonvaImage
         image={image}
         width={effectiveWidth}
@@ -1511,6 +1601,53 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
           <span>基準点移動モード：ピンクのマーカーをドラッグして位置を移動できます</span>
         </div>
       )}
+
+      {/* Floating Multi-Selection Action Pill */}
+      {(activeItemIds.length + activeCurveIds.length) > 1 && (
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-full shadow-2xl flex items-center gap-3 border border-slate-700/80 animate-in fade-in slide-in-from-bottom-2 duration-150">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-blue-300">
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+            <span>{activeItemIds.length + activeCurveIds.length} 個選択中</span>
+          </div>
+          <div className="h-3.5 w-px bg-slate-700" />
+          {onDuplicateSelected && (
+            <button
+              type="button"
+              onClick={onDuplicateSelected}
+              className="text-xs font-medium text-slate-200 hover:text-white flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded-md transition-colors cursor-pointer"
+              title="選択したアイテムを複製 (Ctrl+D)"
+            >
+              <span>📑</span>
+              <span>複製</span>
+            </button>
+          )}
+          {onDeleteSelected && (
+            <button
+              type="button"
+              onClick={onDeleteSelected}
+              className="text-xs font-medium text-rose-300 hover:text-rose-200 flex items-center gap-1 hover:bg-rose-950/60 px-2 py-1 rounded-md transition-colors cursor-pointer"
+              title="選択したアイテムを一括削除 (Delete)"
+            >
+              <span>🗑️</span>
+              <span>削除</span>
+            </button>
+          )}
+          <div className="h-3.5 w-px bg-slate-700" />
+          <button
+            type="button"
+            onClick={() => {
+              if (onSelectItems) onSelectItems([]);
+              else onSelectItem(null);
+              if (onSelectCurves) onSelectCurves([]);
+              else onSelectCurve(null);
+            }}
+            className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+            title="選択を解除"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div
         className="bg-white dark:bg-slate-900 shadow-xl ring-1 ring-slate-900/10 dark:ring-white/10 rounded-sm relative m-auto transition-colors"
         style={{ width: stageDimensions.width, height: stageDimensions.height }}
@@ -1719,7 +1856,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                 <CurveCanvas
                   key={curve.id}
                   curve={curve}
-                  isSelected={selectedCurveId === curve.id}
+                  isSelected={activeCurveIds.includes(curve.id)}
                   onSelect={() => {
                     onSelectCurve(curve.id);
                     onSelectItem(null);
