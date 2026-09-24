@@ -220,7 +220,18 @@ const StageBuilder: React.FC<Props> = ({
     return () => window.removeEventListener('wheel', handleWheel);
   }, [isExportModalOpen]);
 
-  const HISTORY_MAX = 15;
+  const placedItemsRef = useRef(placedItems);
+  placedItemsRef.current = placedItems;
+  const curveObjectsRef = useRef(curveObjects);
+  curveObjectsRef.current = curveObjects;
+  const scenesRef = useRef(scenes);
+  scenesRef.current = scenes;
+  const currentSceneIdRef = useRef(currentSceneId);
+  currentSceneIdRef.current = currentSceneId;
+  const snapSettingsRef = useRef(snapSettings);
+  snapSettingsRef.current = snapSettings;
+
+  const HISTORY_MAX = 50;
   const historyRef = useRef<StageSnapshot[]>([]);      // past snapshots (oldest first)
   const redoStackRef = useRef<StageSnapshot[]>([]);    // future snapshots for redo
   const isRestoringRef = useRef(false);                // flag: skip pushing while restoring
@@ -251,17 +262,17 @@ const StageBuilder: React.FC<Props> = ({
     }
   };
 
-  // Build a snapshot of the current working state
-  const buildSnapshot = (): StageSnapshot => ({
-    placedItems,
-    curveObjects,
+  // Build a snapshot of the current working state (deep copy to prevent mutations)
+  const buildSnapshot = (): StageSnapshot => JSON.parse(JSON.stringify({
+    placedItems: placedItemsRef.current,
+    curveObjects: curveObjectsRef.current,
     // Merge current working state into scenes list before saving
-    scenes: scenes.map(sc =>
-      sc.id === currentSceneId ? { ...sc, placedItems, curveObjects, snapSettings } : sc
+    scenes: scenesRef.current.map(sc =>
+      sc.id === currentSceneIdRef.current ? { ...sc, placedItems: placedItemsRef.current, curveObjects: curveObjectsRef.current, snapSettings: snapSettingsRef.current } : sc
     ),
-    currentSceneId,
-    snapSettings,
-  });
+    currentSceneId: currentSceneIdRef.current,
+    snapSettings: snapSettingsRef.current,
+  }));
 
   const handleBack = () => {
     saveBackup(buildSnapshot());
@@ -282,13 +293,15 @@ const StageBuilder: React.FC<Props> = ({
   // Restore a snapshot to the React state
   const restoreSnapshot = (snap: StageSnapshot) => {
     isRestoringRef.current = true;
-    setScenes(snap.scenes);
-    setCurrentSceneId(snap.currentSceneId);
-    setPlacedItems(snap.placedItems);
-    setCurveObjects(snap.curveObjects);
-    setSnapSettings(snap.snapSettings);
+    const safeSnap = JSON.parse(JSON.stringify(snap));
+    setScenes(safeSnap.scenes);
+    setCurrentSceneId(safeSnap.currentSceneId);
+    setPlacedItems(safeSnap.placedItems);
+    setCurveObjects(safeSnap.curveObjects);
+    setSnapSettings(safeSnap.snapSettings);
     setSelectedIds([]);
     setSelectedCurveIds([]);
+    saveBackup(safeSnap);
     // Allow tick for state to settle before re-enabling history tracking
     requestAnimationFrame(() => { isRestoringRef.current = false; });
   };
@@ -397,6 +410,14 @@ const StageBuilder: React.FC<Props> = ({
   };
 
   const handleUpdateItem = (id: string, newAttrs: Partial<PlacedItem>) => {
+    const currentItem = placedItemsRef.current.find(i => i.id === id);
+    if (currentItem) {
+      const isChanged = Object.keys(newAttrs).some(
+        key => (newAttrs as any)[key] !== (currentItem as any)[key]
+      );
+      if (!isChanged) return;
+    }
+    pushHistory();
     setPlacedItems(prev => prev.map(item => item.id === id ? { ...item, ...newAttrs } : item));
   };
 
@@ -421,6 +442,15 @@ const StageBuilder: React.FC<Props> = ({
   };
 
   const handleUpdateItems = (updates: { id: string; attrs: Partial<PlacedItem> }[]) => {
+    if (updates.length === 0) return;
+    const hasAnyChange = updates.some(u => {
+      const item = placedItemsRef.current.find(i => i.id === u.id);
+      if (!item) return false;
+      return Object.keys(u.attrs).some(k => (u.attrs as any)[k] !== (item as any)[k]);
+    });
+    if (!hasAnyChange) return;
+
+    pushHistory();
     setPlacedItems(prev => prev.map(item => {
       const u = updates.find(x => x.id === item.id);
       return u ? { ...item, ...u.attrs } : item;
@@ -527,6 +557,7 @@ const StageBuilder: React.FC<Props> = ({
     const bgCenter = stageCanvasRef.current?.getStageCenter();
     const bgCenterX = bgCenter?.x ?? 600;
     const bgCenterY = bgCenter?.y ?? 400;
+    pushHistory();
     setSnapSettings(prev => ({
       ...prev,
       showCenterMarker: true,
@@ -535,6 +566,11 @@ const StageBuilder: React.FC<Props> = ({
         y: Math.round(canvasY - bgCenterY),
       },
     }));
+  };
+
+  const handleUpdateCenterOffset = (offset: { x: number; y: number }) => {
+    pushHistory();
+    setSnapSettings(prev => ({ ...prev, centerOffset: offset }));
   };
 
   const addItemToSelectedCurve = (iconId: string) => {
@@ -582,6 +618,14 @@ const StageBuilder: React.FC<Props> = ({
   };
 
   const handleUpdateCurve = (id: string, updates: Partial<CurveObject>) => {
+    const currentCurve = curveObjectsRef.current.find(c => c.id === id);
+    if (currentCurve) {
+      const isChanged = Object.keys(updates).some(
+        key => (updates as any)[key] !== (currentCurve as any)[key]
+      );
+      if (!isChanged) return;
+    }
+    pushHistory();
     setCurveObjects(prev => prev.map(c => {
       if (c.id !== id) return c;
       const nextCurve = { ...c, ...updates };
@@ -608,6 +652,7 @@ const StageBuilder: React.FC<Props> = ({
   };
 
   const handleUpdateAllOfType = (type: 'stand' | 'pianoChair', style: 'default' | 'xMark' | 'doubleCircle') => {
+    pushHistory();
     if (type === 'stand') {
       setPlacedItems(prev =>
         prev.map(item => {
@@ -1823,7 +1868,7 @@ const StageBuilder: React.FC<Props> = ({
           onDuplicateSelected={handleDuplicateSelected}
           onCopySelected={handleCopySelected}
           onPaste={handlePaste}
-          onUpdateCenterOffset={(offset) => setSnapSettings(prev => ({ ...prev, centerOffset: offset }))}
+          onUpdateCenterOffset={handleUpdateCenterOffset}
           isMovingCenter={isMovingCenter}
           onOpenContextMenu={setContextMenu}
           isMeasuringScale={isMeasuringScale}
