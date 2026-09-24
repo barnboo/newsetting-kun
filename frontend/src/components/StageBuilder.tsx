@@ -787,9 +787,6 @@ const StageBuilder: React.FC<Props> = ({
     return [...iconTallies, ...templateTallies];
   };
 
-  // Current active scene helper
-  const currentScene = scenes.find(sc => sc.id === currentSceneId) || scenes[0];
-
   // ─── Scene Handlers (Ported from Prototype) ─────────────────────────────────
 
   const handleSwitchScene = (targetSceneId: string) => {
@@ -1135,35 +1132,6 @@ const StageBuilder: React.FC<Props> = ({
               className={`p-1.5 rounded font-bold transition-colors ${isDarkMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}
               title="ズームイン"
             >➕</button>
-            <div className={`h-4 w-px mx-1 hidden sm:block ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
-            <button
-              type="button"
-              onClick={() => setDrawerSubmenu(prev => (prev === 'scenes' ? null : 'scenes'))}
-              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
-                drawerSubmenu === 'scenes'
-                  ? (isDarkMode ? 'bg-blue-950/70 border-blue-600 text-blue-300' : 'bg-blue-50 border-blue-300 text-blue-700 shadow-2xs')
-                  : (isDarkMode ? 'bg-slate-700/80 hover:bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700')
-              }`}
-              title="場面一覧 (シーン切替) を開く"
-            >
-              <span>📑</span>
-              <span className="max-w-[120px] truncate">{currentScene?.name || '場面 1'}</span>
-              <span className="text-[10px] text-slate-400">▼</span>
-            </button>
-            <div className={`h-4 w-px mx-1 hidden sm:block ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
-            {/* Header Dark Mode Toggle Button */}
-            <button
-              type="button"
-              onClick={toggleDarkMode}
-              className={`p-1.5 rounded-lg border transition-colors flex items-center gap-1 text-xs font-semibold ${
-                isDarkMode
-                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
-                  : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600'
-              }`}
-              title={isDarkMode ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}
-            >
-              <span>{isDarkMode ? '☀️' : '🌙'}</span>
-            </button>
           </div>
 
         </div>
