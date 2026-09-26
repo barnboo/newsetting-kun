@@ -24,8 +24,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "uploads"
-STATIC_DIR = "static"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
@@ -154,7 +155,8 @@ def extract_label_for_icon(bbox: fitz.Rect, page_words: list) -> str:
     right_words.sort(key=lambda w: w[0])
     
     ignored_headers = {
-        "品名", "品名記号", "記号", "要・不要", "個数", "備考", "番号", "No", "No.", "品名/記号"
+        "品名", "品名記号", "記号", "要・不要", "個数", "備考", "番号", "No", "No.", "品名/記号",
+        "使用備品", "数", "脚", "本", "台", "個", "枚", "組", "記", "号"
     }
 
     # Known standard item names to prioritize
@@ -162,7 +164,8 @@ def extract_label_for_icon(bbox: fitz.Rect, page_words: list) -> str:
         "合奏用譜面台", "合奏用椅子", "合奏譜面台", "合奏椅子", "パイプ椅子",
         "指揮用譜面台", "指揮譜面台", "指揮者用譜面台", "指揮者譜面台",
         "ピアノ用椅子", "ピアノ椅子", "ピアノイス",
-        "指揮台", "長机", "ピアノ", "延長コード", "譜面台", "椅子", "イス"
+        "譜めくり椅子", "譜めくりイス", "譜めくり",
+        "指揮台", "長机", "マイク", "電源", "ピアノ", "延長コード", "譜面台", "椅子", "イス"
     ]
     
     def find_standard_name(text: str) -> str:
@@ -177,7 +180,9 @@ def extract_label_for_icon(bbox: fitz.Rect, page_words: list) -> str:
     if matched_left:
         return matched_left
     if left_text and left_text not in ignored_headers:
-        return left_text
+        cleaned = left_text.lstrip("0123456789０１２３４５６７８９")
+        if cleaned:
+            return cleaned
         
     # 2. Secondary check: right side (e.g. [記号] [品名])
     units_stop = {
@@ -190,7 +195,9 @@ def extract_label_for_icon(bbox: fitz.Rect, page_words: list) -> str:
     if matched_right:
         return matched_right
     if right_text and right_text not in ignored_headers:
-        return right_text
+        cleaned = right_text.lstrip("0123456789０１２３４５６７８９")
+        if cleaned:
+            return cleaned
         
     return ""
 
@@ -285,134 +292,164 @@ async def extract_regions(req: ExtractRequest):
                 import time
                 cache_buster = str(int(time.time()))
                 
-                # IMPORTANT: Extract text words BEFORE applying redactions!
                 page_words = page.get_text("words")
 
                 icon_zoom = 4.0
                 mat = fitz.Matrix(icon_zoom, icon_zoom)
                 
-                # Render WITH text for the modal background (so user can read the table)
-                pix_region_with_text = page.get_pixmap(matrix=mat, clip=rect_points)
+                # Render high-resolution region image
+                pix_region = page.get_pixmap(matrix=mat, clip=rect_points)
                 region_filename = f"{req.file_id}_icons_region_{cache_buster}.png"
                 region_path = os.path.join(STATIC_DIR, region_filename)
-                pix_region_with_text.save(region_path)
+                pix_region.save(region_path)
                 icons_region_url = f"/static/{region_filename}"
 
-                # Apply text AND graphics redaction NOW so any cropped icons are rendered cleanly
-                text_blocks = page.get_text("blocks", clip=rect_points)
-                for b in text_blocks:
-                    t_rect = fitz.Rect(b[:4])
-                    page.add_redact_annot(t_rect, cross_out=False)
-                    
-                drawings = page.get_drawings()
-                for d in drawings:
-                    if d["rect"].intersects(rect_points):
-                        page.add_redact_annot(d["rect"], cross_out=False)
-                        
-                # 2 for text and graphics means "remove", 0 means "keep"
-                page.apply_redactions(images=0, graphics=2, text=2)
-                
-                # Render CLEAN version for cropping
-                pix_region_clean = page.get_pixmap(matrix=mat, clip=rect_points)
+                # Also save clean version without destructive redaction (so manual crop works with 100% fidelity)
                 region_clean_path = os.path.join(STATIC_DIR, f"{req.file_id}_icons_region_notext_{cache_buster}.png")
-                pix_region_clean.save(region_clean_path)
-                
-                extracted_icons = []
-                
-                # Check for raster images in this region
+                pix_region.save(region_clean_path)
+
+                # Convert pix_region to OpenCV for table grid removal and symbol cell analysis
+                img_data = np.frombuffer(pix_region.samples, dtype=np.uint8).reshape((pix_region.height, pix_region.width, pix_region.n))
+                if pix_region.n == 4:
+                    img_bgr = cv2.cvtColor(img_data, cv2.COLOR_RGBA2BGR)
+                else:
+                    img_bgr = cv2.cvtColor(img_data, cv2.COLOR_RGB2BGR)
+
+                gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                _, thresh = cv2.threshold(gray, 225, 255, cv2.THRESH_BINARY_INV)
+
+                # Filter out table grid lines (horizontal and vertical lines >= 20 pt)
+                h_k = cv2.getStructuringElement(cv2.MORPH_RECT, (int(20 * icon_zoom), 1))
+                v_k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(20 * icon_zoom)))
+                lines_grid = cv2.add(cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_k), cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_k))
+                no_grid = cv2.subtract(thresh, lines_grid)
+
+                candidate_boxes = []
+
+                # Strategy 1: Raster Images in rect_points
                 raw_images = page.get_image_info(xrefs=True)
-                candidate_images = []
                 for img in raw_images:
-                    bbox = fitz.Rect(img['bbox'])
-                    if bbox.intersects(rect_points):
-                        # Filter out tiny artefacts or huge whole-page backgrounds
-                        if bbox.width >= 5 and bbox.height >= 5 and bbox.width <= 200 and bbox.height <= 200:
-                            candidate_images.append(img)
-                
-                if len(candidate_images) > 0:
-                    # Sort top to bottom by y coordinate
-                    candidate_images.sort(key=lambda img: img['bbox'][1])
-                    
-                    for idx, img in enumerate(candidate_images):
-                        bbox = fitz.Rect(img['bbox'])
+                    b = fitz.Rect(img['bbox'])
+                    if b.intersects(rect_points):
+                        if 6 <= b.width <= 160 and 6 <= b.height <= 160:
+                            lbl = extract_label_for_icon(b, page_words)
+                            candidate_boxes.append((b, lbl, 'raster'))
+
+                # Strategy 2: Row-based symbol cell search for known band sheet equipment items
+                target_names = [
+                    '指揮台', '指揮者譜面台', '指揮用譜面台', '指揮者用譜面台',
+                    'ピアノ椅子', '譜めくり椅子', '譜めくりイス', '譜めくり',
+                    'ピアノ', '合奏用譜面台', '合奏用椅子', '合奏譜面台', '合奏椅子',
+                    '長机', 'マイク', '電源'
+                ]
+                for w in page_words:
+                    if not fitz.Rect(w[:4]).intersects(rect_points):
+                        continue
+                    if 'ピアノの蓋' in w[4]:
+                        continue
+                    for tn in target_names:
+                        if tn in w[4]:
+                            r = fitz.Rect(w[:4])
+                            # Check to the right (common in Japanese tables) and then to the left
+                            for dx0, dx1 in [(10, 95), (-95, -10)]:
+                                sym_x0 = r.x1 + dx0 if dx0 > 0 else r.x0 + dx0
+                                sym_x1 = r.x1 + dx1 if dx0 > 0 else r.x0 + dx1
+                                if sym_x0 > sym_x1:
+                                    sym_x0, sym_x1 = sym_x1, sym_x0
+                                sym_y0 = r.y0 - 8
+                                sym_y1 = r.y1 + 8
+
+                                px0 = max(0, int((sym_x0 - rect_points.x0) * icon_zoom))
+                                px1 = min(pix_region.width, int((sym_x1 - rect_points.x0) * icon_zoom))
+                                py0 = max(0, int((sym_y0 - rect_points.y0) * icon_zoom))
+                                py1 = min(pix_region.height, int((sym_y1 - rect_points.y0) * icon_zoom))
+
+                                if px1 > px0 and py1 > py0:
+                                    cell_content = no_grid[py0:py1, px0:px1]
+                                    dark_y, dark_x = np.where(cell_content > 0)
+                                    if len(dark_x) >= 20:
+                                        pad = 4
+                                        min_x = max(0, np.min(dark_x) + px0 - pad)
+                                        max_x = min(pix_region.width, np.max(dark_x) + px0 + pad)
+                                        min_y = max(0, np.min(dark_y) + py0 - pad)
+                                        max_y = min(pix_region.height, np.max(dark_y) + py0 + pad)
+
+                                        box_pt = fitz.Rect(
+                                            rect_points.x0 + min_x / icon_zoom,
+                                            rect_points.y0 + min_y / icon_zoom,
+                                            rect_points.x0 + max_x / icon_zoom,
+                                            rect_points.y0 + max_y / icon_zoom
+                                        )
+                                        candidate_boxes.append((box_pt, tn, 'row_cell'))
+                                        break
+                            break
+
+                # Strategy 3: Vector drawings fallback / supplement
+                drawings = page.get_drawings()
+                drawing_rects = []
+                for d in drawings:
+                    r = fitz.Rect(d['rect'])
+                    if not r.intersects(rect_points):
+                        continue
+                    if r.width > 120 or r.height > 120:
+                        continue
+                    sw = d.get('width', 1.0) or 1.0
+                    r_exp = fitz.Rect(r.x0 - sw/2, r.y0 - sw/2, r.x1 + sw/2, r.y1 + sw/2)
+                    if (r.width > 50 and r.height <= 2) or (r.height > 50 and r.width <= 2):
+                        continue
+                    drawing_rects.append(r_exp)
+
+                merged_drawings = merge_rects(drawing_rects, margin=6.0)
+                for md in merged_drawings:
+                    if 5 <= md.width <= 120 and 5 <= md.height <= 120:
+                        lbl = extract_label_for_icon(md, page_words)
+                        if lbl:
+                            candidate_boxes.append((md, lbl, 'drawing'))
+
+                # Deduplicate overlapping candidate boxes
+                unique_candidates = []
+                for b, lbl, typ in candidate_boxes:
+                    overlap = False
+                    for idx_u, (ub, ulbl, utyp) in enumerate(unique_candidates):
+                        inter = fitz.Rect(b).intersect(fitz.Rect(ub))
+                        if inter.width > 0 and inter.height > 0:
+                            inter_area = inter.width * inter.height
+                            min_area = min(b.width * b.height, ub.width * ub.height)
+                            if inter_area / min_area > 0.4:
+                                overlap = True
+                                if not ulbl and lbl:
+                                    unique_candidates[idx_u] = (ub, lbl, utyp)
+                                break
+                    if not overlap:
+                        final_lbl = lbl or extract_label_for_icon(b, page_words)
+                        unique_candidates.append((b, final_lbl, typ))
+
+                # Sort candidates in visual reading order: left column top-to-bottom, right column top-to-bottom
+                median_x = (rect_points.x0 + rect_points.x1) / 2
+                unique_candidates.sort(key=lambda item: (0 if item[0].x0 < median_x else 1, item[0].y0))
+
+                extracted_icons = []
+                with Image.open(region_path) as im:
+                    for idx, (b, lbl, typ) in enumerate(unique_candidates):
+                        rel_x = max(0, (b.x0 - rect_points.x0) * icon_zoom)
+                        rel_y = max(0, (b.y0 - rect_points.y0) * icon_zoom)
+                        rel_width = min(pix_region.width - rel_x, b.width * icon_zoom)
+                        rel_height = min(pix_region.height - rel_y, b.height * icon_zoom)
+
+                        if rel_width < 5 or rel_height < 5:
+                            continue
+
                         icon_filename = f"{req.file_id}_icon_{idx}_{cache_buster}.png"
-                        icon_path = os.path.join(STATIC_DIR, icon_filename)
-                        
-                        # Crop exact bbox without padding from the clean rendered page
-                        rel_x = (bbox.x0 - rect_points.x0) * icon_zoom
-                        rel_y = (bbox.y0 - rect_points.y0) * icon_zoom
-                        rel_w = bbox.width * icon_zoom
-                        rel_h = bbox.height * icon_zoom
-                        
-                        with Image.open(region_clean_path) as im:
-                            cropped = im.crop((rel_x, rel_y, rel_x + rel_w, rel_y + rel_h))
-                            cropped.save(icon_path)
-                                
-                        make_white_transparent(icon_path)
-                                
-                        rel_x = (bbox.x0 - rect_points.x0) * icon_zoom
-                        rel_y = (bbox.y0 - rect_points.y0) * icon_zoom
-                        rel_width = bbox.width * icon_zoom
-                        rel_height = bbox.height * icon_zoom
-                        
-                        label = extract_label_for_icon(bbox, page_words)
-                        
+                        icon_crop_path = os.path.join(STATIC_DIR, icon_filename)
+
+                        cropped = im.crop((rel_x, rel_y, rel_x + rel_width, rel_y + rel_height))
+                        cropped.save(icon_crop_path)
+                        make_white_transparent(icon_crop_path)
+
                         extracted_icons.append({
                             "id": f"icon_{idx}",
                             "url": f"/static/{icon_filename}",
-                            "label": label,
-                            "rect": {
-                                "x": rel_x,
-                                "y": rel_y,
-                                "width": rel_width,
-                                "height": rel_height
-                            }
-                        })
-                else:
-                    # Fallback for purely vector-drawn icons: extract drawings
-                    drawings = page.get_drawings()
-                    item_rects = []
-                    for d in drawings:
-                        d_rect = d["rect"]
-                        if not d_rect.intersects(rect_points):
-                            continue
-                        if d_rect.width > 90 or d_rect.height > 90:
-                            continue
-                        aspect = d_rect.width / max(d_rect.height, 0.1)
-                        if aspect > 4 or aspect < 0.25:
-                            if d_rect.width > 10 or d_rect.height > 10:
-                                continue
-                        if len(d["items"]) == 1 and d["items"][0][0] == "re":
-                            continue
-                        is_only_lines = all(item[0] == "l" for item in d["items"])
-                        if is_only_lines and (d_rect.width > 20 or d_rect.height > 20):
-                            continue
-                        r = d_rect.intersect(rect_points)
-                        if r.width > 1 and r.height > 1:
-                            item_rects.append(r)
-                            
-                    merged_rects = merge_rects(item_rects, margin=0.2)
-                    for idx, r in enumerate(merged_rects):
-                        if r.width < 5 or r.height < 5: continue
-                        if r.width > 120 or r.height > 120: continue
-                        
-                        rel_x = (r.x0 - rect_points.x0) * icon_zoom
-                        rel_y = (r.y0 - rect_points.y0) * icon_zoom
-                        rel_width = r.width * icon_zoom
-                        rel_height = r.height * icon_zoom
-                        
-                        icon_crop_path = os.path.join(STATIC_DIR, f"{req.file_id}_icon_{idx}_{cache_buster}.png")
-                        with Image.open(region_clean_path) as im:
-                            cropped = im.crop((rel_x, rel_y, rel_x + rel_width, rel_y + rel_height))
-                            cropped.save(icon_crop_path)
-                        make_white_transparent(icon_crop_path)
-                        
-                        label = extract_label_for_icon(r, page_words)
-                            
-                        extracted_icons.append({
-                            "id": f"icon_{idx}",
-                            "url": f"/static/{req.file_id}_icon_{idx}_{cache_buster}.png",
-                            "label": label,
+                            "label": lbl or f"パーツ {idx + 1}",
                             "rect": {
                                 "x": rel_x,
                                 "y": rel_y,
@@ -445,12 +482,12 @@ async def crop_icons(req: CropIconsRequest):
         import time
         cache_buster = str(int(time.time()))
         
-        # Load the base image
+        # Load the base image (use the exact image the user saw in the modal)
         filename = os.path.basename(req.icons_region_url)
-        # e.g. fileId_icons_region_123456.png -> fileId_icons_region_notext_123456.png
-        filename = filename.replace("_icons_region_", "_icons_region_notext_")
         base_img_path = os.path.join(STATIC_DIR, filename)
-        
+        if not os.path.exists(base_img_path):
+            fallback = filename.replace("_icons_region_", "_icons_region_notext_")
+            base_img_path = os.path.join(STATIC_DIR, fallback)
         if not os.path.exists(base_img_path):
             raise HTTPException(status_code=404, detail="Base image not found")
             
