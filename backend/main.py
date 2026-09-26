@@ -541,6 +541,11 @@ class PreviewRequest(BaseModel):
 async def preview_bg(req: PreviewRequest):
     try:
         pdf_path = os.path.join(UPLOAD_DIR, f"{req.file_id}.pdf")
+        if not os.path.exists(pdf_path):
+            return {
+                "preview_url": "",
+                "auto_nodes": []
+            }
         doc = fitz.open(pdf_path)
         page = doc[0]
 
@@ -916,12 +921,10 @@ async def export_pdf(req: ExportPdfRequest):
     import time
     
     pdf_path = os.path.join(UPLOAD_DIR, f"{req.file_id}.pdf")
-    if not os.path.exists(pdf_path):
-        raise HTTPException(status_code=404, detail="Original PDF not found")
+    has_original_pdf = os.path.exists(pdf_path)
         
     try:
         cache_buster = str(int(time.time()))
-        doc = fitz.open(pdf_path)
         
         # Determine list of images to render
         images = []
@@ -933,22 +936,37 @@ async def export_pdf(req: ExportPdfRequest):
         if not images:
             raise HTTPException(status_code=400, detail="No overlay image provided")
 
-        # Duplicate template page if multiple scenes are being exported
-        if len(images) > 1:
-            template_doc = fitz.open(pdf_path)
-            for _ in range(1, len(images)):
-                doc.insert_pdf(template_doc, from_page=0, to_page=0)
-            template_doc.close()
+        if has_original_pdf:
+            doc = fitz.open(pdf_path)
+            # Duplicate template page if multiple scenes are being exported
+            if len(images) > 1:
+                template_doc = fitz.open(pdf_path)
+                for _ in range(1, len(images)):
+                    doc.insert_pdf(template_doc, from_page=0, to_page=0)
+                template_doc.close()
 
-        # Insert transparent overlay images for each page
-        for i, img_data in enumerate(images):
-            if i < len(doc):
-                page = doc[i]
+            # Insert transparent overlay images for each page
+            for i, img_data in enumerate(images):
+                if i < len(doc):
+                    page = doc[i]
+                    if "," in img_data:
+                        image_bytes = base64.b64decode(img_data.split(",")[1])
+                    else:
+                        image_bytes = base64.b64decode(img_data)
+                    page.insert_image(page.rect, stream=image_bytes)
+        else:
+            # Reconstruct PDF pages directly from images
+            doc = fitz.open()
+            for img_data in images:
                 if "," in img_data:
                     image_bytes = base64.b64decode(img_data.split(",")[1])
                 else:
                     image_bytes = base64.b64decode(img_data)
-                page.insert_image(page.rect, stream=image_bytes)
+                img = fitz.open("png", image_bytes)
+                rect = img[0].rect
+                page = doc.new_page(width=rect.width, height=rect.height)
+                page.insert_image(rect, stream=image_bytes)
+                img.close()
 
         # Save completed PDF with aggressive compression
         completed_filename = f"{req.file_id}_completed_{cache_buster}.pdf"

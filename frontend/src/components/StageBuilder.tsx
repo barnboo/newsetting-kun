@@ -28,6 +28,9 @@ export interface StageSnapshot {
   scenes: Scene[];
   currentSceneId: string;
   snapSettings: SnapSettings;
+  backgroundCrop?: { x: number; y: number; width: number; height: number } | null;
+  pageImageUrl?: string;
+  backgroundUrl?: string;
 }
 
 interface Props {
@@ -291,6 +294,9 @@ const StageBuilder: React.FC<Props> = ({
     ),
     currentSceneId: currentSceneIdRef.current,
     snapSettings: snapSettingsRef.current,
+    backgroundCrop: backgroundCrop || initialBackup?.backgroundCrop,
+    pageImageUrl: pageImageUrl || initialBackup?.pageImageUrl,
+    backgroundUrl: backgroundUrl || initialBackup?.backgroundUrl,
   }));
 
   const handleBack = () => {
@@ -1067,12 +1073,14 @@ const StageBuilder: React.FC<Props> = ({
 
   if (isExportModalOpen && (stageImageUrl || sceneExports.length > 0)) {
     const tallies = computeTallies();
+    const effectiveCrop = backgroundCrop || initialBackup?.backgroundCrop || { x: 0, y: 0, width: 1684, height: 1191 };
+    const effectivePageImg = pageImageUrl || initialBackup?.pageImageUrl || backgroundUrl || '';
     return (
       <FullPageEditor
         fileId={fileId!}
-        pageImageUrl={pageImageUrl}
+        pageImageUrl={effectivePageImg}
         stageImageUrl={stageImageUrl || sceneExports[0]?.stageImageUrl || ''}
-        backgroundCrop={backgroundCrop!}
+        backgroundCrop={effectiveCrop}
         tallies={tallies}
         sceneExports={sceneExports}
         onBack={() => {

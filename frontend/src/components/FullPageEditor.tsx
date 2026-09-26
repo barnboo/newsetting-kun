@@ -26,7 +26,7 @@ interface FullPageEditorProps {
   fileId: string;
   pageImageUrl: string;
   stageImageUrl: string;
-  backgroundCrop: { x: number; y: number; width: number; height: number };
+  backgroundCrop?: { x: number; y: number; width: number; height: number } | null;
   tallies: { icon_id: string; label: string; count: number; source?: 'pdf' | 'template' }[];
   initialNodes?: OverlayNode[];
   sceneExports?: SceneExportData[];
@@ -40,7 +40,7 @@ interface SingleSceneCanvasProps {
   scene: SceneExportData;
   index: number;
   dimensions: { width: number; height: number; scale: number };
-  backgroundCrop: { x: number; y: number; width: number; height: number };
+  backgroundCrop?: { x: number; y: number; width: number; height: number } | null;
   bgImage: HTMLImageElement | undefined;
   nodes: OverlayNode[];
   selectedId: string | null;
@@ -65,6 +65,16 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
   onCanvasDblClick,
 }, ref) => {
   const [stageImg] = useImage(scene.stageImageUrl, 'anonymous');
+
+  // Fallback crop if backgroundCrop is null/undefined
+  const crop = (backgroundCrop && backgroundCrop.width > 0)
+    ? backgroundCrop
+    : {
+        x: 40,
+        y: 120,
+        width: (bgImage?.naturalWidth || 1684) - 80,
+        height: (bgImage?.naturalHeight || 1191) - 200,
+      };
 
   return (
     <Stage
@@ -117,13 +127,24 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
     >
       {/* Background Document Layer */}
       <Layer id="bgLayer">
-        {bgImage && (
+        {bgImage ? (
           <KonvaImage
             image={bgImage}
             x={0}
             y={0}
             width={bgImage.naturalWidth || 1684}
             height={bgImage.naturalHeight || 1191}
+            listening={false}
+          />
+        ) : (
+          <Rect
+            x={0}
+            y={0}
+            width={1684}
+            height={1191}
+            fill="#ffffff"
+            stroke="#cbd5e1"
+            strokeWidth={1}
             listening={false}
           />
         )}
@@ -134,10 +155,10 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
         {stageImg && (
           <KonvaImage
             image={stageImg}
-            x={backgroundCrop.x}
-            y={backgroundCrop.y}
-            width={backgroundCrop.width}
-            height={backgroundCrop.height}
+            x={crop.x}
+            y={crop.y}
+            width={crop.width}
+            height={crop.height}
             listening={false}
           />
         )}
@@ -329,8 +350,6 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
   // Initialize nodes for all scenes
   useEffect(() => {
-    if (!bgImage) return;
-
     setSceneNodesMap(prevMap => {
       const newMap: Record<string, OverlayNode[]> = { ...prevMap };
 
@@ -365,7 +384,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
       return newMap;
     });
-  }, [bgImage, effectiveScenes, initialNodes]);
+  }, [effectiveScenes, initialNodes]);
 
   // Active tallies based on selected scene
   const activeTallies = activeScene?.tallies || tallies;
@@ -381,15 +400,15 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
   // Initialize stage dimensions dynamically
   useEffect(() => {
-    if (!containerRef.current || !bgImage) return;
+    if (!containerRef.current) return;
 
     const updateDimensions = () => {
-      if (!containerRef.current || !bgImage) return;
+      if (!containerRef.current) return;
       const containerW = containerRef.current.clientWidth - 48;
       const containerH = containerRef.current.clientHeight - 48;
 
-      const imgW = bgImage.naturalWidth || 1684;
-      const imgH = bgImage.naturalHeight || 1191;
+      const imgW = bgImage?.naturalWidth || 1684;
+      const imgH = bgImage?.naturalHeight || 1191;
 
       if (containerW <= 0 || containerH <= 0) return;
 

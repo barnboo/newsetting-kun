@@ -178,12 +178,29 @@ function App() {
       sess = await loadSessionFromIndexedDB(meta.id);
     }
 
-    let backgroundUrl = sess?.extractedData?.backgroundUrl || '';
+    // Check localStorage snapshot for this fileId
+    let localBackup: any = null;
+    try {
+      const raw = localStorage.getItem(`settingkun_backup_${meta.id}`);
+      if (raw) localBackup = JSON.parse(raw);
+    } catch { }
+
+    let backgroundUrl = sess?.extractedData?.backgroundUrl || localBackup?.backgroundUrl || '';
     let iconsRegionUrl = sess?.extractedData?.iconsRegionUrl || '';
     let extractedIcons = sess?.extractedData?.extractedIcons || [];
-    let pageImageUrl = sess?.fileData?.image_url || '';
+    let pageImageUrl = sess?.fileData?.image_url || localBackup?.pageImageUrl || '';
     let selectedRegions = sess?.selectedRegions || [];
     let iconLabels = sess?.iconLabels || {};
+
+    // If selectedRegions is empty but localBackup has backgroundCrop, reconstruct background region
+    if (selectedRegions.length === 0 && localBackup?.backgroundCrop) {
+      selectedRegions = [{ type: 'background', crop: localBackup.backgroundCrop }];
+    }
+
+    // Fallback: If pageImageUrl is missing, fallback to backgroundUrl
+    if (!pageImageUrl && backgroundUrl) {
+      pageImageUrl = backgroundUrl;
+    }
 
     // If backgroundUrl is missing, attempt to probe backend static files
     if (!backgroundUrl) {
@@ -208,7 +225,7 @@ function App() {
 
     setFileData({
       file_id: meta.id,
-      image_url: pageImageUrl,
+      image_url: pageImageUrl || backgroundUrl,
       width: sess?.fileData?.width || 1200,
       height: sess?.fileData?.height || 800,
     });
@@ -251,8 +268,17 @@ function App() {
   };
 
 
-  const handleUploadSuccess = (data: { file_id: string; image_url: string; width: number; height: number }) => {
-    setFileData(data);
+  const handleUploadSuccess = async (data: { file_id: string; image_url: string; width: number; height: number }) => {
+    let permanentImageUrl = data.image_url;
+    try {
+      permanentImageUrl = await urlToDataUrl(data.image_url);
+    } catch (e) {
+      console.warn('Failed to convert page image to data URL:', e);
+    }
+    setFileData({
+      ...data,
+      image_url: permanentImageUrl,
+    });
     setCurrentPhase(2);
   };
 
@@ -302,8 +328,12 @@ function App() {
               url: await urlToDataUrl(ic.url),
             }))
           );
+          const pageImageDataUrl = await urlToDataUrl(fileData.image_url);
           const newSession: SavedSession = {
-            fileData: fileData,
+            fileData: {
+              ...fileData,
+              image_url: pageImageDataUrl,
+            },
             extractedData: {
               backgroundUrl: bgDataUrl,
               iconsRegionUrl: iconsRegionDataUrl,
