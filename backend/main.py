@@ -995,7 +995,10 @@ async def export_pdf(req: ExportPdfRequest):
                         image_bytes = base64.b64decode(img_data.split(",")[1])
                     else:
                         image_bytes = base64.b64decode(img_data)
-                    page.insert_image(page.rect, stream=image_bytes)
+                    # When a PDF page has rotation (/Rotate 90, 180, 270), PyMuPDF expects coordinates in the unrotated
+                    # cropbox space and needs the rotate parameter set to page.rotation so the inserted overlay matches the
+                    # rendered view orientation without being rotated independently.
+                    page.insert_image(page.cropbox, stream=image_bytes, rotate=page.rotation)
         else:
             # Reconstruct PDF pages directly from images
             doc = fitz.open()
