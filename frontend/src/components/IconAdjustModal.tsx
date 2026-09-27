@@ -3,6 +3,7 @@ import type { ExtractedIcon } from '../App';
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Circle, Line, Label, Tag, Text } from 'react-konva';
 import useImage from 'use-image';
 import Konva from 'konva';
+import { urlToDataUrl } from '../utils/indexedDb';
 
 interface Props {
   iconsRegionUrl: string;
@@ -476,11 +477,13 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
       
       const data = await res.json();
       
-      const updatedIcons = data.extracted_icons.map((icon: any) => ({
-        ...icon,
-        label: labels[icon.id] || icon.label || '',
-        url: icon.url
-      }));
+      const updatedIcons = await Promise.all(
+        data.extracted_icons.map(async (icon: any) => ({
+          ...icon,
+          label: labels[icon.id] || icon.label || '',
+          url: await urlToDataUrl(icon.url)
+        }))
+      );
       
       onSave(updatedIcons, labels);
     } catch (err) {

@@ -433,13 +433,30 @@ const CurveItemRenderer: React.FC<{
   size: number;
   color?: string;
   isSelected?: boolean;
+  extractedIcons?: ExtractedIcon[];
   onSelect?: () => void;
-}> = ({ item, x, y, rotation, size, color, isSelected, onSelect }) => {
+}> = ({ item, x, y, rotation, size, color, isSelected, extractedIcons, onSelect }) => {
   const tmpl = TEMPLATE_SHAPES.find(t => t.type === item.type || t.id === item.type || t.id === `tmpl_${item.type}`);
   const isPerc = item.type === 'percussion' || Boolean(item.percussionType) || (tmpl && tmpl.type === 'percussion');
   const percInfo = isPerc ? getPercussionInfo(item.percussionType) : null;
 
   const getUrl = () => {
+    // 1. If custom extracted icon, first prefer data URL from extractedIcons
+    if (item.isCustom && item.iconId && extractedIcons) {
+      const iconDef = extractedIcons.find(ic => ic.id === item.iconId);
+      if (iconDef?.url && iconDef.url.startsWith('data:')) {
+        return iconDef.url;
+      }
+    }
+    // 2. If item.url is a data URL, use it
+    if (item.url && item.url.startsWith('data:')) {
+      return item.url;
+    }
+    // 3. If extractedIcons has any URL, use it
+    if (item.isCustom && item.iconId && extractedIcons) {
+      const iconDef = extractedIcons.find(ic => ic.id === item.iconId);
+      if (iconDef?.url) return iconDef.url;
+    }
     if (item.url) return item.url;
     if (isPerc) {
       return getPercussionDataUrl(item.percussionType || 'ティンパニ', item.color || color);
@@ -584,7 +601,23 @@ const CurveItemRenderer: React.FC<{
       )}
       <Circle
         radius={halfW}
-        fill="#374151"
+        fill="#f8fafc"
+        stroke="#475569"
+        strokeWidth={1.5}
+        listening={false}
+      />
+      <Text
+        text={item.label || 'パーツ'}
+        x={-halfW}
+        y={-6}
+        width={itemW}
+        height={12}
+        fontSize={Math.max(7, Math.min(10, halfW * 0.7))}
+        fontFamily="sans-serif"
+        fontStyle="bold"
+        align="center"
+        verticalAlign="middle"
+        fill="#1e293b"
         listening={false}
       />
     </Group>
@@ -605,6 +638,7 @@ const CurveCanvas: React.FC<{
   bgCenter: { x: number; y: number };
   effectiveCenter: { x: number; y: number };
   onSnapGuideChange?: (guideX: number | null, guideY: number | null) => void;
+  extractedIcons?: ExtractedIcon[];
 }> = ({
   curve,
   isSelected,
@@ -618,6 +652,7 @@ const CurveCanvas: React.FC<{
   bgCenter,
   effectiveCenter,
   onSnapGuideChange,
+  extractedIcons,
 }) => {
   const pts = curve.points;
   const pathData = getBezierPathData(pts);
@@ -704,6 +739,7 @@ const CurveCanvas: React.FC<{
           size={p.item.size || curve.itemSize}
           color={curve.color}
           isSelected={selectedCurveItemId === p.item.id}
+          extractedIcons={extractedIcons}
           onSelect={() => {
             onSelect();
             onSelectCurveItem?.(curve.id, p.item.id);
@@ -1966,6 +2002,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                     setActiveGuideX(gx);
                     setActiveGuideY(gy);
                   }}
+                  extractedIcons={extractedIcons}
                 />
               );
             })}

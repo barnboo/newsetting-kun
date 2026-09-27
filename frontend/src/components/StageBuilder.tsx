@@ -31,6 +31,8 @@ export interface StageSnapshot {
   backgroundCrop?: { x: number; y: number; width: number; height: number } | null;
   pageImageUrl?: string;
   backgroundUrl?: string;
+  iconsRegionUrl?: string;
+  extractedIcons?: ExtractedIcon[];
   iconLabels?: Record<string, string>;
 }
 
@@ -164,6 +166,30 @@ const StageBuilder: React.FC<Props> = ({
       });
       return changed ? next : prev;
     });
+  }, [extractedIcons]);
+
+  // Auto-heal custom curve items if their URL was a stale /static/ URL by applying the working data URL from extractedIcons
+  useEffect(() => {
+    if (extractedIcons && extractedIcons.length > 0) {
+      setCurveObjects(prev => {
+        let changed = false;
+        const next = prev.map(c => {
+          if (!Array.isArray(c.items)) return c;
+          const nextItems = c.items.map(it => {
+            if (it.isCustom && it.iconId) {
+              const def = extractedIcons.find(ic => ic.id === it.iconId);
+              if (def?.url && def.url.startsWith('data:') && it.url !== def.url) {
+                changed = true;
+                return { ...it, url: def.url };
+              }
+            }
+            return it;
+          });
+          return changed ? { ...c, items: nextItems } : c;
+        });
+        return changed ? next : prev;
+      });
+    }
   }, [extractedIcons]);
 
   // Scenes management (Phase 3 scenes logic ported from prototype)
@@ -307,6 +333,8 @@ const StageBuilder: React.FC<Props> = ({
     backgroundCrop: backgroundCrop || initialBackup?.backgroundCrop,
     pageImageUrl: pageImageUrl || initialBackup?.pageImageUrl,
     backgroundUrl: backgroundUrl || initialBackup?.backgroundUrl,
+    iconsRegionUrl: iconsRegionUrl || initialBackup?.iconsRegionUrl,
+    extractedIcons: extractedIcons || initialBackup?.extractedIcons,
     iconLabels: iconLabelsRef.current,
   }));
 

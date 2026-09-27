@@ -10,6 +10,7 @@ import {
   clearSessionFromIndexedDB,
   getAllSessionsFromIndexedDB,
   urlToDataUrl,
+  cropIconFromImage,
   type SavedSession,
 } from './utils/indexedDb';
 
@@ -186,11 +187,43 @@ function App() {
     } catch { }
 
     let backgroundUrl = sess?.extractedData?.backgroundUrl || localBackup?.backgroundUrl || '';
-    let iconsRegionUrl = sess?.extractedData?.iconsRegionUrl || '';
-    let extractedIcons = sess?.extractedData?.extractedIcons || [];
+    let iconsRegionUrl = sess?.extractedData?.iconsRegionUrl || localBackup?.iconsRegionUrl || '';
+    let extractedIcons = sess?.extractedData?.extractedIcons || localBackup?.extractedIcons || [];
     let pageImageUrl = sess?.fileData?.image_url || localBackup?.pageImageUrl || '';
     let selectedRegions = sess?.selectedRegions || [];
     let iconLabels = sess?.iconLabels || localBackup?.iconLabels || {};
+
+    // Auto-heal extractedIcons if their URLs are missing or point to ephemeral /static/ paths
+    if (iconsRegionUrl && extractedIcons.length > 0) {
+      try {
+        const healedIcons = await Promise.all(
+          extractedIcons.map(async (ic: ExtractedIcon) => {
+            if (!ic.url || ic.url.startsWith('/static/')) {
+              try {
+                const healedUrl = await cropIconFromImage(iconsRegionUrl, ic.rect);
+                return { ...ic, url: healedUrl };
+              } catch (err) {
+                console.warn('Failed to auto-heal icon from iconsRegionUrl:', ic.id, err);
+                return ic;
+              }
+            }
+            return ic;
+          })
+        );
+        extractedIcons = healedIcons;
+
+        // Persist healed icons back into local backup so they never revert to /static/
+        if (localBackup) {
+          localBackup.iconsRegionUrl = iconsRegionUrl;
+          localBackup.extractedIcons = extractedIcons;
+          try {
+            localStorage.setItem(`settingkun_backup_${meta.id}`, JSON.stringify(localBackup));
+          } catch {}
+        }
+      } catch (err) {
+        console.warn('Error during auto-healing extracted icons:', err);
+      }
+    }
 
     extractedIcons.forEach((ic: ExtractedIcon, idx: number) => {
       if (!iconLabels[ic.id]) {
@@ -255,11 +288,18 @@ function App() {
     await refreshBackups();
   };
 
-  const handleExportProjectJson = (meta: BackupProjectMeta, e: React.MouseEvent) => {
+  const handleExportProjectJson = async (meta: BackupProjectMeta, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
+      let sess = meta.session || (await loadSessionFromIndexedDB(meta.id));
       const raw = localStorage.getItem(`settingkun_backup_${meta.id}`);
       const data = raw ? JSON.parse(raw) : { projectId: meta.id };
+      if (!data.iconsRegionUrl && sess?.extractedData?.iconsRegionUrl) {
+        data.iconsRegionUrl = sess.extractedData.iconsRegionUrl;
+      }
+      if (!data.extractedIcons && sess?.extractedData?.extractedIcons) {
+        data.extractedIcons = sess.extractedData.extractedIcons;
+      }
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -336,6 +376,11 @@ function App() {
               url: await urlToDataUrl(ic.url),
             }))
           );
+          setExtractedData({
+            backgroundUrl: bgDataUrl,
+            iconsRegionUrl: iconsRegionDataUrl,
+            extractedIcons: iconsWithDataUrls,
+          });
           const pageImageDataUrl = await urlToDataUrl(fileData.image_url);
           const newSession: SavedSession = {
             fileData: {

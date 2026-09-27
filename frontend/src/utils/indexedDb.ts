@@ -69,6 +69,68 @@ export async function urlToDataUrl(url: string): Promise<string> {
 }
 
 /**
+ * Crop an icon directly from an image URL (data URL or regular URL) on an HTML5 canvas.
+ * Produces a transparent PNG Data URL without contacting the server.
+ * Guarantees icon recovery even if server files are wiped on redeployment.
+ */
+export function cropIconFromImage(
+  imageUrl: string,
+  rect: { x: number; y: number; width: number; height: number }
+): Promise<string> {
+  return new Promise((resolve) => {
+    if (!imageUrl) {
+      resolve('');
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const w = Math.max(1, Math.round(rect.width));
+        const h = Math.max(1, Math.round(rect.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve('');
+          return;
+        }
+        ctx.drawImage(
+          img,
+          rect.x,
+          rect.y,
+          rect.width,
+          rect.height,
+          0,
+          0,
+          w,
+          h
+        );
+        // Make white/near-white background transparent
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const data = imgData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240) {
+            data[i + 3] = 0;
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (err) {
+        console.warn('cropIconFromImage canvas error:', err);
+        resolve('');
+      }
+    };
+    img.onerror = (err) => {
+      console.warn('cropIconFromImage load error:', err);
+      resolve('');
+    };
+    img.src = imageUrl;
+  });
+}
+
+/**
  * Save session to IndexedDB, keyed by project file_id for strict project separation
  */
 export async function saveSessionToIndexedDB(session: SavedSession): Promise<void> {
