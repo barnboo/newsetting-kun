@@ -340,6 +340,14 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   editingNodeIdRef.current = editingNodeId;
   const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Undo / Redo history state
+  const historyRef = useRef<Record<string, OverlayNode[]>[]>([]);
+  const redoStackRef = useRef<Record<string, OverlayNode[]>[]>([]);
+  const isRestoringRef = useRef(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const textPreEditMapRef = useRef<Record<string, OverlayNode[]> | null>(null);
+
   // Focus inline textarea on editing start
   useEffect(() => {
     if (editingNodeId && inlineTextareaRef.current) {
@@ -600,7 +608,64 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   const activeSceneId = activeScene.sceneId;
   const currentNodes = sceneNodesMap[activeSceneId] || [];
 
+  const pushHistory = (newMap: Record<string, OverlayNode[]>) => {
+    if (isRestoringRef.current) return;
+    historyRef.current = [...historyRef.current.slice(-50), JSON.parse(JSON.stringify(sceneNodesMap))];
+    redoStackRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+    setSceneNodesMap(newMap);
+  };
+
+  const handleUndo = () => {
+    if (historyRef.current.length === 0) return;
+    isRestoringRef.current = true;
+    redoStackRef.current = [JSON.parse(JSON.stringify(sceneNodesMap)), ...redoStackRef.current];
+    const prev = historyRef.current[historyRef.current.length - 1];
+    historyRef.current = historyRef.current.slice(0, -1);
+    setSceneNodesMap(prev);
+    if (selectedId) {
+      const exists = Object.values(prev).some(list => list.some(n => n.id === selectedId));
+      if (!exists) setSelectedId(null);
+    }
+    setCanUndo(historyRef.current.length > 0);
+    setCanRedo(true);
+    requestAnimationFrame(() => { isRestoringRef.current = false; });
+  };
+
+  const handleRedo = () => {
+    if (redoStackRef.current.length === 0) return;
+    isRestoringRef.current = true;
+    historyRef.current = [...historyRef.current, JSON.parse(JSON.stringify(sceneNodesMap))];
+    const next = redoStackRef.current[0];
+    redoStackRef.current = redoStackRef.current.slice(1);
+    setSceneNodesMap(next);
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+    requestAnimationFrame(() => { isRestoringRef.current = false; });
+  };
+
+  const handleStartTextEdit = () => {
+    if (!textPreEditMapRef.current) {
+      textPreEditMapRef.current = JSON.parse(JSON.stringify(sceneNodesMap));
+    }
+  };
+
+  const handleCommitTextEdit = () => {
+    if (textPreEditMapRef.current) {
+      const isDifferent = JSON.stringify(textPreEditMapRef.current) !== JSON.stringify(sceneNodesMap);
+      if (isDifferent) {
+        historyRef.current = [...historyRef.current.slice(-50), textPreEditMapRef.current];
+        redoStackRef.current = [];
+        setCanUndo(true);
+        setCanRedo(false);
+      }
+      textPreEditMapRef.current = null;
+    }
+  };
+
   const handleUpdateNodeText = (sceneId: string, nodeId: string, newText: string) => {
+    handleStartTextEdit();
     setSceneNodesMap(prev => ({
       ...prev,
       [sceneId]: (prev[sceneId] || []).map(t =>
@@ -611,63 +676,64 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
   const handleAddText = (defaultText = '新規テキスト', x = 300, y = 150, fontSize = 22, startEditing = false) => {
     const newId = `text_${Date.now()}`;
-    setSceneNodesMap(prev => ({
-      ...prev,
-      [activeSceneId]: [
-        ...(prev[activeSceneId] || []),
-        {
-          id: newId,
-          type: 'text',
-          text: defaultText,
-          x,
-          y,
-          fontSize,
-          radius: 15,
-        },
-      ],
-    }));
+    const nextNodes = [
+      ...(sceneNodesMap[activeSceneId] || []),
+      {
+        id: newId,
+        type: 'text' as const,
+        text: defaultText,
+        x,
+        y,
+        fontSize,
+        radius: 15,
+      },
+    ];
+    pushHistory({
+      ...sceneNodesMap,
+      [activeSceneId]: nextNodes,
+    });
     setSelectedId(newId);
     if (startEditing) {
+      handleStartTextEdit();
       setEditingNodeId(newId);
     }
   };
 
   const handleAddCircle = () => {
     const newId = `circle_${Date.now()}`;
-    setSceneNodesMap(prev => ({
-      ...prev,
-      [activeSceneId]: [
-        ...(prev[activeSceneId] || []),
-        {
-          id: newId,
-          type: 'circle',
-          text: '',
-          x: 300,
-          y: 150,
-          fontSize: 22,
-          radius: 15,
-        },
-      ],
-    }));
+    const nextNodes = [
+      ...(sceneNodesMap[activeSceneId] || []),
+      {
+        id: newId,
+        type: 'circle' as const,
+        text: '',
+        x: 300,
+        y: 150,
+        fontSize: 22,
+        radius: 15,
+      },
+    ];
+    pushHistory({
+      ...sceneNodesMap,
+      [activeSceneId]: nextNodes,
+    });
     setSelectedId(newId);
   };
 
   const handleDeleteSelected = () => {
     const targetId = selectedIdRef.current || selectedId;
     if (targetId) {
-      setSceneNodesMap(prev => {
-        const next: Record<string, OverlayNode[]> = {};
-        for (const [sId, nodes] of Object.entries(prev)) {
-          next[sId] = nodes.filter(t => t.id !== targetId);
-        }
-        return next;
-      });
+      const next: Record<string, OverlayNode[]> = {};
+      for (const [sId, nodes] of Object.entries(sceneNodesMap)) {
+        next[sId] = nodes.filter(t => t.id !== targetId);
+      }
+      pushHistory(next);
       setSelectedId(null);
       setEditingNodeId(null);
     }
   };
 
-  // Keyboard shortcut: Backspace / Delete to remove selected node (unless typing in input/textarea)
+  // Keyboard shortcut: Backspace / Delete, Undo / Redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
@@ -679,7 +745,25 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         activeEl?.tagName === 'TEXTAREA' ||
         (activeEl as HTMLElement)?.isContentEditable;
 
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+
+      // When inside an input/textarea, let the browser handle typing/internal undo
       if (isInput) return;
+
+      if (isCmdOrCtrl) {
+        // Undo: Ctrl/Cmd + Z
+        if ((e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+          e.preventDefault();
+          handleUndo();
+          return;
+        }
+        // Redo: Ctrl/Cmd + Shift + Z  OR  Ctrl/Cmd + Y
+        if (((e.key === 'z' || e.key === 'Z') && e.shiftKey) || e.key === 'y' || e.key === 'Y') {
+          e.preventDefault();
+          handleRedo();
+          return;
+        }
+      }
 
       if (e.key === 'Backspace' || e.key === 'Delete') {
         const curSelectedId = selectedIdRef.current;
@@ -699,10 +783,11 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [sceneNodesMap, canUndo, canRedo]);
 
   const handleUpdateSelectedText = (newText: string) => {
     if (!selectedId) return;
+    handleStartTextEdit();
 
     // If updating the organization name (text_org), sync across all scenes
     if (selectedId === 'text_org') {
@@ -726,29 +811,32 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
   const handleUpdateSelectedFontSize = (fontSize: number) => {
     if (!selectedId) return;
-    setSceneNodesMap(prev => ({
-      ...prev,
-      [activeSceneId]: (prev[activeSceneId] || []).map(t =>
+    pushHistory({
+      ...sceneNodesMap,
+      [activeSceneId]: (sceneNodesMap[activeSceneId] || []).map(t =>
         t.id === selectedId ? { ...t, fontSize } : t
       ),
-    }));
+    });
   };
 
   const handleUpdateSelectedRadius = (radius: number) => {
     if (!selectedId) return;
-    setSceneNodesMap(prev => ({
-      ...prev,
-      [activeSceneId]: (prev[activeSceneId] || []).map(t =>
+    pushHistory({
+      ...sceneNodesMap,
+      [activeSceneId]: (sceneNodesMap[activeSceneId] || []).map(t =>
         t.id === selectedId ? { ...t, radius } : t
       ),
-    }));
+    });
   };
 
   const handleUpdateNodePos = (sId: string, id: string, x: number, y: number) => {
-    setSceneNodesMap(prev => ({
-      ...prev,
-      [sId]: (prev[sId] || []).map(t => (t.id === id ? { ...t, x, y } : t)),
-    }));
+    const current = sceneNodesMap[sId]?.find(t => t.id === id);
+    if (current && (current.x !== x || current.y !== y)) {
+      pushHistory({
+        ...sceneNodesMap,
+        [sId]: (sceneNodesMap[sId] || []).map(t => (t.id === id ? { ...t, x, y } : t)),
+      });
+    }
   };
 
   const handleExport = () => {
@@ -844,6 +932,38 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
         {/* Right: Controls & Actions */}
         <div className="flex items-center gap-2 shrink-0 flex-nowrap">
+          {/* Undo / Redo Buttons */}
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={!canUndo}
+              className={`p-1.5 rounded transition-colors ${
+                canUndo
+                  ? 'text-slate-700 hover:bg-white hover:text-slate-900 cursor-pointer'
+                  : 'text-slate-300 cursor-not-allowed'
+              }`}
+              title={`元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
+            >
+              ↩️
+            </button>
+            <button
+              type="button"
+              onClick={handleRedo}
+              disabled={!canRedo}
+              className={`p-1.5 rounded transition-colors ${
+                canRedo
+                  ? 'text-slate-700 hover:bg-white hover:text-slate-900 cursor-pointer'
+                  : 'text-slate-300 cursor-not-allowed'
+              }`}
+              title="やり直し (Ctrl+Y / Ctrl+Shift+Z)"
+            >
+              ↪️
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block" />
+
           {/* View Controls: Fit Mode Switcher */}
           <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
             <button
@@ -1093,13 +1213,19 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                       <textarea
                         ref={inlineTextareaRef}
                         value={editingNode.text}
+                        onFocus={handleStartTextEdit}
                         onChange={(e) => handleUpdateNodeText(sc.sceneId, editingNode.id, e.target.value)}
-                        onBlur={() => setEditingNodeId(null)}
+                        onBlur={() => {
+                          handleCommitTextEdit();
+                          setEditingNodeId(null);
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
+                            handleCommitTextEdit();
                             setEditingNodeId(null);
                           } else if (e.key === 'Escape') {
+                            handleCommitTextEdit();
                             setEditingNodeId(null);
                           }
                         }}
@@ -1192,7 +1318,15 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                       <input
                         type="text"
                         value={selectedNode.text}
+                        onFocus={handleStartTextEdit}
                         onChange={(e) => handleUpdateSelectedText(e.target.value)}
+                        onBlur={handleCommitTextEdit}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleCommitTextEdit();
+                            (e.target as HTMLElement).blur();
+                          }
+                        }}
                         className="w-full bg-white border border-blue-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:ring-2 focus:ring-blue-400 focus:outline-none shadow-2xs"
                         placeholder="文字を入力..."
                       />

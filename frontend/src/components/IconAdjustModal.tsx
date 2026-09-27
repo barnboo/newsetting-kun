@@ -19,8 +19,21 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [newRect, setNewRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [newRect, setNewRect] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Zoom state (matching StageBuilder)
+  const [zoomMultiplier, setZoomMultiplier] = useState(1.0);
+  const handleZoomIn = () => setZoomMultiplier(prev => Math.min(Number((prev + 0.15).toFixed(2)), 3.0));
+  const handleZoomOut = () => setZoomMultiplier(prev => Math.max(Number((prev - 0.15).toFixed(2)), 0.4));
+  const handleZoomReset = () => setZoomMultiplier(1.0);
+
+  // Undo / Redo history state
+  const historyRef = useRef<ExtractedIcon[][]>([]);
+  const redoStackRef = useRef<ExtractedIcon[][]>([]);
+  const isRestoringRef = useRef(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
@@ -28,6 +41,10 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   useEffect(() => {
     // Deep copy to avoid mutating props directly
     setRects(JSON.parse(JSON.stringify(extractedIcons)));
+    historyRef.current = [];
+    redoStackRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
   }, [extractedIcons]);
 
   useEffect(() => {
@@ -42,7 +59,75 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     }
   }, [selectedId]);
 
-  // Handle Delete / Backspace key to remove selected box
+  // Determine stage dimensions based on window size and image aspect ratio
+  // Deduct 280px for the right-hand parts list panel
+  let baseStageWidth = Math.max(400, window.innerWidth * 0.85 - 280);
+  let baseStageHeight = window.innerHeight * 0.72;
+  let baseScale = 1;
+
+  if (image) {
+    const scaleX = baseStageWidth / image.width;
+    const scaleY = baseStageHeight / image.height;
+    baseScale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
+  }
+
+  const effectiveScale = baseScale * zoomMultiplier;
+  const stageWidth = image ? image.width * effectiveScale : baseStageWidth;
+  const stageHeight = image ? image.height * effectiveScale : baseStageHeight;
+
+  // History push helper
+  const pushHistory = (newRects: ExtractedIcon[]) => {
+    if (isRestoringRef.current) return;
+    historyRef.current = [...historyRef.current.slice(-50), JSON.parse(JSON.stringify(rects))];
+    redoStackRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+    setRects(newRects);
+  };
+
+  const handleUndo = () => {
+    if (historyRef.current.length === 0) return;
+    isRestoringRef.current = true;
+    redoStackRef.current = [JSON.parse(JSON.stringify(rects)), ...redoStackRef.current];
+    const prev = historyRef.current[historyRef.current.length - 1];
+    historyRef.current = historyRef.current.slice(0, -1);
+    setRects(prev);
+    if (selectedId && !prev.some(r => r.id === selectedId)) {
+      setSelectedId(null);
+    }
+    setCanUndo(historyRef.current.length > 0);
+    setCanRedo(true);
+    requestAnimationFrame(() => { isRestoringRef.current = false; });
+  };
+
+  const handleRedo = () => {
+    if (redoStackRef.current.length === 0) return;
+    isRestoringRef.current = true;
+    historyRef.current = [...historyRef.current, JSON.parse(JSON.stringify(rects))];
+    const next = redoStackRef.current[0];
+    redoStackRef.current = redoStackRef.current.slice(1);
+    setRects(next);
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+    requestAnimationFrame(() => { isRestoringRef.current = false; });
+  };
+
+  // Mouse wheel zoom (Ctrl/Cmd + wheel)
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        setZoomMultiplier(prev => {
+          const newZoom = e.deltaY < 0 ? prev + 0.15 : prev - 0.15;
+          return Math.min(Math.max(Number(newZoom.toFixed(2)), 0.4), 3.0);
+        });
+      }
+    };
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    return () => window.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  // Keyboard shortcuts: Undo/Redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z), Zoom (+, -, 0), Delete
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
@@ -50,12 +135,45 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
         return;
       }
 
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+
+      if (isCmdOrCtrl) {
+        // Undo: Ctrl/Cmd + Z
+        if ((e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+          e.preventDefault();
+          handleUndo();
+          return;
+        }
+        // Redo: Ctrl/Cmd + Shift + Z  OR  Ctrl/Cmd + Y
+        if (((e.key === 'z' || e.key === 'Z') && e.shiftKey) || e.key === 'y' || e.key === 'Y') {
+          e.preventDefault();
+          handleRedo();
+          return;
+        }
+        // Zoom In: Ctrl/Cmd + +
+        if (e.key === '+' || e.key === '=') {
+          e.preventDefault();
+          handleZoomIn();
+          return;
+        }
+        // Zoom Out: Ctrl/Cmd + -
+        if (e.key === '-') {
+          e.preventDefault();
+          handleZoomOut();
+          return;
+        }
+        // Zoom Reset: Ctrl/Cmd + 0
+        if (e.key === '0') {
+          e.preventDefault();
+          handleZoomReset();
+          return;
+        }
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedId) {
           e.preventDefault();
-          setRects(prev => prev.filter(r => r.id !== selectedId));
-          setSelectedId(null);
-          setHoveredId(null);
+          handleDelete(selectedId);
         }
       }
     };
@@ -64,7 +182,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [selectedId]);
+  }, [selectedId, rects, canUndo, canRedo]);
 
   const handleMouseDown = (e: any) => {
     // If clicked on an empty area, start drawing
@@ -72,9 +190,13 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     
     if (clickedOnEmpty) {
       setSelectedId(null);
-      const pos = e.target.getStage().getPointerPosition();
+      const stage = e.target.getStage();
+      const pos = stage?.getPointerPosition();
+      if (!pos) return;
       setIsDrawing(true);
-      setNewRect({ x: pos.x, y: pos.y, width: 0, height: 0 });
+      const imgX = pos.x / effectiveScale;
+      const imgY = pos.y / effectiveScale;
+      setNewRect({ startX: imgX, startY: imgY, curX: imgX, curY: imgY });
     } else {
       // Clicked on a rect or its transformer
       const id = e.target.id() || e.target.parent?.id();
@@ -85,30 +207,28 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   const handleMouseMove = (e: any) => {
     if (!isDrawing || !newRect) return;
     const stage = e.target.getStage();
-    const point = stage.getPointerPosition();
+    const pos = stage?.getPointerPosition();
+    if (!pos) return;
+    const imgX = pos.x / effectiveScale;
+    const imgY = pos.y / effectiveScale;
     
-    setNewRect({
-      x: newRect.x,
-      y: newRect.y,
-      width: point.x - newRect.x,
-      height: point.y - newRect.y,
-    });
+    setNewRect(prev => prev ? {
+      ...prev,
+      curX: imgX,
+      curY: imgY,
+    } : null);
   };
 
   const handleMouseUp = () => {
     if (isDrawing && newRect) {
-      if (Math.abs(newRect.width) > 5 && Math.abs(newRect.height) > 5) {
-        // Normalize rect (handle negative width/height from dragging left/up)
-        const scale = stageRef.current?.scaleX() || 1;
-        const normalizedRect = {
-          x: (newRect.width < 0 ? newRect.x + newRect.width : newRect.x) / scale,
-          y: (newRect.height < 0 ? newRect.y + newRect.height : newRect.y) / scale,
-          width: Math.abs(newRect.width) / scale,
-          height: Math.abs(newRect.height) / scale,
-        };
-        
+      const x = Math.round(Math.min(newRect.startX, newRect.curX));
+      const y = Math.round(Math.min(newRect.startY, newRect.curY));
+      const width = Math.round(Math.abs(newRect.curX - newRect.startX));
+      const height = Math.round(Math.abs(newRect.curY - newRect.startY));
+
+      if (width > 5 && height > 5) {
         const id = `icon_manual_${Date.now()}`;
-        setRects([...rects, { id, url: '', rect: normalizedRect }]);
+        pushHistory([...rects, { id, url: '', rect: { x, y, width, height } }]);
         setSelectedId(id);
       }
     }
@@ -120,10 +240,13 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     const id = e.target.id();
     const newX = Math.round(e.target.x());
     const newY = Math.round(e.target.y());
-    setRects(prev => prev.map(r => r.id === id ? {
-      ...r,
-      rect: { ...r.rect, x: newX, y: newY }
-    } : r));
+    const target = rects.find(r => r.id === id);
+    if (target && (target.rect.x !== newX || target.rect.y !== newY)) {
+      pushHistory(rects.map(r => r.id === id ? {
+        ...r,
+        rect: { ...r.rect, x: newX, y: newY }
+      } : r));
+    }
   };
 
   const handleTransformEnd = (e: any) => {
@@ -154,19 +277,26 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
       newY -= newHeight;
     }
 
-    setRects(prev => prev.map(r => r.id === id ? {
-      ...r,
-      rect: {
-        x: newX,
-        y: newY,
-        width: newWidth,
-        height: newHeight,
-      }
-    } : r));
+    if (
+      target.rect.x !== newX ||
+      target.rect.y !== newY ||
+      target.rect.width !== newWidth ||
+      target.rect.height !== newHeight
+    ) {
+      pushHistory(rects.map(r => r.id === id ? {
+        ...r,
+        rect: {
+          x: newX,
+          y: newY,
+          width: newWidth,
+          height: newHeight,
+        }
+      } : r));
+    }
   };
 
   const handleDelete = (id: string) => {
-    setRects(prev => prev.filter(r => r.id !== id));
+    pushHistory(rects.filter(r => r.id !== id));
     if (selectedId === id) setSelectedId(null);
     if (hoveredId === id) setHoveredId(null);
   };
@@ -215,62 +345,118 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     }
   };
 
-  // Determine stage dimensions based on window size and image aspect ratio
-  // Deduct 280px for the right-hand parts list panel
-  let stageWidth = Math.max(400, window.innerWidth * 0.85 - 280);
-  let stageHeight = window.innerHeight * 0.72;
-  let scale = 1;
-
-  if (image) {
-    const scaleX = stageWidth / image.width;
-    const scaleY = stageHeight / image.height;
-    scale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
-    stageWidth = image.width * scale;
-    stageHeight = image.height * scale;
-  }
-
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-7xl flex flex-col h-[88vh]">
         
-        <div className="p-4 border-b flex justify-between items-center shrink-0">
-          <div>
-            <h3 className="text-lg font-bold text-gray-800">アイコンの抽出範囲を手動調整</h3>
-            <p className="text-sm text-gray-500 mt-1">
-              枠をドラッグで移動・変形、余白をドラッグで新規作成できます。枠を選択して Delete / Backspace キーまたは中央の [✕] で削除できます。
-            </p>
+        <div className="p-3.5 px-5 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 shrink-0 bg-white">
+          <div className="flex items-center gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <span>⚙️</span>
+                <span>アイコンの抽出範囲を手動調整</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                枠をドラッグで移動・変形、余白をドラッグで新規作成できます。枠を選択して Delete / Backspace または [✕] で削除。
+              </p>
+            </div>
+
+            {/* Undo / Redo & Zoom Controls */}
+            <div className="flex items-center gap-1.5 ml-4 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={!canUndo}
+                className={`p-1.5 rounded transition-colors ${
+                  canUndo
+                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 cursor-pointer'
+                    : 'text-slate-300 cursor-not-allowed'
+                }`}
+                title={`元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
+              >
+                ↩️
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={!canRedo}
+                className={`p-1.5 rounded transition-colors ${
+                  canRedo
+                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 cursor-pointer'
+                    : 'text-slate-300 cursor-not-allowed'
+                }`}
+                title="やり直し (Ctrl+Y / Ctrl+Shift+Z)"
+              >
+                ↪️
+              </button>
+              <div className="h-4 w-px bg-slate-300 mx-0.5" />
+              <button
+                type="button"
+                onClick={handleZoomOut}
+                className="w-7 h-7 flex items-center justify-center hover:bg-white rounded text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
+                title="ズームアウト (Ctrl + -)"
+              >
+                ➖
+              </button>
+              <button
+                type="button"
+                onClick={handleZoomReset}
+                className="px-2 py-0.5 text-xs font-mono font-bold text-slate-800 hover:bg-white rounded transition-colors cursor-pointer select-none min-w-[3.5rem] text-center"
+                title="拡大率を100%にリセット"
+              >
+                {Math.round(zoomMultiplier * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={handleZoomIn}
+                className="w-7 h-7 flex items-center justify-center hover:bg-white rounded text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
+                title="ズームイン (Ctrl + +)"
+              >
+                ➕
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2">
+
+          <div className="flex items-center gap-2">
             <button 
               onClick={onClose}
-              className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer border border-slate-200"
               disabled={isSaving}
             >
               キャンセル
             </button>
             <button 
               onClick={saveAdjustments}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded transition-colors"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
               disabled={isSaving}
             >
-              {isSaving ? '保存中...' : '確定して再切り抜き'}
+              {isSaving ? (
+                <>
+                  <span className="animate-spin text-xs">⏳</span>
+                  <span>保存中...</span>
+                </>
+              ) : (
+                <>
+                  <span>✓ 確定して再切り抜き</span>
+                </>
+              )}
             </button>
           </div>
         </div>
 
         <div className="flex-1 min-h-0 flex overflow-hidden">
           {/* Main Canvas Area */}
-          <div className="flex-1 overflow-auto bg-slate-100 p-4 flex items-center justify-center relative">
+          <div className="flex-1 overflow-auto bg-slate-100 p-6 flex relative">
             {!image ? (
-              <p>画像を読み込み中...</p>
+              <div className="m-auto text-slate-500 font-medium">画像を読み込み中...</div>
             ) : (
-              <div className="relative shadow-lg border border-gray-300 bg-white" style={{ width: stageWidth, height: stageHeight }}>
+              <div className="relative shadow-lg border border-gray-300 bg-white m-auto shrink-0" style={{ width: stageWidth, height: stageHeight }}>
                 <Stage 
                   ref={stageRef}
                   width={stageWidth} 
                   height={stageHeight}
-                  scaleX={scale}
-                  scaleY={scale}
+                  scaleX={effectiveScale}
+                  scaleY={effectiveScale}
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
@@ -285,7 +471,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                       const isSelected = selectedId === r.id;
                       const isHovered = hoveredId === r.id;
                       // Hide delete button if the box is too small and overlaps heavily with it
-                      const isTooSmall = (r.rect.width * scale < 28) || (r.rect.height * scale < 28);
+                      const isTooSmall = (r.rect.width * effectiveScale < 28) || (r.rect.height * effectiveScale < 28);
                       const showDeleteBtn = (isSelected || isHovered) && !isTooSmall;
                       const name = iconLabels?.[r.id] ?? `パーツ ${idx + 1}`;
 
@@ -308,14 +494,14 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                             width={r.rect.width}
                             height={r.rect.height}
                             stroke={isSelected ? "#3b82f6" : "#22c55e"}
-                            strokeWidth={2 / scale}
+                            strokeWidth={2 / effectiveScale}
                             fill={isSelected ? "rgba(59, 130, 246, 0.2)" : "rgba(34, 197, 94, 0.1)"}
                           />
 
                           {/* Part Name Label Badge (Visual identification) */}
                           <Label
                             x={0}
-                            y={r.rect.y < 20 ? 0 : -18 / scale}
+                            y={r.rect.y < 20 / effectiveScale ? 0 : -18 / effectiveScale}
                             listening={true}
                             onClick={(e) => {
                               e.cancelBubble = true;
@@ -328,7 +514,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                           >
                             <Tag
                               fill={isSelected ? "#2563eb" : isHovered ? "#334155" : "#1e293b"}
-                              cornerRadius={3 / scale}
+                              cornerRadius={3 / effectiveScale}
                               opacity={0.92}
                               shadowColor="black"
                               shadowBlur={2}
@@ -336,10 +522,10 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                             />
                             <Text
                               text={`${idx + 1}. ${name}`}
-                              fontSize={10 / scale}
+                              fontSize={10 / effectiveScale}
                               fontFamily="sans-serif"
                               fontStyle="bold"
-                              padding={3 / scale}
+                              padding={3 / effectiveScale}
                               fill="#ffffff"
                             />
                           </Label>
@@ -367,24 +553,24 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                               }}
                             >
                               <Circle
-                                radius={9 / scale}
+                                radius={9 / effectiveScale}
                                 fill="#ef4444"
                                 stroke="#ffffff"
-                                strokeWidth={1.5 / scale}
+                                strokeWidth={1.5 / effectiveScale}
                                 shadowColor="black"
                                 shadowBlur={3}
                                 shadowOpacity={0.3}
                               />
                               <Line
-                                points={[-4 / scale, -4 / scale, 4 / scale, 4 / scale]}
+                                points={[-4 / effectiveScale, -4 / effectiveScale, 4 / effectiveScale, 4 / effectiveScale]}
                                 stroke="#ffffff"
-                                strokeWidth={1.8 / scale}
+                                strokeWidth={1.8 / effectiveScale}
                                 lineCap="round"
                               />
                               <Line
-                                points={[4 / scale, -4 / scale, -4 / scale, 4 / scale]}
+                                points={[4 / effectiveScale, -4 / effectiveScale, -4 / effectiveScale, 4 / effectiveScale]}
                                 stroke="#ffffff"
-                                strokeWidth={1.8 / scale}
+                                strokeWidth={1.8 / effectiveScale}
                                 lineCap="round"
                               />
                             </Group>
@@ -395,12 +581,12 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                     
                     {isDrawing && newRect && (
                       <Rect
-                        x={(newRect.width < 0 ? newRect.x + newRect.width : newRect.x) / scale}
-                        y={(newRect.height < 0 ? newRect.y + newRect.height : newRect.y) / scale}
-                        width={Math.abs(newRect.width) / scale}
-                        height={Math.abs(newRect.height) / scale}
+                        x={Math.min(newRect.startX, newRect.curX)}
+                        y={Math.min(newRect.startY, newRect.curY)}
+                        width={Math.abs(newRect.curX - newRect.startX)}
+                        height={Math.abs(newRect.curY - newRect.startY)}
                         stroke="#3b82f6"
-                        strokeWidth={2 / scale}
+                        strokeWidth={2 / effectiveScale}
                         fill="rgba(59, 130, 246, 0.2)"
                       />
                     )}
