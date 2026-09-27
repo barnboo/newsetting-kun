@@ -629,10 +629,35 @@ function App() {
                 fileId={fileData.file_id}
                 pageImageUrl={fileData.image_url}
                 initialIconLabels={iconLabels}
-                onIconsUpdated={(icons, newLabels) => {
+                onIconsUpdated={async (icons, newLabels) => {
                   setExtractedData(prev => prev ? { ...prev, extractedIcons: icons } : null);
                   if (newLabels) {
                     setIconLabels(prev => ({ ...prev, ...newLabels }));
+                  }
+                  if (fileData?.file_id) {
+                    try {
+                      const sess = await loadSessionFromIndexedDB(fileData.file_id);
+                      if (sess) {
+                        const iconsWithDataUrls = await Promise.all(
+                          icons.map(async (ic) => ({
+                            ...ic,
+                            url: ic.url.startsWith('data:') ? ic.url : await urlToDataUrl(ic.url),
+                          }))
+                        );
+                        await saveSessionToIndexedDB({
+                          ...sess,
+                          extractedData: {
+                            backgroundUrl: sess.extractedData?.backgroundUrl || '',
+                            iconsRegionUrl: sess.extractedData?.iconsRegionUrl || '',
+                            extractedIcons: iconsWithDataUrls,
+                          },
+                          iconLabels: newLabels ? { ...sess.iconLabels, ...newLabels } : sess.iconLabels,
+                          updatedAt: Date.now(),
+                        });
+                      }
+                    } catch (e) {
+                      console.warn('Failed to update session in IndexedDB:', e);
+                    }
                   }
                 }}
                 onBack={handleBackToHome}

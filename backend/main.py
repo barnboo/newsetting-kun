@@ -480,46 +480,88 @@ async def extract_regions(req: ExtractRequest):
 async def crop_icons(req: CropIconsRequest):
     try:
         import time
+        import io
+        import base64
         cache_buster = str(int(time.time()))
         
-        # Load the base image (use the exact image the user saw in the modal)
-        filename = os.path.basename(req.icons_region_url)
-        base_img_path = os.path.join(STATIC_DIR, filename)
-        if not os.path.exists(base_img_path):
-            fallback = filename.replace("_icons_region_", "_icons_region_notext_")
-            base_img_path = os.path.join(STATIC_DIR, fallback)
-        if not os.path.exists(base_img_path):
+        img = None
+        # Case 1: Base64 data URL (e.g. from IndexedDB session)
+        if req.icons_region_url.startswith("data:image/"):
+            try:
+                header, encoded = req.icons_region_url.split(",", 1)
+                img_bytes = base64.b64decode(encoded)
+                img = Image.open(io.BytesIO(img_bytes))
+                # Persist to STATIC_DIR for future reference
+                saved_base_filename = f"{req.file_id}_icons_region_{cache_buster}.png"
+                img.save(os.path.join(STATIC_DIR, saved_base_filename))
+            except Exception as e:
+                print("Failed to decode base64 icons_region_url:", e)
+
+        # Case 2: File URL or path
+        if img is None:
+            clean_url = req.icons_region_url.split("?")[0]
+            filename = os.path.basename(clean_url)
+            base_img_path = os.path.join(STATIC_DIR, filename)
+            if not os.path.exists(base_img_path):
+                fallback = filename.replace("_icons_region_", "_icons_region_notext_")
+                base_img_path = os.path.join(STATIC_DIR, fallback)
+            
+            # Case 3: Search STATIC_DIR for any icons_region matching this file_id
+            if not os.path.exists(base_img_path) and req.file_id:
+                candidates = [
+                    f for f in os.listdir(STATIC_DIR)
+                    if f.startswith(f"{req.file_id}_icons_region") and f.endswith(".png")
+                ]
+                if candidates:
+                    candidates.sort(reverse=True)
+                    base_img_path = os.path.join(STATIC_DIR, candidates[0])
+
+            if os.path.exists(base_img_path):
+                img = Image.open(base_img_path)
+
+        if img is None:
             raise HTTPException(status_code=404, detail="Base image not found")
+
+        # Ensure image is in RGB or RGBA mode
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA")
             
         extracted_icons = []
-        with Image.open(base_img_path) as img:
-            for i, r in enumerate(req.rects):
-                icon_filename = f"{req.file_id}_icon_adj_{i}_{cache_buster}.png"
-                icon_path = os.path.join(STATIC_DIR, icon_filename)
-                
-                # Crop and save
-                cropped = img.crop((r.x, r.y, r.x + r.width, r.y + r.height))
-                cropped.save(icon_path)
-                make_white_transparent(icon_path)
-                
-                label = getattr(r, 'label', '') or ''
-                extracted_icons.append({
-                    "id": r.id,
-                    "url": f"/static/{icon_filename}",
-                    "label": label,
-                    "rect": {
-                        "x": r.x,
-                        "y": r.y,
-                        "width": r.width,
-                        "height": r.height
-                    }
-                })
-                
+        for i, r in enumerate(req.rects):
+            icon_filename = f"{req.file_id}_icon_adj_{i}_{cache_buster}.png"
+            icon_path = os.path.join(STATIC_DIR, icon_filename)
+            
+            # Clamp crop bounds to valid image dimensions
+            rx = max(0, min(int(round(r.x)), img.width - 1))
+            ry = max(0, min(int(round(r.y)), img.height - 1))
+            rw = max(1, min(int(round(r.width)), img.width - rx))
+            rh = max(1, min(int(round(r.height)), img.height - ry))
+
+            # Crop and save
+            cropped = img.crop((rx, ry, rx + rw, ry + rh))
+            cropped.save(icon_path)
+            make_white_transparent(icon_path)
+            
+            label = getattr(r, 'label', '') or ''
+            extracted_icons.append({
+                "id": r.id,
+                "url": f"/static/{icon_filename}",
+                "label": label,
+                "rect": {
+                    "x": rx,
+                    "y": ry,
+                    "width": rw,
+                    "height": rh
+                }
+            })
+            
         icon_labels = {icon["id"]: icon["label"] for icon in extracted_icons if icon.get("label")}
         return {
             "extracted_icons": extracted_icons,
             "icon_labels": icon_labels
         }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()

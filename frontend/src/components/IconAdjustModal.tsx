@@ -468,7 +468,11 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error('Failed to save adjustments');
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('crop-icons failed:', res.status, errText);
+        throw new Error(`Failed to save adjustments: ${res.status}`);
+      }
       
       const data = await res.json();
       
