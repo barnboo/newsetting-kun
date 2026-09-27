@@ -31,6 +31,7 @@ export interface StageSnapshot {
   backgroundCrop?: { x: number; y: number; width: number; height: number } | null;
   pageImageUrl?: string;
   backgroundUrl?: string;
+  iconLabels?: Record<string, string>;
 }
 
 interface Props {
@@ -41,7 +42,7 @@ interface Props {
   fileId: string | null;
   pageImageUrl: string;
   initialIconLabels?: Record<string, string>;
-  onIconsUpdated: (icons: ExtractedIcon[]) => void;
+  onIconsUpdated: (icons: ExtractedIcon[], newLabels?: Record<string, string>) => void;
   onBack: () => void;
   onPhaseChange?: (phase: 3 | 4) => void;
 }
@@ -133,21 +134,30 @@ const StageBuilder: React.FC<Props> = ({
 
   const [paletteTab, setPaletteTab] = useState<PaletteTab>('pdf');
   const [iconLabels, setIconLabels] = useState<Record<string, string>>(() => {
-    const merged: Record<string, string> = { ...(initialIconLabels ?? {}) };
-    extractedIcons.forEach(ic => {
-      if (ic.label && !merged[ic.id]) {
-        merged[ic.id] = ic.label;
+    const merged: Record<string, string> = {
+      ...(initialBackup?.iconLabels ?? {}),
+      ...(initialIconLabels ?? {})
+    };
+    extractedIcons.forEach((ic, idx) => {
+      if (!merged[ic.id]) {
+        merged[ic.id] = ic.label || `パーツ ${idx + 1}`;
       }
     });
     return merged;
   });
 
+  const iconLabelsRef = useRef(iconLabels);
+  iconLabelsRef.current = iconLabels;
+
   useEffect(() => {
     setIconLabels(prev => {
       const next = { ...prev };
       let changed = false;
-      extractedIcons.forEach(ic => {
-        if (ic.label && !next[ic.id]) {
+      extractedIcons.forEach((ic, idx) => {
+        if (!next[ic.id]) {
+          next[ic.id] = ic.label || `パーツ ${idx + 1}`;
+          changed = true;
+        } else if (ic.label && ic.label !== next[ic.id]) {
           next[ic.id] = ic.label;
           changed = true;
         }
@@ -297,6 +307,7 @@ const StageBuilder: React.FC<Props> = ({
     backgroundCrop: backgroundCrop || initialBackup?.backgroundCrop,
     pageImageUrl: pageImageUrl || initialBackup?.pageImageUrl,
     backgroundUrl: backgroundUrl || initialBackup?.backgroundUrl,
+    iconLabels: iconLabelsRef.current,
   }));
 
   const handleBack = () => {
@@ -323,6 +334,10 @@ const StageBuilder: React.FC<Props> = ({
     setCurrentSceneId(safeSnap.currentSceneId);
     setPlacedItems(safeSnap.placedItems);
     setCurveObjects(safeSnap.curveObjects);
+    if (safeSnap.iconLabels) {
+      setIconLabels(prev => ({ ...prev, ...safeSnap.iconLabels }));
+      iconLabelsRef.current = { ...iconLabelsRef.current, ...safeSnap.iconLabels };
+    }
     setSnapSettings(prev => ({
       ...prev,
       ...safeSnap.snapSettings,
@@ -730,7 +745,12 @@ const StageBuilder: React.FC<Props> = ({
   // ─── Label & Tally Handlers ─────────────────────────────────────────────────
 
   const handleUpdateLabel = (iconId: string, label: string) => {
-    setIconLabels(prev => ({ ...prev, [iconId]: label }));
+    setIconLabels(prev => {
+      const next = { ...prev, [iconId]: label };
+      iconLabelsRef.current = next;
+      saveBackup({ ...buildSnapshot(), iconLabels: next });
+      return next;
+    });
   };
 
   // Compute tallies: merge placed items + curve items
@@ -781,9 +801,9 @@ const StageBuilder: React.FC<Props> = ({
     }
 
     // Build tallies from extracted icons
-    const iconTallies = extractedIcons.map((icon, idx) => ({
+    const iconTallies = extractedIcons.map((icon) => ({
       icon_id: icon.id,
-      label: iconLabels[icon.id] ?? `パーツ ${idx + 1}`,
+      label: iconLabels[icon.id] || icon.label || 'パーツ',
       count: counts[icon.id] || 0,
       source: 'pdf' as const,
     }));
@@ -1346,7 +1366,7 @@ const StageBuilder: React.FC<Props> = ({
               {extractedIcons.length === 0 ? (
                 <p className="text-xs text-slate-400 w-full text-center">PDFから切り出されたアイコンがありません</p>
               ) : (
-                extractedIcons.map((icon, idx) => (
+                extractedIcons.map((icon) => (
                   <div
                     key={icon.id}
                     draggable={!selectedCurveId}
@@ -1357,7 +1377,7 @@ const StageBuilder: React.FC<Props> = ({
                         ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500' : 'bg-purple-50/60 hover:bg-purple-100/90 border border-purple-300 hover:border-purple-400')
                         : (isDarkMode ? 'bg-slate-700/80 hover:bg-slate-700 border border-slate-600 cursor-grab active:cursor-grabbing' : 'bg-white hover:bg-blue-50/80 border border-slate-200 cursor-grab active:cursor-grabbing')
                     }`}
-                    title={selectedCurveId ? `「${iconLabels[icon.id] ?? `パーツ ${idx + 1}`}」をベジェ曲線に追加` : (iconLabels[icon.id] ?? `パーツ ${idx + 1}`)}
+                    title={selectedCurveId ? `「${iconLabels[icon.id] || icon.label || 'パーツ'}」をベジェ曲線に追加` : (iconLabels[icon.id] || icon.label || 'パーツ')}
                   >
                     {selectedCurveId && (
                       <span className="absolute -top-1.5 right-0.5 bg-purple-600 text-white text-[8px] font-bold px-1 rounded-full shadow-2xs">
@@ -1372,7 +1392,7 @@ const StageBuilder: React.FC<Props> = ({
                         ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
                         : (isDarkMode ? 'text-slate-300 group-hover:text-blue-400' : 'text-slate-600 group-hover:text-blue-700')
                     }`}>
-                      {iconLabels[icon.id] ?? `パーツ ${idx + 1}`}
+                      {iconLabels[icon.id] || icon.label || 'パーツ'}
                     </span>
                   </div>
                 ))
@@ -1411,7 +1431,18 @@ const StageBuilder: React.FC<Props> = ({
           fileId={fileId!}
           iconLabels={iconLabels}
           onClose={() => setIsAdjusting(false)}
-          onSave={newIcons => { onIconsUpdated(newIcons); setIsAdjusting(false); }}
+          onSave={(newIcons, newLabels) => {
+            if (newLabels) {
+              setIconLabels(prev => {
+                const next = { ...prev, ...newLabels };
+                iconLabelsRef.current = next;
+                saveBackup({ ...buildSnapshot(), iconLabels: next });
+                return next;
+              });
+            }
+            onIconsUpdated(newIcons, newLabels);
+            setIsAdjusting(false);
+          }}
         />
       )}
 

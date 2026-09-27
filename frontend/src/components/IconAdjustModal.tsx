@@ -10,12 +10,13 @@ interface Props {
   fileId: string;
   iconLabels?: Record<string, string>;
   onClose: () => void;
-  onSave: (newIcons: ExtractedIcon[]) => void;
+  onSave: (newIcons: ExtractedIcon[], newLabels?: Record<string, string>) => void;
 }
 
 const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, fileId, iconLabels, onClose, onSave }) => {
   const [image] = useImage(iconsRegionUrl);
   const [rects, setRects] = useState<ExtractedIcon[]>([]);
+  const [labels, setLabels] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -37,15 +38,26 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
 
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // Deep copy to avoid mutating props directly
-    setRects(JSON.parse(JSON.stringify(extractedIcons)));
+    const initialLabels: Record<string, string> = { ...(iconLabels || {}) };
+    const initialRects: ExtractedIcon[] = JSON.parse(JSON.stringify(extractedIcons));
+    initialRects.forEach((ic, idx) => {
+      if (!initialLabels[ic.id]) {
+        initialLabels[ic.id] = ic.label || `パーツ ${idx + 1}`;
+      }
+      ic.label = initialLabels[ic.id];
+    });
+    setLabels(initialLabels);
+    setRects(initialRects);
     historyRef.current = [];
     redoStackRef.current = [];
     setCanUndo(false);
     setCanRedo(false);
-  }, [extractedIcons]);
+  }, [extractedIcons, iconLabels]);
 
   useEffect(() => {
     if (selectedId && trRef.current && stageRef.current) {
@@ -60,8 +72,8 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   }, [selectedId]);
 
   // Determine stage dimensions based on window size and image aspect ratio
-  // Deduct 280px for the right-hand parts list panel
-  let baseStageWidth = Math.max(400, window.innerWidth * 0.85 - 280);
+  // Deduct 288px for the right-hand parts list panel
+  let baseStageWidth = Math.max(400, window.innerWidth * 0.85 - 288);
   let baseStageHeight = window.innerHeight * 0.72;
   let baseScale = 1;
 
@@ -92,6 +104,12 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     const prev = historyRef.current[historyRef.current.length - 1];
     historyRef.current = historyRef.current.slice(0, -1);
     setRects(prev);
+    // sync labels from prev
+    const updatedLabels: Record<string, string> = { ...labels };
+    prev.forEach(r => {
+      if (r.label) updatedLabels[r.id] = r.label;
+    });
+    setLabels(updatedLabels);
     if (selectedId && !prev.some(r => r.id === selectedId)) {
       setSelectedId(null);
     }
@@ -107,10 +125,113 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     const next = redoStackRef.current[0];
     redoStackRef.current = redoStackRef.current.slice(1);
     setRects(next);
+    // sync labels from next
+    const updatedLabels: Record<string, string> = { ...labels };
+    next.forEach(r => {
+      if (r.label) updatedLabels[r.id] = r.label;
+    });
+    setLabels(updatedLabels);
     setCanUndo(true);
     setCanRedo(redoStackRef.current.length > 0);
     requestAnimationFrame(() => { isRestoringRef.current = false; });
   };
+
+  const handleRename = (id: string, newName: string) => {
+    setLabels(prev => ({ ...prev, [id]: newName }));
+    setRects(prev => prev.map(r => r.id === id ? { ...r, label: newName } : r));
+  };
+
+  // Middle-click and Space+drag canvas panning
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+
+    let isPanning = false;
+    let startX = 0;
+    let startY = 0;
+    let startScrollLeft = 0;
+    let startScrollTop = 0;
+    let isSpaceDown = false;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        return;
+      }
+      if (e.code === 'Space') {
+        if (!isSpaceDown) {
+          isSpaceDown = true;
+          if (!isPanning) {
+            container.style.cursor = 'grab';
+          }
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        isSpaceDown = false;
+        if (!isPanning) {
+          container.style.cursor = '';
+        }
+      }
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 1 || (e.button === 0 && isSpaceDown)) {
+        isPanning = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        startScrollLeft = container.scrollLeft;
+        startScrollTop = container.scrollTop;
+        container.style.cursor = 'grabbing';
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isPanning) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      container.scrollLeft = startScrollLeft - dx;
+      container.scrollTop = startScrollTop - dy;
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (isPanning) {
+        isPanning = false;
+        container.style.cursor = isSpaceDown ? 'grab' : '';
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    const handleAuxClick = (e: MouseEvent) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    container.addEventListener('mousedown', handleMouseDown, { capture: true });
+    window.addEventListener('mousemove', handleMouseMove, { capture: true });
+    window.addEventListener('mouseup', handleMouseUp, { capture: true });
+    container.addEventListener('auxclick', handleAuxClick);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      container.removeEventListener('mousedown', handleMouseDown, { capture: true });
+      window.removeEventListener('mousemove', handleMouseMove, { capture: true });
+      window.removeEventListener('mouseup', handleMouseUp, { capture: true });
+      container.removeEventListener('auxclick', handleAuxClick);
+    };
+  }, []);
 
   // Mouse wheel zoom (Ctrl/Cmd + wheel)
   useEffect(() => {
@@ -185,6 +306,9 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   }, [selectedId, rects, canUndo, canRedo]);
 
   const handleMouseDown = (e: any) => {
+    // Middle click is handled by container panning
+    if (e.evt && (e.evt.button === 1 || e.evt.buttons === 4)) return;
+
     // If clicked on an empty area, start drawing
     const clickedOnEmpty = e.target === e.target.getStage() || e.target.name() === 'backgroundImage';
     
@@ -219,7 +343,8 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     } : null);
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e?: any) => {
+    if (e?.evt && (e.evt.button === 1 || e.evt.buttons === 4)) return;
     if (isDrawing && newRect) {
       const x = Math.round(Math.min(newRect.startX, newRect.curX));
       const y = Math.round(Math.min(newRect.startY, newRect.curY));
@@ -228,8 +353,24 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
 
       if (width > 5 && height > 5) {
         const id = `icon_manual_${Date.now()}`;
-        pushHistory([...rects, { id, url: '', rect: { x, y, width, height } }]);
+        // Find next part number based on existing "パーツ N" labels so numbers never collide
+        const existingNums = rects.map(r => {
+          const lbl = labels[r.id] || r.label || '';
+          const match = lbl.match(/パーツ\s*(\d+)/);
+          return match ? parseInt(match[1], 10) : 0;
+        });
+        const nextNum = (existingNums.length > 0 ? Math.max(...existingNums, 0) : 0) + 1;
+        const defaultName = `パーツ ${nextNum}`;
+
+        setLabels(prev => ({ ...prev, [id]: defaultName }));
+        pushHistory([...rects, { id, url: '', label: defaultName, rect: { x, y, width, height } }]);
         setSelectedId(id);
+
+        // Auto focus input to let user immediately rename the new part if desired
+        requestAnimationFrame(() => {
+          nameInputRef.current?.focus();
+          nameInputRef.current?.select();
+        });
       }
     }
     setIsDrawing(false);
@@ -312,7 +453,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
           y: Math.round(r.rect.y),
           width: Math.max(5, Math.round(r.rect.width)),
           height: Math.max(5, Math.round(r.rect.height)),
-          label: iconLabels?.[r.id] || r.label || ''
+          label: labels[r.id] || r.label || ''
         }));
 
       const payload = {
@@ -333,10 +474,11 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
       
       const updatedIcons = data.extracted_icons.map((icon: any) => ({
         ...icon,
+        label: labels[icon.id] || icon.label || '',
         url: icon.url
       }));
       
-      onSave(updatedIcons);
+      onSave(updatedIcons, labels);
     } catch (err) {
       console.error(err);
       alert('保存に失敗しました');
@@ -357,7 +499,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                 <span>アイコンの抽出範囲を手動調整</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                枠をドラッグで移動・変形、余白をドラッグで新規作成できます。枠を選択して Delete / Backspace または [✕] で削除。
+                枠をドラッグで移動・変形、余白ドラッグで新規作成。ミドルクリックまたは Space+ドラッグで画面移動。枠を選択して Delete / Backspace または [✕] で削除。
               </p>
             </div>
 
@@ -446,7 +588,10 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
 
         <div className="flex-1 min-h-0 flex overflow-hidden">
           {/* Main Canvas Area */}
-          <div className="flex-1 overflow-auto bg-slate-100 p-6 flex relative">
+          <div 
+            ref={canvasContainerRef}
+            className="flex-1 overflow-auto bg-slate-100 p-6 flex relative select-none"
+          >
             {!image ? (
               <div className="m-auto text-slate-500 font-medium">画像を読み込み中...</div>
             ) : (
@@ -467,13 +612,13 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                       name="backgroundImage" 
                     />
                     
-                    {rects.map((r, idx) => {
+                    {rects.map((r) => {
                       const isSelected = selectedId === r.id;
                       const isHovered = hoveredId === r.id;
                       // Hide delete button if the box is too small and overlaps heavily with it
                       const isTooSmall = (r.rect.width * effectiveScale < 28) || (r.rect.height * effectiveScale < 28);
                       const showDeleteBtn = (isSelected || isHovered) && !isTooSmall;
-                      const name = iconLabels?.[r.id] ?? `パーツ ${idx + 1}`;
+                      const name = labels[r.id] || r.label || 'パーツ';
 
                       return (
                         <Group 
@@ -521,7 +666,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                               shadowOpacity={0.25}
                             />
                             <Text
-                              text={`${idx + 1}. ${name}`}
+                              text={name}
                               fontSize={10 / effectiveScale}
                               fontFamily="sans-serif"
                               fontStyle="bold"
@@ -605,17 +750,52 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
           </div>
 
           {/* Right Sidebar: Parts List */}
-          <div className="w-64 border-l border-slate-200 bg-white flex flex-col shrink-0">
+          <div className="w-72 border-l border-slate-200 bg-white flex flex-col shrink-0">
             <div className="p-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700">パーツ一覧 ({rects.length})</span>
               <span className="text-[10px] text-slate-400">クリックで選択</span>
             </div>
+
+            {/* Selected Part Name Editor */}
+            {selectedId && (() => {
+              const selectedItem = rects.find(r => r.id === selectedId);
+              if (!selectedItem) return null;
+              const currentName = labels[selectedId] || selectedItem.label || '';
+              return (
+                <div className="p-3 bg-blue-50/90 border-b border-blue-200 space-y-1.5 shrink-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-blue-900 flex items-center gap-1">
+                      <span>✏️</span>
+                      <span>パーツ名の編集</span>
+                    </span>
+                    <span className="text-[10px] text-blue-600 font-mono">
+                      {Math.round(selectedItem.rect.width)} × {Math.round(selectedItem.rect.height)} px
+                    </span>
+                  </div>
+                  <input
+                    ref={nameInputRef}
+                    type="text"
+                    value={currentName}
+                    onChange={(e) => handleRename(selectedId, e.target.value)}
+                    placeholder="パーツ名を入力 (例: 指揮台, ホルン)"
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-blue-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-bold text-slate-800 shadow-2xs"
+                  />
+                  <p className="text-[10px] text-blue-700 leading-tight">
+                    ※ ここで変更した名称が配置画面や集計表に反映されます
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Parts List */}
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {rects.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">枠がありません。<br />キャンバスをドラッグして追加できます。</p>
+                <p className="text-xs text-slate-400 text-center py-6">
+                  枠がありません。<br />キャンバスをドラッグして追加できます。
+                </p>
               ) : (
-                rects.map((r, idx) => {
-                  const name = iconLabels?.[r.id] ?? `パーツ ${idx + 1}`;
+                rects.map((r) => {
+                  const name = labels[r.id] || r.label || 'パーツ';
                   const isSelected = selectedId === r.id;
                   return (
                     <div
@@ -623,7 +803,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                       onClick={() => setSelectedId(r.id)}
                       className={`flex items-center justify-between p-2 rounded-lg text-xs cursor-pointer transition-colors ${
                         isSelected
-                          ? 'bg-blue-50 border border-blue-300 text-blue-800 font-bold shadow-2xs'
+                          ? 'bg-blue-50 border border-blue-300 text-blue-900 font-bold shadow-2xs'
                           : 'hover:bg-slate-50 border border-transparent text-slate-700'
                       }`}
                     >
@@ -631,7 +811,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                         <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${
                           isSelected ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
                         }`}>
-                          {idx + 1}
+                          🏷️
                         </span>
                         <div className="flex flex-col truncate">
                           <span className="truncate">{name}</span>

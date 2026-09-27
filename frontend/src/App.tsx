@@ -190,7 +190,14 @@ function App() {
     let extractedIcons = sess?.extractedData?.extractedIcons || [];
     let pageImageUrl = sess?.fileData?.image_url || localBackup?.pageImageUrl || '';
     let selectedRegions = sess?.selectedRegions || [];
-    let iconLabels = sess?.iconLabels || {};
+    let iconLabels = sess?.iconLabels || localBackup?.iconLabels || {};
+
+    extractedIcons.forEach((ic: ExtractedIcon, idx: number) => {
+      if (!iconLabels[ic.id]) {
+        iconLabels[ic.id] = ic.label || `パーツ ${idx + 1}`;
+      }
+      ic.label = iconLabels[ic.id];
+    });
 
     // If selectedRegions is empty but localBackup has backgroundCrop, reconstruct background region
     if (selectedRegions.length === 0 && localBackup?.backgroundCrop) {
@@ -306,10 +313,11 @@ function App() {
       if (data.icon_labels) {
         Object.assign(detectedLabels, data.icon_labels);
       }
-      data.extracted_icons.forEach((ic) => {
-        if (ic.label && !detectedLabels[ic.id]) {
-          detectedLabels[ic.id] = ic.label;
+      data.extracted_icons.forEach((ic, idx) => {
+        if (!detectedLabels[ic.id]) {
+          detectedLabels[ic.id] = ic.label || `パーツ ${idx + 1}`;
         }
+        ic.label = detectedLabels[ic.id];
       });
       setIconLabels(prev => ({ ...detectedLabels, ...prev }));
 
@@ -621,7 +629,12 @@ function App() {
                 fileId={fileData.file_id}
                 pageImageUrl={fileData.image_url}
                 initialIconLabels={iconLabels}
-                onIconsUpdated={(icons) => setExtractedData(prev => prev ? { ...prev, extractedIcons: icons } : null)}
+                onIconsUpdated={(icons, newLabels) => {
+                  setExtractedData(prev => prev ? { ...prev, extractedIcons: icons } : null);
+                  if (newLabels) {
+                    setIconLabels(prev => ({ ...prev, ...newLabels }));
+                  }
+                }}
                 onBack={handleBackToHome}
                 onPhaseChange={(p) => setCurrentPhase(p)}
               />
