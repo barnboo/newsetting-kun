@@ -1,4 +1,4 @@
-import { useState, useEffect, Component, type ErrorInfo, type ReactNode } from 'react';
+import { useState, useEffect, useRef, Component, type ErrorInfo, type ReactNode } from 'react';
 import axios from 'axios';
 import { PdfUploader } from './components/PdfUploader';
 import { RegionSelector } from './components/RegionSelector';
@@ -98,6 +98,7 @@ function App() {
   const [iconLabels, setIconLabels] = useState<Record<string, string>>({});
   const [backupProjects, setBackupProjects] = useState<BackupProjectMeta[]>([]);
   const [storageUsage, setStorageUsage] = useState({ mb: '0.00', percent: 0 });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Refresh and load all project backups and storage usage
   const refreshBackups = async () => {
@@ -294,12 +295,26 @@ function App() {
       let sess = meta.session || (await loadSessionFromIndexedDB(meta.id));
       const raw = localStorage.getItem(`settingkun_backup_${meta.id}`);
       const data = raw ? JSON.parse(raw) : { projectId: meta.id };
+
+      if (!data.backgroundUrl && sess?.extractedData?.backgroundUrl) {
+        data.backgroundUrl = sess.extractedData.backgroundUrl;
+      }
       if (!data.iconsRegionUrl && sess?.extractedData?.iconsRegionUrl) {
         data.iconsRegionUrl = sess.extractedData.iconsRegionUrl;
       }
       if (!data.extractedIcons && sess?.extractedData?.extractedIcons) {
         data.extractedIcons = sess.extractedData.extractedIcons;
       }
+      if (!data.pageImageUrl && sess?.fileData?.image_url) {
+        data.pageImageUrl = sess.fileData.image_url;
+      }
+      if (!data.iconLabels && sess?.iconLabels) {
+        data.iconLabels = sess.iconLabels;
+      }
+      data.version = data.version || '2.0';
+      data.name = data.name || meta.name;
+      data.exportedAt = Date.now();
+
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -311,6 +326,91 @@ function App() {
       URL.revokeObjectURL(url);
     } catch {
       alert('書き出しに失敗しました');
+    }
+  };
+
+  const handleImportProjectJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data.scenes && !data.placedItems && !data.curveObjects) {
+        alert('セッティングくんのプロジェクトデータ形式と一致しませんでした。');
+        return;
+      }
+
+      const projId = data.projectId || `proj_${Date.now()}`;
+      const projName = data.name || file.name.replace(/\.json$/i, '');
+
+      // Auto-heal icons if needed
+      let iconsRegionUrl = data.iconsRegionUrl || '';
+      let extractedIcons = data.extractedIcons || [];
+      if (iconsRegionUrl && extractedIcons.length > 0) {
+        try {
+          const healedIcons = await Promise.all(
+            extractedIcons.map(async (ic: ExtractedIcon) => {
+              if (!ic.url || ic.url.startsWith('/static/')) {
+                try {
+                  const healedUrl = await cropIconFromImage(iconsRegionUrl, ic.rect);
+                  return { ...ic, url: healedUrl };
+                } catch {
+                  return ic;
+                }
+              }
+              return ic;
+            })
+          );
+          extractedIcons = healedIcons;
+          data.extractedIcons = extractedIcons;
+        } catch {}
+      }
+
+      // Save to localStorage
+      try {
+        localStorage.setItem(`settingkun_backup_${projId}`, JSON.stringify(data));
+        localStorage.setItem(`settingkun_backup_${projId}_ts`, (data.savedAt || data.exportedAt || Date.now()).toString());
+      } catch (err) {
+        console.warn('localStorage save warning:', err);
+      }
+
+      // Save to IndexedDB
+      const newSession: SavedSession = {
+        fileData: {
+          file_id: projId,
+          image_url: data.pageImageUrl || data.backgroundUrl || '',
+          width: 1200,
+          height: 800,
+        },
+        extractedData: {
+          backgroundUrl: data.backgroundUrl || '',
+          iconsRegionUrl: data.iconsRegionUrl || '',
+          extractedIcons: extractedIcons,
+        },
+        iconLabels: data.iconLabels || {},
+        selectedRegions: data.backgroundCrop ? [{ type: 'background', crop: data.backgroundCrop }] : [],
+        currentPhase: 3,
+        updatedAt: Date.now(),
+      };
+      await saveSessionToIndexedDB(newSession);
+      await refreshBackups();
+
+      // Immediately resume the imported project
+      await handleResumeProject({
+        id: projId,
+        name: projName,
+        savedAt: data.savedAt || data.exportedAt || Date.now(),
+        sceneCount: data.scenes?.length || 1,
+        session: newSession,
+      });
+    } catch (err) {
+      console.error('Failed to import JSON file:', err);
+      alert('JSONファイルの読み込みに失敗しました。正しいJSONファイルかご確認ください。');
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -567,19 +667,45 @@ function App() {
                     <span className="text-sm">🕒</span>
                     <span>自動バックアップ一覧</span>
                   </div>
-                  {backupProjects.length > 0 && (
-                    <span className="text-[11px] text-slate-400 font-medium">
-                      {backupProjects.length} 件保存中
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800 px-2.5 py-1 rounded-lg transition-colors font-medium flex items-center gap-1.5 cursor-pointer shadow-2xs hover:shadow-xs"
+                      title="パソコンに保存したJSONファイルからプロジェクトを読み込みます"
+                    >
+                      <span>📂</span>
+                      <span>JSONから復元</span>
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      onChange={handleImportProjectJson}
+                    />
+                    {backupProjects.length > 0 && (
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        {backupProjects.length} 件保存中
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Project List */}
                 <div className="max-h-52 overflow-y-auto flex flex-col gap-2 pr-1">
                   {backupProjects.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-2 py-6 text-slate-400 dark:text-slate-500 text-xs">
+                    <div className="flex flex-col items-center justify-center gap-2.5 py-6 text-slate-400 dark:text-slate-500 text-xs">
                       <span className="text-2xl opacity-60">📁</span>
                       <span>バックアップされたデータはありません</span>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="text-xs text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>📂</span>
+                        <span>保存したJSONファイルを開く</span>
+                      </button>
                     </div>
                   ) : (
                     backupProjects.map((proj) => {

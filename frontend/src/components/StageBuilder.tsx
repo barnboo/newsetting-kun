@@ -343,6 +343,39 @@ const StageBuilder: React.FC<Props> = ({
     onBack();
   };
 
+  const handleExportJson = () => {
+    try {
+      const snap = buildSnapshot();
+      saveBackup(snap);
+
+      const d = new Date();
+      const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+      const fileName = `settingkun_${fileId ? fileId.substring(0, 8) : 'project'}_${dateStr}.json`;
+
+      const exportPayload = {
+        version: '2.0',
+        projectId: fileId || 'default',
+        name: `セッティング_${dateStr}`,
+        exportedAt: Date.now(),
+        ...snap,
+      };
+
+      const jsonStr = JSON.stringify(exportPayload, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Failed to export JSON:', e);
+      alert('JSONファイルの書き出しに失敗しました。');
+    }
+  };
+
   // Push current state onto history (called after every meaningful user action)
   const pushHistory = () => {
     if (isRestoringRef.current) return;
@@ -1136,6 +1169,7 @@ const StageBuilder: React.FC<Props> = ({
           onPhaseChange?.(3);
         }}
         onExport={handleExportFinalPdf}
+        onExportJson={handleExportJson}
       />
     );
   }
@@ -1217,9 +1251,22 @@ const StageBuilder: React.FC<Props> = ({
             <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">4. PDF出力</span>
           </div>
           <button
+            type="button"
+            onClick={handleExportJson}
+            className={`px-3 py-2 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1.5 cursor-pointer ${
+              isDarkMode
+                ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-2xs hover:shadow-xs'
+            }`}
+            title="現在の全場面・配置データをJSONファイルとしてダウンロード保存します"
+          >
+            <span>💾</span>
+            <span>JSON保存</span>
+          </button>
+          <button
             onClick={handleGoToExport}
             disabled={isPreparingExport}
-            className={`text-white text-sm font-bold px-5 py-2 rounded-lg shadow-sm hover:shadow transition-all flex items-center gap-2 ml-2 ${
+            className={`text-white text-sm font-bold px-5 py-2 rounded-lg shadow-sm hover:shadow transition-all flex items-center gap-2 ${
               isPreparingExport
                 ? 'bg-blue-400 cursor-not-allowed'
                 : 'bg-blue-600 hover:bg-blue-700'

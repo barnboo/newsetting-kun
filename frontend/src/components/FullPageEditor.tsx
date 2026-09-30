@@ -32,6 +32,7 @@ interface FullPageEditorProps {
   sceneExports?: SceneExportData[];
   onBack: () => void;
   onExport: (fullPageImages: string | string[]) => void;
+  onExportJson?: () => void;
 }
 
 // ─── Single Scene Canvas Component ──────────────────────────────────────────
@@ -290,6 +291,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   sceneExports,
   onBack,
   onExport,
+  onExportJson,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRefs = useRef<Record<string, any>>({});
@@ -1074,6 +1076,18 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           </button>
 
           <div className="h-4 w-px bg-slate-200 mx-1 hidden sm:block" />
+
+          {onExportJson && (
+            <button
+              type="button"
+              onClick={onExportJson}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs hover:shadow-xs transition-colors shrink-0 cursor-pointer"
+              title="現在の全場面・配置データをJSONファイルとしてダウンロード保存します"
+            >
+              <span>💾</span>
+              <span>JSON保存</span>
+            </button>
+          )}
 
           {/* Main Action: Export PDF */}
           <button
