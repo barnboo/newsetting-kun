@@ -19,6 +19,9 @@ interface ItemInspectorProps {
   onDeleteCurve: (id: string) => void;
   onDeleteSelected?: () => void;
   onUpdateAllOfType?: (type: 'stand' | 'pianoChair', style: 'default' | 'xMark' | 'doubleCircle') => void;
+  onTogglePin?: () => void;
+  onMoveOrder?: (direction: 'front' | 'back' | 'forward' | 'backward') => void;
+  onAlign?: (type: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => void;
 }
 
 export const ItemInspector: React.FC<ItemInspectorProps> = ({
@@ -37,6 +40,9 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
   onDeleteCurve,
   onDeleteSelected,
   onUpdateAllOfType,
+  onTogglePin,
+  onMoveOrder,
+  onAlign,
 }) => {
   if (selectedCount > 1) {
     return (
@@ -59,7 +65,133 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
             <div>• <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">矢印キー</kbd>: 微調整移動</div>
           </div>
         </div>
+        {/* Align Controls */}
+        {onAlign && (
+          <div className="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 space-y-2">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">📐 一括整列・均等配置:</span>
+            <div className="grid grid-cols-3 gap-1 text-[11px]">
+              <button
+                type="button"
+                onClick={() => onAlign('left')}
+                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="左揃え"
+              >
+                ⬅ 左揃え
+              </button>
+              <button
+                type="button"
+                onClick={() => onAlign('centerH')}
+                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="水平中央揃え"
+              >
+                ↔ 左右中央
+              </button>
+              <button
+                type="button"
+                onClick={() => onAlign('right')}
+                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="右揃え"
+              >
+                ➡ 右揃え
+              </button>
+              <button
+                type="button"
+                onClick={() => onAlign('top')}
+                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="上揃え"
+              >
+                ⬆ 上揃え
+              </button>
+              <button
+                type="button"
+                onClick={() => onAlign('centerV')}
+                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="垂直中央揃え"
+              >
+                ↕ 上下中央
+              </button>
+              <button
+                type="button"
+                onClick={() => onAlign('bottom')}
+                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="下揃え"
+              >
+                ⬇ 下揃え
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-1 text-[11px] pt-1 border-t border-slate-200 dark:border-slate-600">
+              <button
+                type="button"
+                onClick={() => onAlign('distributeH')}
+                className="py-1 px-1.5 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="水平等間隔に整列"
+              >
+                || 左右等間隔
+              </button>
+              <button
+                type="button"
+                onClick={() => onAlign('distributeV')}
+                className="py-1 px-1.5 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="垂直等間隔に整列"
+              >
+                = 上下等間隔
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Order Controls */}
+        {onMoveOrder && (
+          <div className="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 space-y-1.5">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">層（重なり順）:</span>
+            <div className="grid grid-cols-2 gap-1.5 text-xs">
+              <button
+                type="button"
+                onClick={() => onMoveOrder('forward')}
+                className="py-1.5 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="1段階前面へ"
+              >
+                ▲ 前面へ
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveOrder('backward')}
+                className="py-1.5 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="1段階背面へ"
+              >
+                ▼ 背面へ
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveOrder('front')}
+                className="py-1 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 text-[11px] text-center"
+                title="最前面へ"
+              >
+                ↑ 最前面
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveOrder('back')}
+                className="py-1 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 text-[11px] text-center"
+                title="最背面へ"
+              >
+                ↓ 最背面
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col gap-2 mt-auto">
+          {onTogglePin && (
+            <button
+              type="button"
+              onClick={onTogglePin}
+              className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+            >
+              <span>📌</span>
+              <span>選択オブジェクトを固定/解除 (Ctrl+F)</span>
+            </button>
+          )}
           {onDuplicateSelected && (
             <button
               type="button"
@@ -118,12 +250,25 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors"
       >
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
-          <h3 className="font-semibold text-slate-800 dark:text-slate-100">
-            {TEMPLATE_SHAPES.find(t => t.type === selectedItem.templateType)?.label || 'パーツ'} 設定
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[120px]">
+              {TEMPLATE_SHAPES.find(t => t.type === selectedItem.templateType)?.label || 'パーツ'}
+            </h3>
+            {onTogglePin && (
+              <label className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedItem.isPinned)}
+                  onChange={onTogglePin}
+                  className="rounded text-blue-600 w-3.5 h-3.5"
+                />
+                <span>📌固定</span>
+              </label>
+            )}
+          </div>
           <button
             onClick={() => onDeleteItem(selectedItem.id)}
-            className="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded"
+            className="text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 px-2 py-1 rounded"
           >
             削除
           </button>
@@ -193,6 +338,30 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
             />
           </label>
         </div>
+
+        {onMoveOrder && (
+          <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100 dark:border-slate-700">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">重なり順:</span>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => onMoveOrder('forward')}
+                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-slate-600"
+                title="1段階前面へ"
+              >
+                ▲ 前面へ
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveOrder('backward')}
+                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-slate-600"
+                title="1段階背面へ"
+              >
+                ▼ 背面へ
+              </button>
+            </div>
+          </div>
+        )}
 
         {isStand && (
           <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
@@ -457,9 +626,22 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors"
       >
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
-          <h3 className="font-semibold text-slate-800 dark:text-slate-100">
-            ベジェ曲線 設定
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-800 dark:text-slate-100">
+              ベジェ曲線 設定
+            </h3>
+            {onTogglePin && (
+              <label className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedCurve.isPinned)}
+                  onChange={onTogglePin}
+                  className="rounded text-blue-600 w-3.5 h-3.5"
+                />
+                <span>📌固定</span>
+              </label>
+            )}
+          </div>
           <button
             onClick={() => onDeleteCurve(selectedCurve.id)}
             className="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded cursor-pointer"
@@ -491,6 +673,47 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
             />
           </label>
         </div>
+
+        {/* Order Controls */}
+        {onMoveOrder && (
+          <div className="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 space-y-1.5">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">層（重なり順）:</span>
+            <div className="grid grid-cols-2 gap-1.5 text-xs">
+              <button
+                type="button"
+                onClick={() => onMoveOrder('forward')}
+                className="py-1.5 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="1段階前面へ"
+              >
+                ▲ 前面へ
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveOrder('backward')}
+                className="py-1.5 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                title="1段階背面へ"
+              >
+                ▼ 背面へ
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveOrder('front')}
+                className="py-1 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 text-[11px] text-center"
+                title="最前面へ"
+              >
+                ↑ 最前面
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveOrder('back')}
+                className="py-1 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 text-[11px] text-center"
+                title="最背面へ"
+              >
+                ↓ 最背面
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col gap-3">
           {Array.isArray(selectedCurve.items) ? (() => {

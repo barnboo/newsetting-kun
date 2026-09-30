@@ -145,13 +145,13 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
   const hasValidCrop = Boolean(crop && crop.width && crop.height && crop.width > 0 && crop.height > 0);
 
   return (
-    <div className="flex flex-col items-center w-full max-w-5xl mx-auto">
-      {/* ── Compact Header & Toolbar ── */}
-      <div className="w-full bg-white rounded-xl shadow-xs border border-slate-200 p-3 mb-3">
+    <div className="flex flex-col items-center w-full max-w-5xl mx-auto select-none">
+      {/* ── Compact Header & Toolbar (DADS compliant) ── */}
+      <div className="w-full bg-white rounded-lg shadow-2xs border border-slate-300 p-3 mb-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           
           {/* Step Segmented Buttons */}
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg">
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-md border border-slate-200">
             {MODES.map(m => {
               const isSelected = currentMode === m.type;
               const isSaved = regions.some(r => r.type === m.type);
@@ -167,21 +167,21 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
                   className={`px-3 py-1.5 rounded-md text-xs transition-all flex items-center gap-1.5 cursor-pointer border ${
                     isSelected
                       ? m.activeClass
-                      : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 font-medium'
+                      : 'border-transparent text-slate-700 hover:text-slate-900 hover:bg-slate-200 font-medium'
                   }`}
                 >
-                  <span className={`w-2.5 h-2.5 rounded-full ${m.dotColor}`} />
+                  <span className={`w-2 h-2 rounded-full ${m.dotColor}`} />
                   <span>{m.label}</span>
                   <span
                     className={`text-xs ${
                       isSaved
-                        ? 'text-emerald-600 font-bold'
+                        ? 'text-emerald-700 font-bold'
                         : m.required
-                        ? 'text-rose-500 font-bold text-[10px]'
-                        : 'text-slate-400 text-[10px]'
+                        ? 'text-rose-600 font-bold text-[10px]'
+                        : 'text-slate-500 text-[10px]'
                     }`}
                   >
-                    {isSaved ? '✓' : m.requiredLabel}
+                    {isSaved ? '✓ 確定済' : m.requiredLabel}
                   </span>
                 </button>
               );
@@ -195,7 +195,7 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
                 key="confirm-btn"
                 type="button"
                 onClick={handleSaveRegion}
-                className={`px-4 py-1.5 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all hover:opacity-90 ${currentCfg.btnBg}`}
+                className={`px-4 py-1.5 text-white rounded-md text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all hover:opacity-90 ${currentCfg.btnBg}`}
               >
                 <span>💾</span>
                 <span>{currentCfg.label} を確定する</span>
@@ -207,14 +207,14 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
                 key="redo-btn"
                 type="button"
                 onClick={() => handleClearRegion(currentMode)}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-md text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
               >
                 <span>🔄</span>
                 <span>やり直す</span>
               </button>
             ) : null}
 
-            <div className="h-4 w-px bg-slate-200 mx-1" />
+            <div className="h-5 w-px bg-slate-300 mx-1" />
 
             <button
               key="proceed-btn"
@@ -222,13 +222,13 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, onComp
               onClick={() => onComplete(regions)}
               disabled={!canProceed}
               title={!canProceed ? '① ステージ図面を指定してください' : 'ステージ配置へ進む'}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+              className={`px-4 py-2 rounded-md text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-all focus:ring-4 focus:ring-amber-300 ${
                 canProceed
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer'
-                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                  ? 'bg-[#0055c0] hover:bg-[#004098] active:bg-[#002966] text-white shadow-2xs cursor-pointer'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
               }`}
             >
-              <span>次へ (配置)</span>
+              <span>次へ進む (ステージ配置)</span>
               <span>→</span>
             </button>
           </div>

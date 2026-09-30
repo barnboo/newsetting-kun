@@ -195,7 +195,7 @@ const StageBuilder: React.FC<Props> = ({
   // Scenes management (Phase 3 scenes logic ported from prototype)
   const [scenes, setScenes] = useState<Scene[]>(initialScenes);
   const [currentSceneId, setCurrentSceneId] = useState<string>(initialCurrentSceneId);
-  const [drawerSubmenu, setDrawerSubmenu] = useState<'scenes' | 'settings' | null>(null);
+  const [drawerSubmenu, setDrawerSubmenu] = useState<'scenes' | 'settings' | 'objects' | null>(null);
 
   const [snapSettings, setSnapSettings] = useState<SnapSettings>(() => {
     const defaultSettings: SnapSettings = {
@@ -454,6 +454,18 @@ const StageBuilder: React.FC<Props> = ({
         handleRedo();
         return;
       }
+      // Select All: Ctrl/Cmd + A
+      if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        handleSelectAll();
+        return;
+      }
+      // Toggle Pin Selected: Ctrl/Cmd + F
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        handleTogglePinSelected();
+        return;
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -642,6 +654,289 @@ const StageBuilder: React.FC<Props> = ({
       setSelectedCurveIds([newCurves[0].id]);
       setSelectedId(null);
       setSelectedIds([]);
+    }
+  };
+
+  // ─── Object Manipulation Handlers (Ported from Prototype & DADS) ─────────
+
+  const handleSelectAll = () => {
+    setSelectedIds(placedItems.map(i => i.id));
+    setSelectedCurveIds(curveObjects.map(c => c.id));
+    setSelectedCurveItemId(null);
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedIds([]);
+    setSelectedCurveIds([]);
+    setSelectedCurveItemId(null);
+  };
+
+  const handleTogglePinSelected = () => {
+    const { items, curves } = getSelectedObjects();
+    if (items.length === 0 && curves.length === 0) return;
+    pushHistory();
+    const allPinned = [...items, ...curves].every(o => Boolean(o.isPinned));
+    const nextPinned = !allPinned;
+
+    if (items.length > 0) {
+      const itemIds = new Set(items.map(i => i.id));
+      setPlacedItems(prev => prev.map(it => itemIds.has(it.id) ? { ...it, isPinned: nextPinned } : it));
+    }
+    if (curves.length > 0) {
+      const curveIds = new Set(curves.map(c => c.id));
+      setCurveObjects(prev => prev.map(cv => curveIds.has(cv.id) ? { ...cv, isPinned: nextPinned } : cv));
+    }
+  };
+
+  const handleTogglePinItem = (id: string) => {
+    pushHistory();
+    setPlacedItems(prev => prev.map(it => it.id === id ? { ...it, isPinned: !it.isPinned } : it));
+  };
+
+  const handleTogglePinCurve = (id: string) => {
+    pushHistory();
+    setCurveObjects(prev => prev.map(c => c.id === id ? { ...c, isPinned: !c.isPinned } : c));
+  };
+
+  const handleMoveOrder = (direction: 'front' | 'back' | 'forward' | 'backward') => {
+    const { items, curves } = getSelectedObjects();
+    if (items.length === 0 && curves.length === 0) return;
+    pushHistory();
+
+    if (items.length > 0) {
+      const selSet = new Set(items.map(i => i.id));
+      setPlacedItems(prev => {
+        const arr = [...prev];
+        if (direction === 'front') {
+          const nonSel = arr.filter(i => !selSet.has(i.id));
+          const sel = arr.filter(i => selSet.has(i.id));
+          return [...nonSel, ...sel];
+        } else if (direction === 'back') {
+          const nonSel = arr.filter(i => !selSet.has(i.id));
+          const sel = arr.filter(i => selSet.has(i.id));
+          return [...sel, ...nonSel];
+        } else if (direction === 'forward') {
+          for (let i = arr.length - 2; i >= 0; i--) {
+            if (selSet.has(arr[i].id) && !selSet.has(arr[i + 1].id)) {
+              const temp = arr[i];
+              arr[i] = arr[i + 1];
+              arr[i + 1] = temp;
+            }
+          }
+          return arr;
+        } else if (direction === 'backward') {
+          for (let i = 1; i < arr.length; i++) {
+            if (selSet.has(arr[i].id) && !selSet.has(arr[i - 1].id)) {
+              const temp = arr[i];
+              arr[i] = arr[i - 1];
+              arr[i - 1] = temp;
+            }
+          }
+          return arr;
+        }
+        return arr;
+      });
+    }
+
+    if (curves.length > 0) {
+      const selCurveSet = new Set(curves.map(c => c.id));
+      setCurveObjects(prev => {
+        const arr = [...prev];
+        if (direction === 'front') {
+          const nonSel = arr.filter(c => !selCurveSet.has(c.id));
+          const sel = arr.filter(c => selCurveSet.has(c.id));
+          return [...nonSel, ...sel];
+        } else if (direction === 'back') {
+          const nonSel = arr.filter(c => !selCurveSet.has(c.id));
+          const sel = arr.filter(c => selCurveSet.has(c.id));
+          return [...sel, ...nonSel];
+        } else if (direction === 'forward') {
+          for (let i = arr.length - 2; i >= 0; i--) {
+            if (selCurveSet.has(arr[i].id) && !selCurveSet.has(arr[i + 1].id)) {
+              const temp = arr[i];
+              arr[i] = arr[i + 1];
+              arr[i + 1] = temp;
+            }
+          }
+          return arr;
+        } else if (direction === 'backward') {
+          for (let i = 1; i < arr.length; i++) {
+            if (selCurveSet.has(arr[i].id) && !selCurveSet.has(arr[i - 1].id)) {
+              const temp = arr[i];
+              arr[i] = arr[i - 1];
+              arr[i - 1] = temp;
+            }
+          }
+          return arr;
+        }
+        return arr;
+      });
+    }
+  };
+
+  const handleAlign = (type: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => {
+    const { items, curves } = getSelectedObjects();
+    const totalSelected = items.length + curves.length;
+    if (totalSelected === 0) return;
+    if (totalSelected === 1 && (type === 'distributeH' || type === 'distributeV')) return;
+
+    pushHistory();
+
+    type ObjMeta = {
+      id: string;
+      isCurve: boolean;
+      minX: number;
+      maxX: number;
+      minY: number;
+      maxY: number;
+      cx: number;
+      cy: number;
+      width: number;
+      height: number;
+      ref: any;
+    };
+    const metas: ObjMeta[] = [];
+
+    for (const it of items) {
+      const w = it.width ?? 40;
+      const h = it.height ?? 40;
+      metas.push({
+        id: it.id,
+        isCurve: false,
+        minX: it.x,
+        maxX: it.x + w,
+        minY: it.y,
+        maxY: it.y + h,
+        cx: it.x + w / 2,
+        cy: it.y + h / 2,
+        width: w,
+        height: h,
+        ref: it,
+      });
+    }
+
+    for (const c of curves) {
+      const [x0, y0, cx, cy, x1, y1] = c.points;
+      const allX = [c.x + x0, c.x + cx, c.x + x1];
+      const allY = [c.y + y0, c.y + cy, c.y + y1];
+      const minX = Math.min(...allX);
+      const maxX = Math.max(...allX);
+      const minY = Math.min(...allY);
+      const maxY = Math.max(...allY);
+      metas.push({
+        id: c.id,
+        isCurve: true,
+        minX,
+        maxX,
+        minY,
+        maxY,
+        cx: (minX + maxX) / 2,
+        cy: (minY + maxY) / 2,
+        width: maxX - minX,
+        height: maxY - minY,
+        ref: c,
+      });
+    }
+
+    const overallMinX = Math.min(...metas.map(m => m.minX));
+    const overallMaxX = Math.max(...metas.map(m => m.maxX));
+    const overallMinY = Math.min(...metas.map(m => m.minY));
+    const overallMaxY = Math.max(...metas.map(m => m.maxY));
+    const overallCx = (overallMinX + overallMaxX) / 2;
+    const overallCy = (overallMinY + overallMaxY) / 2;
+
+    const itemUpdates = new Map<string, Partial<PlacedItem>>();
+    const curveUpdates = new Map<string, Partial<CurveObject>>();
+
+    if (type === 'left') {
+      for (const m of metas) {
+        const deltaX = overallMinX - m.minX;
+        if (m.isCurve) {
+          curveUpdates.set(m.id, { x: m.ref.x + deltaX });
+        } else {
+          itemUpdates.set(m.id, { x: overallMinX });
+        }
+      }
+    } else if (type === 'centerH') {
+      for (const m of metas) {
+        const deltaX = overallCx - m.cx;
+        if (m.isCurve) {
+          curveUpdates.set(m.id, { x: m.ref.x + deltaX });
+        } else {
+          itemUpdates.set(m.id, { x: overallCx - m.width / 2 });
+        }
+      }
+    } else if (type === 'right') {
+      for (const m of metas) {
+        const deltaX = overallMaxX - m.maxX;
+        if (m.isCurve) {
+          curveUpdates.set(m.id, { x: m.ref.x + deltaX });
+        } else {
+          itemUpdates.set(m.id, { x: overallMaxX - m.width });
+        }
+      }
+    } else if (type === 'top') {
+      for (const m of metas) {
+        const deltaY = overallMinY - m.minY;
+        if (m.isCurve) {
+          curveUpdates.set(m.id, { y: m.ref.y + deltaY });
+        } else {
+          itemUpdates.set(m.id, { y: overallMinY });
+        }
+      }
+    } else if (type === 'centerV') {
+      for (const m of metas) {
+        const deltaY = overallCy - m.cy;
+        if (m.isCurve) {
+          curveUpdates.set(m.id, { y: m.ref.y + deltaY });
+        } else {
+          itemUpdates.set(m.id, { y: overallCy - m.height / 2 });
+        }
+      }
+    } else if (type === 'bottom') {
+      for (const m of metas) {
+        const deltaY = overallMaxY - m.maxY;
+        if (m.isCurve) {
+          curveUpdates.set(m.id, { y: m.ref.y + deltaY });
+        } else {
+          itemUpdates.set(m.id, { y: overallMaxY - m.height });
+        }
+      }
+    } else if (type === 'distributeH' && metas.length >= 3) {
+      const sorted = [...metas].sort((a, b) => a.cx - b.cx);
+      const firstCx = sorted[0].cx;
+      const lastCx = sorted[sorted.length - 1].cx;
+      const step = (lastCx - firstCx) / (sorted.length - 1);
+      sorted.forEach((m, idx) => {
+        const targetCx = firstCx + step * idx;
+        const deltaX = targetCx - m.cx;
+        if (m.isCurve) {
+          curveUpdates.set(m.id, { x: m.ref.x + deltaX });
+        } else {
+          itemUpdates.set(m.id, { x: m.ref.x + deltaX });
+        }
+      });
+    } else if (type === 'distributeV' && metas.length >= 3) {
+      const sorted = [...metas].sort((a, b) => a.cy - b.cy);
+      const firstCy = sorted[0].cy;
+      const lastCy = sorted[sorted.length - 1].cy;
+      const step = (lastCy - firstCy) / (sorted.length - 1);
+      sorted.forEach((m, idx) => {
+        const targetCy = firstCy + step * idx;
+        const deltaY = targetCy - m.cy;
+        if (m.isCurve) {
+          curveUpdates.set(m.id, { y: m.ref.y + deltaY });
+        } else {
+          itemUpdates.set(m.id, { y: m.ref.y + deltaY });
+        }
+      });
+    }
+
+    if (itemUpdates.size > 0) {
+      setPlacedItems(prev => prev.map(it => itemUpdates.has(it.id) ? { ...it, ...itemUpdates.get(it.id) } : it));
+    }
+    if (curveUpdates.size > 0) {
+      setCurveObjects(prev => prev.map(c => curveUpdates.has(c.id) ? { ...c, ...curveUpdates.get(c.id) } : c));
     }
   };
 
@@ -1192,71 +1487,136 @@ const StageBuilder: React.FC<Props> = ({
           >✕</button>
         </div>
       )}
-      {/* Header */}
-      <header className={`h-14 border-b flex items-center justify-between px-4 shrink-0 shadow-sm z-10 transition-colors ${
-        isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
+      {/* Digital Agency Design System (DADS) Global Service Header */}
+      <header className={`h-15 border-b flex items-center justify-between px-4 shrink-0 z-20 select-none transition-colors ${
+        isDarkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-300 text-slate-900 shadow-2xs'
       }`}>
-        <div className="flex items-center gap-4">
+        {/* Brand / Service Title */}
+        <div className="flex items-center gap-3">
           <div
-            className="flex items-center gap-2 cursor-pointer hover:opacity-75 transition-opacity select-none group"
+            className="flex items-center gap-2.5 cursor-pointer hover:opacity-85 transition-opacity group"
             onClick={handleBack}
-            title="最初の画面（PDF読込・バックアップ一覧）に戻る"
+            title="ホーム画面（PDF読込・バックアップ一覧）に戻る"
           >
-            <span className="text-2xl group-hover:scale-105 transition-transform">🪄</span>
-            <h2 className={`font-bold text-lg hidden sm:block ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>セッティングくん</h2>
+            <div className="w-8 h-8 rounded-md bg-[#0055c0] text-white flex items-center justify-center font-bold text-sm shadow-2xs select-none">
+              🎼
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1.5">
+                <span className={`font-bold text-sm leading-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                  舞台セッティング図 作成システム
+                </span>
+                <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 rounded border border-blue-300 dark:border-blue-800">
+                  公認様式
+                </span>
+              </div>
+              <span className={`text-[10px] leading-tight mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                熊本県吹奏楽連盟 セッティングくん
+              </span>
+            </div>
           </div>
-          <div className={`h-6 w-px ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
+
+          <div className={`h-6 w-px mx-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
+
+          {/* DADS Operational Tools: Undo / Redo & Zoom */}
           <div className="flex items-center gap-1">
             <button
               onClick={handleUndo}
               disabled={!canUndo}
-              className={`p-1.5 rounded transition-colors ${
+              className={`px-2 py-1 rounded-md text-xs font-medium border flex items-center gap-1 transition-colors ${
                 canUndo
-                  ? (isDarkMode ? 'text-slate-200 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900')
-                  : (isDarkMode ? 'text-slate-600 cursor-not-allowed' : 'text-slate-300 cursor-not-allowed')
+                  ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 cursor-pointer' : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300 cursor-pointer')
+                  : (isDarkMode ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed' : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed')
               }`}
-              title={`元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
-            >↩️</button>
+              title={`1手元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
+            >
+              <span>↩</span>
+              <span className="hidden xl:inline">元に戻す</span>
+            </button>
             <button
               onClick={handleRedo}
               disabled={!canRedo}
-              className={`p-1.5 rounded transition-colors ${
+              className={`px-2 py-1 rounded-md text-xs font-medium border flex items-center gap-1 transition-colors ${
                 canRedo
-                  ? (isDarkMode ? 'text-slate-200 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900')
-                  : (isDarkMode ? 'text-slate-600 cursor-not-allowed' : 'text-slate-300 cursor-not-allowed')
+                  ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 cursor-pointer' : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300 cursor-pointer')
+                  : (isDarkMode ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed' : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed')
               }`}
-              title="やり直し (Ctrl+Y / Ctrl+Shift+Z)"
-            >↪️</button>
-            <div className={`h-4 w-px mx-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
-            <button
-              onClick={handleZoomOut}
-              className={`p-1.5 rounded font-bold transition-colors ${isDarkMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}
-              title="ズームアウト"
-            >➖</button>
-            <span className={`text-xs font-semibold min-w-[3rem] text-center ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{Math.round(zoomMultiplier * 100)}%</span>
-            <button
-              onClick={handleZoomIn}
-              className={`p-1.5 rounded font-bold transition-colors ${isDarkMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}
-              title="ズームイン"
-            >➕</button>
-          </div>
+              title="やり直す (Ctrl+Y / Ctrl+Shift+Z)"
+            >
+              <span>↪</span>
+              <span className="hidden xl:inline">やり直し</span>
+            </button>
 
-        </div>
-        
-        <div className="flex items-center gap-4">
-          <div className="hidden md:flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">1. ファイル</span>
-            <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">2. 領域選択</span>
-            <span className="text-xs font-bold text-blue-700 bg-blue-100 px-3 py-1 rounded-full ring-2 ring-blue-500 ring-offset-1">3. ステージ配置</span>
-            <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">4. PDF出力</span>
+            <div className={`h-4 w-px mx-1.5 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
+
+            <div className={`flex items-center border rounded-md overflow-hidden ${
+              isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-300'
+            }`}>
+              <button
+                onClick={handleZoomOut}
+                className={`px-2 py-1 text-xs font-bold transition-colors ${
+                  isDarkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
+                }`}
+                title="縮小"
+              >
+                −
+              </button>
+              <span className={`text-[11px] font-bold font-mono px-2 py-1 min-w-[3.2rem] text-center border-x ${
+                isDarkMode ? 'border-slate-700 text-slate-200 bg-slate-850' : 'border-slate-200 text-slate-800 bg-slate-50'
+              }`}>
+                {Math.round(zoomMultiplier * 100)}%
+              </span>
+              <button
+                onClick={handleZoomIn}
+                className={`px-2 py-1 text-xs font-bold transition-colors ${
+                  isDarkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
+                }`}
+                title="拡大"
+              >
+                ＋
+              </button>
+            </div>
           </div>
+        </div>
+
+        {/* Center: DADS Standard Stepper (ステップナビゲーション) */}
+        <div className="hidden lg:flex items-center gap-1.5">
+          <div className="flex items-center gap-1 px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-md border border-slate-300 dark:border-slate-700 text-xs">
+            {/* Step 1 */}
+            <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
+              <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">✓</span>
+              <span>1. PDF読込</span>
+            </div>
+            <span className="text-slate-300 dark:text-slate-600 mx-1">›</span>
+            {/* Step 2 */}
+            <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
+              <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">✓</span>
+              <span>2. 領域設定</span>
+            </div>
+            <span className="text-slate-300 dark:text-slate-600 mx-1">›</span>
+            {/* Step 3 (Active) */}
+            <div className="flex items-center gap-1 font-bold text-[#0055c0] dark:text-blue-300 bg-white dark:bg-slate-700 px-2 py-0.5 rounded shadow-2xs border border-blue-300 dark:border-blue-600">
+              <span className="w-4 h-4 rounded-full bg-[#0055c0] text-white text-[10px] font-bold flex items-center justify-center">3</span>
+              <span>ステージ配置 (現在地)</span>
+            </div>
+            <span className="text-slate-300 dark:text-slate-600 mx-1">›</span>
+            {/* Step 4 */}
+            <div className="flex items-center gap-1 text-slate-400 dark:text-slate-500">
+              <span className="w-4 h-4 rounded-full bg-slate-300 dark:bg-slate-600 text-slate-700 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">4</span>
+              <span>PDF出力</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Actions: DADS Secondary + Primary Buttons */}
+        <div className="flex items-center gap-2.5">
           <button
             type="button"
             onClick={handleExportJson}
-            className={`px-3 py-2 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs hover:shadow-xs focus:ring-2 focus:ring-amber-300 ${
               isDarkMode
-                ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600'
-                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-2xs hover:shadow-xs'
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
+                : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300'
             }`}
             title="現在の全場面・配置データをJSONファイルとしてダウンロード保存します"
           >
@@ -1266,10 +1626,10 @@ const StageBuilder: React.FC<Props> = ({
           <button
             onClick={handleGoToExport}
             disabled={isPreparingExport}
-            className={`text-white text-sm font-bold px-5 py-2 rounded-lg shadow-sm hover:shadow transition-all flex items-center gap-2 ${
+            className={`text-white text-xs sm:text-sm font-bold px-4 py-2 rounded-md shadow-2xs hover:shadow-xs transition-all flex items-center gap-2 cursor-pointer focus:ring-4 focus:ring-amber-300 ${
               isPreparingExport
                 ? 'bg-blue-400 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-[#0055c0] hover:bg-[#004098] active:bg-[#002966]'
             }`}
           >
             {isPreparingExport ? (
@@ -1279,7 +1639,7 @@ const StageBuilder: React.FC<Props> = ({
               </>
             ) : (
               <>
-                <span>次へ</span>
+                <span>次へ進む (出力プレビュー)</span>
                 <span>→</span>
               </>
             )}
@@ -1541,12 +1901,26 @@ const StageBuilder: React.FC<Props> = ({
               onClick={() => setDrawerSubmenu(prev => (prev === 'scenes' ? null : 'scenes'))}
               className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg transition-all my-1 ${
                 drawerSubmenu === 'scenes'
-                  ? 'bg-blue-600 text-white ring-2 ring-blue-400 shadow-md scale-105'
+                  ? 'bg-[#0055c0] text-white ring-2 ring-blue-300 shadow-md scale-105'
                   : 'hover:bg-slate-700/70 hover:text-white text-slate-300'
               }`}
               title="場面一覧 (シーン切替)"
             >
               🏠
+            </button>
+
+            {/* Box Icon: Object Operations Item */}
+            <button
+              type="button"
+              onClick={() => setDrawerSubmenu(prev => (prev === 'objects' ? null : 'objects'))}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg transition-all my-1 ${
+                drawerSubmenu === 'objects'
+                  ? 'bg-[#0055c0] text-white ring-2 ring-blue-300 shadow-md scale-105'
+                  : 'hover:bg-slate-700/70 hover:text-white text-slate-300'
+              }`}
+              title="オブジェクト操作パネル (重なり順・整列・固定)"
+            >
+              📦
             </button>
 
             {/* Display & Snap Settings Item */}
@@ -1555,7 +1929,7 @@ const StageBuilder: React.FC<Props> = ({
               onClick={() => setDrawerSubmenu(prev => (prev === 'settings' ? null : 'settings'))}
               className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg transition-all my-1 ${
                 drawerSubmenu === 'settings'
-                  ? 'bg-slate-700 text-blue-400 ring-1 ring-blue-500/50 shadow-inner'
+                  ? 'bg-[#0055c0] text-white ring-2 ring-blue-300 shadow-md scale-105'
                   : 'hover:bg-slate-700/70 hover:text-white text-slate-300'
               }`}
               title="表示・スナップ設定"
@@ -1730,6 +2104,394 @@ const StageBuilder: React.FC<Props> = ({
                   <span>＋</span>
                   <span>新しい場面を追加</span>
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* 2. Object Operations Sub-Panel: Opens from Box Icon 📦 */}
+          {drawerSubmenu === 'objects' && (
+            <div className={`w-80 h-full backdrop-blur-md border-r shadow-2xl flex flex-col p-4 animate-in fade-in slide-in-from-left-2 duration-200 shrink-0 ${
+              isDarkMode ? 'bg-slate-900/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-300 text-slate-900'
+            }`}>
+              <div className={`flex items-center justify-between pb-3 border-b mb-3 ${isDarkMode ? 'border-slate-700' : 'border-slate-300'}`}>
+                <h3 className={`font-bold text-sm flex items-center gap-1.5 ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                  <span>📦</span> オブジェクト操作パネル
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setDrawerSubmenu(null)}
+                  className={`rounded-md p-1 transition-colors text-xs font-bold ${
+                    isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                  }`}
+                  title="閉じる"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className={`text-[11px] mb-3 leading-snug ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                配置したパーツの固定、重なり順、整列、およびシーン内の全オブジェクトを管理します。
+              </p>
+
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                {/* 1. 一括選択 & 固定操作 */}
+                <div className="space-y-2">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    選択 & 固定
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={handleSelectAll}
+                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
+                        isDarkMode
+                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
+                          : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300'
+                      }`}
+                      title="キャンバス上の全オブジェクトを選択 (Ctrl+A)"
+                    >
+                      全選択 (Ctrl+A)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAll}
+                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
+                        isDarkMode
+                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
+                          : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300'
+                      }`}
+                      title="選択をすべて解除"
+                    >
+                      選択解除
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleTogglePinSelected}
+                    disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                    className={`w-full py-1.5 px-2.5 rounded-md text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 shadow-2xs ${
+                      (selectedIds.length + selectedCurveIds.length) > 0
+                        ? (isDarkMode
+                            ? 'bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border-blue-600'
+                            : 'bg-blue-50 hover:bg-blue-100 text-[#0055c0] border-blue-300')
+                        : (isDarkMode ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border-slate-700' : 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200')
+                    }`}
+                    title="ドラッグによる誤操作を防ぐため固定します (Ctrl+F)"
+                  >
+                    <span>📌</span>
+                    <span>選択物を固定/解除 (Ctrl+F)</span>
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-1.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={handleDuplicateSelected}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
+                        (selectedIds.length + selectedCurveIds.length) > 0
+                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
+                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
+                      }`}
+                    >
+                      📑 選択物を複製
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteSelected}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
+                        (selectedIds.length + selectedCurveIds.length) > 0
+                          ? (isDarkMode ? 'bg-red-950/50 hover:bg-red-900/60 text-red-300 border-red-800' : 'bg-red-50 hover:bg-red-100 text-red-700 border-red-200')
+                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
+                      }`}
+                    >
+                      🗑 選択物を削除
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. 重なり順 (Z-Index) */}
+                <div className={`space-y-2 pt-3 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    重なり順 (Z-Index)
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleMoveOrder('front')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
+                        (selectedIds.length + selectedCurveIds.length) > 0
+                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
+                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
+                      }`}
+                      title="最前面へ移動"
+                    >
+                      ↑ 最前面へ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMoveOrder('forward')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
+                        (selectedIds.length + selectedCurveIds.length) > 0
+                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
+                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
+                      }`}
+                      title="1段階前面へ"
+                    >
+                      ▲ 前面へ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMoveOrder('backward')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
+                        (selectedIds.length + selectedCurveIds.length) > 0
+                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
+                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
+                      }`}
+                      title="1段階背面へ"
+                    >
+                      ▼ 背面へ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMoveOrder('back')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
+                        (selectedIds.length + selectedCurveIds.length) > 0
+                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
+                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
+                      }`}
+                      title="最背面へ移動"
+                    >
+                      ↓ 最背面へ
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. 整列 & 均等配置 */}
+                <div className={`space-y-2 pt-3 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    整列 & 均等配置
+                  </span>
+                  <div className="grid grid-cols-3 gap-1 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => handleAlign('left')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1 px-1 rounded border font-medium text-center ${
+                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
+                      title="左揃え"
+                    >
+                      ⬅ 左揃え
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAlign('centerH')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1 px-1 rounded border font-medium text-center ${
+                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
+                      title="水平中央揃え"
+                    >
+                      ⬌ 水平中央
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAlign('right')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1 px-1 rounded border font-medium text-center ${
+                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
+                      title="右揃え"
+                    >
+                      ➡ 右揃え
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAlign('top')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1 px-1 rounded border font-medium text-center ${
+                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
+                      title="上揃え"
+                    >
+                      ⬆ 上揃え
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAlign('centerV')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1 px-1 rounded border font-medium text-center ${
+                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
+                      title="垂直中央揃え"
+                    >
+                      ⬍ 垂直中央
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAlign('bottom')}
+                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
+                      className={`py-1 px-1 rounded border font-medium text-center ${
+                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
+                      title="下揃え"
+                    >
+                      ⬇ 下揃え
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 text-[11px] pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleAlign('distributeH')}
+                      disabled={(selectedIds.length + selectedCurveIds.length) < 3}
+                      className={`py-1 px-1.5 rounded border font-medium text-center ${
+                        (selectedIds.length + selectedCurveIds.length) >= 3
+                          ? (isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800')
+                          : 'opacity-40 cursor-not-allowed border-slate-300 dark:border-slate-700 text-slate-400'
+                      }`}
+                      title="3つ以上のオブジェクトを水平等間隔に配置"
+                    >
+                      || 左右等間隔
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAlign('distributeV')}
+                      disabled={(selectedIds.length + selectedCurveIds.length) < 3}
+                      className={`py-1 px-1.5 rounded border font-medium text-center ${
+                        (selectedIds.length + selectedCurveIds.length) >= 3
+                          ? (isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800')
+                          : 'opacity-40 cursor-not-allowed border-slate-300 dark:border-slate-700 text-slate-400'
+                      }`}
+                      title="3つ以上のオブジェクトを垂直等間隔に配置"
+                    >
+                      = 上下等間隔
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. 配置済みオブジェクト一覧 (レイヤー管理) */}
+                <div className={`space-y-2 pt-3 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    <span className="uppercase tracking-wider">
+                      配置済み一覧 ({placedItems.length + curveObjects.length}件)
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      上ほど前面
+                    </span>
+                  </div>
+
+                  {placedItems.length === 0 && curveObjects.length === 0 ? (
+                    <div className="text-center py-4 text-xs text-slate-400 dark:text-slate-500 border border-dashed rounded-lg">
+                      オブジェクトは配置されていません
+                    </div>
+                  ) : (
+                    <div className="max-h-56 overflow-y-auto space-y-1 pr-1 border rounded-md p-1 bg-slate-50/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700">
+                      {/* We reverse to show front-most items first */}
+                      {[...placedItems].reverse().map((item, idx) => {
+                        const isSelected = selectedIds.includes(item.id);
+                        const tmpl = TEMPLATE_SHAPES.find(t => t.type === item.templateType);
+                        const label = item.templateType ? (tmpl?.label || item.templateType) : (iconLabels[item.iconId] || 'パーツ');
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => {
+                              setSelectedIds([item.id]);
+                              setSelectedCurveIds([]);
+                              setSelectedCurveItemId(null);
+                            }}
+                            className={`flex items-center justify-between p-1.5 rounded text-xs cursor-pointer transition-colors border ${
+                              isSelected
+                                ? 'bg-blue-50 dark:bg-blue-900/50 border-blue-400 dark:border-blue-500 text-blue-900 dark:text-blue-100 font-semibold shadow-2xs'
+                                : 'bg-white dark:bg-slate-750 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-[10px] text-slate-400 font-mono w-4 shrink-0">
+                                {placedItems.length - idx}.
+                              </span>
+                              <span className="truncate">{label}</span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePinItem(item.id)}
+                                className={`p-1 rounded text-xs transition-colors ${
+                                  item.isPinned
+                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-950/60 font-bold'
+                                    : 'text-slate-400 hover:text-slate-600'
+                                }`}
+                                title={item.isPinned ? '固定解除' : '固定する'}
+                              >
+                                📌
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteItem(item.id)}
+                                className="p-1 rounded text-xs text-slate-400 hover:text-red-600 transition-colors"
+                                title="削除"
+                              >
+                                🗑
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Curve objects */}
+                      {curveObjects.map((curve) => {
+                        const isSelected = selectedCurveIds.includes(curve.id);
+                        return (
+                          <div
+                            key={curve.id}
+                            onClick={() => {
+                              setSelectedCurveIds([curve.id]);
+                              setSelectedIds([]);
+                              setSelectedCurveItemId(null);
+                            }}
+                            className={`flex items-center justify-between p-1.5 rounded text-xs cursor-pointer transition-colors border ${
+                              isSelected
+                                ? 'bg-purple-50 dark:bg-purple-900/50 border-purple-400 dark:border-purple-500 text-purple-900 dark:text-purple-100 font-semibold shadow-2xs'
+                                : 'bg-white dark:bg-slate-750 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-purple-600 dark:text-purple-400 text-xs shrink-0">〰</span>
+                              <span className="truncate">ベジェ曲線 ({curve.items?.length || curve.itemCount || 0}個)</span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePinCurve(curve.id)}
+                                className={`p-1 rounded text-xs transition-colors ${
+                                  curve.isPinned
+                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-950/60 font-bold'
+                                    : 'text-slate-400 hover:text-slate-600'
+                                }`}
+                                title={curve.isPinned ? '固定解除' : '固定する'}
+                              >
+                                📌
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCurve(curve.id)}
+                                className="p-1 rounded text-xs text-slate-400 hover:text-red-600 transition-colors"
+                                title="削除"
+                              >
+                                🗑
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -2018,6 +2780,9 @@ const StageBuilder: React.FC<Props> = ({
             onDeleteCurve={handleDeleteCurve}
             onDeleteSelected={handleDeleteSelected}
             onUpdateAllOfType={handleUpdateAllOfType}
+            onTogglePin={handleTogglePinSelected}
+            onMoveOrder={handleMoveOrder}
+            onAlign={handleAlign}
           />
         ) : (
           <div

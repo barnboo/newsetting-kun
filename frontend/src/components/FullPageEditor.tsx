@@ -885,44 +885,73 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-slate-100 select-none">
-      {/* Top Studio Toolbar */}
-      <header className="min-h-14 py-2 px-4 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-y-2 gap-x-3 shrink-0 shadow-xs z-20">
+      {/* Top Studio Toolbar with Digital Agency Design System (DADS) layout */}
+      <header className="min-h-15 py-2 px-4 bg-white border-b border-slate-300 flex flex-wrap items-center justify-between gap-y-2 gap-x-3 shrink-0 shadow-2xs z-20 select-none">
         {/* Left: Navigation & Title */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-3 shrink-0">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition-colors shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-2xs transition-colors shrink-0 cursor-pointer"
             title="ステージ配置画面に戻る"
           >
             <span>←</span>
-            <span>ステージへ</span>
+            <span>ステージへ戻る</span>
           </button>
-          <div className="h-4 w-px bg-slate-200" />
-          <h2 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5 shrink-0">
-            <span>📄</span>
-            <span>全体プレビュー</span>
-            {effectiveScenes.length > 1 && (
-              <span className="text-[11px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 ml-1">
-                全 {effectiveScenes.length} 場面を一望中
-              </span>
-            )}
-          </h2>
+          <div className="h-5 w-px bg-slate-300" />
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-7 h-7 rounded-md bg-[#0055c0] text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+              📄
+            </div>
+            <div>
+              <h2 className="text-xs sm:text-sm font-bold text-slate-900 leading-tight">
+                プレビュー・PDF出力
+              </h2>
+              <p className="text-[10px] text-slate-500 font-medium leading-tight">
+                {effectiveScenes.length > 1 ? `全 ${effectiveScenes.length} 場面の出力プレビュー` : '印刷・提出用プレビュー'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Center: DADS Standard Stepper */}
+        <div className="hidden xl:flex items-center gap-1.5">
+          <div className="flex items-center gap-1 px-3 py-1 bg-slate-100 rounded-md border border-slate-300 text-xs">
+            <div className="flex items-center gap-1 text-slate-500">
+              <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">✓</span>
+              <span>1. PDF読込</span>
+            </div>
+            <span className="text-slate-300 mx-1">›</span>
+            <div className="flex items-center gap-1 text-slate-500">
+              <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">✓</span>
+              <span>2. 領域設定</span>
+            </div>
+            <span className="text-slate-300 mx-1">›</span>
+            <div className="flex items-center gap-1 text-slate-500">
+              <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">✓</span>
+              <span>3. ステージ配置</span>
+            </div>
+            <span className="text-slate-300 mx-1">›</span>
+            <div className="flex items-center gap-1 font-bold text-[#0055c0] bg-white px-2 py-0.5 rounded shadow-2xs border border-blue-300">
+              <span className="w-4 h-4 rounded-full bg-[#0055c0] text-white text-[10px] font-bold flex items-center justify-center">4</span>
+              <span>PDF出力 (現在地)</span>
+            </div>
+          </div>
         </div>
 
         {/* Scene Navigation Quick Jump (When multiple scenes exist) */}
         {effectiveScenes.length > 1 && (
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs shrink-0 max-w-full overflow-x-auto">
-            <span className="text-[11px] text-slate-500 font-bold px-1 shrink-0">場面ジャンプ:</span>
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-md border border-slate-300 text-xs shrink-0 max-w-full overflow-x-auto">
+            <span className="text-[11px] text-slate-600 font-bold px-1 shrink-0">場面切替:</span>
             {effectiveScenes.map((sc, idx) => (
               <button
                 key={sc.sceneId}
                 type="button"
                 onClick={() => scrollToScene(idx)}
-                className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all shrink-0 ${
+                className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all shrink-0 cursor-pointer ${
                   activeSceneIdx === idx
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-white text-slate-700 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'
+                    ? 'bg-[#0055c0] text-white shadow-2xs'
+                    : 'bg-white text-slate-700 hover:text-slate-900 border border-slate-300 hover:bg-slate-50'
                 }`}
                 title={`第${idx + 1}ページ（${sc.name}）へスクロール`}
               >
@@ -935,19 +964,19 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         {/* Right: Controls & Actions */}
         <div className="flex items-center gap-2 shrink-0 flex-nowrap">
           {/* Undo / Redo Buttons */}
-          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-md border border-slate-300 text-xs shrink-0">
             <button
               type="button"
               onClick={handleUndo}
               disabled={!canUndo}
               className={`p-1.5 rounded transition-colors ${
                 canUndo
-                  ? 'text-slate-700 hover:bg-white hover:text-slate-900 cursor-pointer'
-                  : 'text-slate-300 cursor-not-allowed'
+                  ? 'text-slate-800 hover:bg-white hover:text-slate-900 cursor-pointer'
+                  : 'text-slate-400 cursor-not-allowed'
               }`}
               title={`元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
             >
-              ↩️
+              ↩
             </button>
             <button
               type="button"
@@ -955,19 +984,19 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
               disabled={!canRedo}
               className={`p-1.5 rounded transition-colors ${
                 canRedo
-                  ? 'text-slate-700 hover:bg-white hover:text-slate-900 cursor-pointer'
-                  : 'text-slate-300 cursor-not-allowed'
+                  ? 'text-slate-800 hover:bg-white hover:text-slate-900 cursor-pointer'
+                  : 'text-slate-400 cursor-not-allowed'
               }`}
               title="やり直し (Ctrl+Y / Ctrl+Shift+Z)"
             >
-              ↪️
+              ↪
             </button>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block" />
+          <div className="h-4 w-px bg-slate-300 mx-0.5 hidden sm:block" />
 
           {/* View Controls: Fit Mode Switcher */}
-          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-md border border-slate-300 text-xs shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -976,7 +1005,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
               }}
               className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
                 fitMode === 'page'
-                  ? 'bg-white text-blue-700 shadow-xs'
+                  ? 'bg-white text-[#0055c0] shadow-2xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
               title="画面内に用紙全体が収まるよう縮小表示"
@@ -991,7 +1020,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
               }}
               className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
                 fitMode === 'width'
-                  ? 'bg-white text-blue-700 shadow-xs'
+                  ? 'bg-white text-[#0055c0] shadow-2xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
               title="用紙の横幅を画面いっぱいに拡大表示"
@@ -1001,15 +1030,15 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           </div>
 
           {/* Zoom Buttons */}
-          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
+          <div className="flex items-center border border-slate-300 rounded-md overflow-hidden bg-white text-xs shrink-0">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 handleZoomOut();
               }}
-              className="w-7 h-7 flex items-center justify-center hover:bg-white rounded text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
-              title="ズームアウト (-10%)"
+              className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold transition-colors cursor-pointer select-none"
+              title="縮小 (-10%)"
             >
               −
             </button>
@@ -1019,7 +1048,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                 e.stopPropagation();
                 handleZoomReset();
               }}
-              className="px-2 py-0.5 text-xs font-mono font-bold text-slate-800 hover:bg-white rounded transition-colors cursor-pointer select-none min-w-[3.5rem] text-center"
+              className="px-2 py-1 text-xs font-mono font-bold text-slate-800 hover:bg-slate-50 border-x border-slate-200 transition-colors cursor-pointer select-none min-w-[3.2rem] text-center"
               title="拡大率を100%にリセット"
             >
               {Math.round(zoomMultiplier * 100)}%
@@ -1030,20 +1059,20 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                 e.stopPropagation();
                 handleZoomIn();
               }}
-              className="w-7 h-7 flex items-center justify-center hover:bg-white rounded text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
-              title="ズームイン (+10%)"
+              className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold transition-colors cursor-pointer select-none"
+              title="拡大 (+10%)"
             >
-              +
+              ＋
             </button>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 mx-1 hidden sm:block" />
+          <div className="h-4 w-px bg-slate-300 mx-1 hidden sm:block" />
 
           {/* Add Text / Circle Nodes */}
           <button
             type="button"
             onClick={() => handleAddText()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100/70 text-blue-700 text-xs font-semibold shadow-2xs transition-colors shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-blue-300 bg-blue-50 hover:bg-blue-100 text-[#0055c0] text-xs font-bold shadow-2xs transition-colors shrink-0 cursor-pointer"
             title="文字を追加して任意の場所に配置"
           >
             <span>✍️</span>
@@ -1053,7 +1082,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           <button
             type="button"
             onClick={handleAddCircle}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition-colors shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-2xs transition-colors shrink-0 cursor-pointer"
             title="丸囲み枠を追加"
           >
             <span>⭕</span>
@@ -1064,24 +1093,24 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           <button
             type="button"
             onClick={() => setShowCurveLines(prev => !prev)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold shadow-2xs transition-all shrink-0 ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-semibold shadow-2xs transition-all shrink-0 cursor-pointer ${
               showCurveLines
                 ? 'bg-purple-50 border-purple-300 text-purple-700 hover:bg-purple-100'
-                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
             }`}
             title="出力プレビュー内のベジェ曲線の線（ガイド線）の表示/非表示を切り替えます"
           >
             <span>〰️</span>
-            <span>ベジェ曲線: {showCurveLines ? '表示' : '非表示'}</span>
+            <span>ベジェ線: {showCurveLines ? '表示' : '非表示'}</span>
           </button>
 
-          <div className="h-4 w-px bg-slate-200 mx-1 hidden sm:block" />
+          <div className="h-4 w-px bg-slate-300 mx-1 hidden sm:block" />
 
           {onExportJson && (
             <button
               type="button"
               onClick={onExportJson}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs hover:shadow-xs transition-colors shrink-0 cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-2xs transition-colors shrink-0 cursor-pointer"
               title="現在の全場面・配置データをJSONファイルとしてダウンロード保存します"
             >
               <span>💾</span>
@@ -1089,12 +1118,12 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             </button>
           )}
 
-          {/* Main Action: Export PDF */}
+          {/* Main Action: Export PDF in Digital Agency Blue */}
           <button
             type="button"
             onClick={handleExport}
             disabled={isExporting}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs hover:shadow transition-all shrink-0 disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 rounded-md bg-[#0055c0] hover:bg-[#004098] active:bg-[#002966] text-white text-xs sm:text-sm font-bold shadow-2xs transition-all shrink-0 disabled:opacity-50 cursor-pointer focus:ring-4 focus:ring-amber-300"
           >
             <span>{isExporting ? '⏳' : '📥'}</span>
             <span>

@@ -24,6 +24,7 @@ export interface PlacedItem {
   color?: string;
   customIconStyle?: 'default' | 'xMark' | 'doubleCircle';
   chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg';
+  isPinned?: boolean;
 }
 
 export interface SnapSettings {
@@ -218,7 +219,7 @@ const CanvasItem: React.FC<{
       scaleY={item.scaleY}
       offsetX={effectiveWidth / 2}
       offsetY={effectiveHeight / 2}
-      draggable
+      draggable={!item.isPinned}
       onClick={(e) => { e.cancelBubble = true; onSelect(e); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(e); }}
       onDragStart={(e) => {
@@ -686,7 +687,7 @@ const CurveCanvas: React.FC<{
       id={curve.id}
       x={curve.x}
       y={curve.y}
-      draggable
+      draggable={!curve.isPinned}
       onClick={(e) => { e.cancelBubble = true; onSelect(); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(); }}
       onDragMove={(e) => {
@@ -830,7 +831,7 @@ const CurveCanvas: React.FC<{
             fill="#2563eb"
             stroke="#ffffff"
             strokeWidth={2 / scale}
-            draggable
+            draggable={!curve.isPinned}
             onDragStart={(e) => {
               e.cancelBubble = true;
             }}
@@ -892,7 +893,7 @@ const CurveCanvas: React.FC<{
             fill="#2563eb"
             stroke="#ffffff"
             strokeWidth={2 / scale}
-            draggable
+            draggable={!curve.isPinned}
             onDragStart={(e) => {
               e.cancelBubble = true;
             }}
@@ -957,7 +958,7 @@ const CurveCanvas: React.FC<{
             shadowColor="#000000"
             shadowBlur={isSnappedToMid ? 8 : 2}
             shadowOpacity={0.4}
-            draggable
+            draggable={!curve.isPinned}
             onDragStart={(e) => {
               e.cancelBubble = true;
             }}

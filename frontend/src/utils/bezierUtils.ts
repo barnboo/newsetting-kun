@@ -58,6 +58,7 @@ export interface CurveObject {
   showPercussionName?: boolean;
   customIconStyle?: 'default' | 'xMark' | 'doubleCircle';
   chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg';
+  isPinned?: boolean;
 }
 
 /**
