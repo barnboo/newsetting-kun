@@ -568,11 +568,14 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
 
           <div className="flex items-center gap-2">
             <button 
+              type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer border border-slate-200"
+              translate="no"
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer border border-slate-200 flex items-center gap-1.5 notranslate"
               disabled={isSaving}
             >
-              キャンセル
+              <span>✕</span>
+              <span>キャンセル</span>
             </button>
             <button 
               onClick={saveAdjustments}
@@ -782,6 +785,12 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                   <input
                     ref={nameInputRef}
                     type="text"
+                    name="part-name-input"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    data-1p-ignore="true"
+                    data-lpignore="true"
                     value={currentName}
                     onChange={(e) => handleRename(selectedId, e.target.value)}
                     placeholder="パーツ名を入力 (例: 指揮台, ホルン)"
@@ -801,7 +810,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                   枠がありません。<br />キャンバスをドラッグして追加できます。
                 </p>
               ) : (
-                rects.map((r) => {
+                rects.map((r, idx) => {
                   const name = labels[r.id] || r.label || 'パーツ';
                   const isSelected = selectedId === r.id;
                   return (
@@ -815,10 +824,10 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                       }`}
                     >
                       <div className="flex items-center gap-2 truncate">
-                        <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                        <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-bold shrink-0 ${
                           isSelected ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
                         }`}>
-                          🏷️
+                          {idx + 1}
                         </span>
                         <div className="flex flex-col truncate">
                           <span className="truncate">{name}</span>
