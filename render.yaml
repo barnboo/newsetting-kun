@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: newsetting-kun
+    name: stajet
     env: docker
     dockerfilePath: Dockerfile
     plan: free
