@@ -23,11 +23,9 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
   onConfirm,
   onSkip,
 }) => {
-  const [decisions, setDecisions] = useState<MatchingDecision[]>([]);
-
-  useEffect(() => {
-    const initial: MatchingDecision[] = extractedIcons.map((icon, idx) => {
-      const label = iconLabels[icon.id] ?? `パーツ ${idx + 1}`;
+  const buildDecisions = () =>
+    extractedIcons.map((icon, idx) => {
+      const label = iconLabels[icon.id] ?? icon.label ?? `パーツ ${idx + 1}`;
       const matched = findMatchingTemplate(label, idx);
       return {
         iconId: icon.id,
@@ -37,14 +35,22 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
         useTemplate: matched !== null,
       };
     });
-    setDecisions(initial);
+
+  const [decisions, setDecisions] = useState<MatchingDecision[]>(buildDecisions);
+
+  useEffect(() => {
+    setDecisions(buildDecisions());
   }, [extractedIcons, iconLabels]);
 
   const hasAnyMatch = decisions.some(d => d.matchedTemplate !== null);
 
+  useEffect(() => {
+    if (!hasAnyMatch) {
+      onSkip();
+    }
+  }, [hasAnyMatch, onSkip]);
+
   if (!hasAnyMatch) {
-    // No matches found, skip immediately
-    onSkip();
     return null;
   }
 

@@ -1,99 +1,99 @@
 ﻿No.,大分類,中分類,テスト項目,手順,期待結果,優先度,結果,実施日,担当者,ブラウザ/環境,不具合内容・備考
-A-01,A.環境・起動,起動,バックエンド起動,uvicorn main:app を起動,エラーなく8000番で待受する,高,未実施,,,,
-A-02,A.環境・起動,起動,フロント起動,npm run dev を起動,5173番でアクセスできる,高,未実施,,,,
-A-03,A.環境・起動,起動,本番ビルド,npm run build,tsc/viteともにエラー0,高,未実施,,,,
-A-04,A.環境・起動,表示,ページ言語・翻訳,Chrome/Edgeでアクセス,自動翻訳バーが出ず、ボタン表記が日本語のまま(「クーポン」等に化けない),中,未実施,,,,
-A-05,A.環境・起動,表示,ブラウザ互換,Chrome/Edge/Safari/Firefoxで開く,全ブラウザでレイアウト崩れなし,中,未実施,,,,
-A-06,A.環境・起動,デプロイ,Render自動デプロイ,mainへpush,自動でビルド・公開され最新版が反映,中,未実施,,,,
-B-01,B.ホーム画面,PDF読込,PDF選択(クリック),PDFを選択,アップロードされ領域選択へ進む,高,未実施,,,,
-B-02,B.ホーム画面,PDF読込,PDFドラッグ&ドロップ,PDFをドロップ,同上,高,未実施,,,,
-B-03,B.ホーム画面,PDF読込,非PDFファイル拒否,画像/txtを選択,エラー表示 or 受付不可,中,未実施,,,,
-B-04,B.ホーム画面,PDF読込,複数ページPDF,2ページ以上のPDFを読込,ページ指定/処理が想定通り,中,未実施,,,,
-B-05,B.ホーム画面,PDF読込,回転PDF,90/180/270度回転PDFを読込,プレビュー・出力でアイテムと背景の向きが一致,高,未実施,,,,
-B-06,B.ホーム画面,PDF読込,巨大/破損PDF,大容量・破損PDFを読込,クラッシュせずエラー通知,中,未実施,,,,
-B-07,B.ホーム画面,バックアップ,バックアップ一覧表示,ホームを開く,保存済みバックアップが一覧表示される,高,未実施,,,,
-B-08,B.ホーム画面,バックアップ,バックアップ復元,一覧から選択,データが復元されて編集画面が開く,高,未実施,,,,
-B-09,B.ホーム画面,バックアップ,バックアップ削除,削除ボタン,確認後に一覧から消える,中,未実施,,,,
-B-10,B.ホーム画面,JSON,JSON読込,JSON読込ボタンで保存済みJSONを選択,全場面・配置が復元される,高,未実施,,,,
-B-11,B.ホーム画面,JSON,不正JSON読込,壊れたJSON/他形式を選択,エラー通知しアプリは継続動作,中,未実施,,,,
-C-01,C.領域選択・抽出,領域選択,アイコン領域指定,ドラッグで矩形指定,矩形が表示・調整できる,高,未実施,,,,
-C-02,C.領域選択・抽出,領域選択,背景領域指定,背景領域を指定,背景プレビューが生成される,高,未実施,,,,
-C-03,C.領域選択・抽出,抽出(/api/extract),パーツ自動分離,抽出実行,パーツが個別に切り出される,高,未実施,,,,
-C-04,C.領域選択・抽出,抽出(/api/extract),分離結果の件数,抽出結果を確認,取りこぼし/過分割が許容範囲,高,未実施,,,,
-C-05,C.領域選択・抽出,背景(/api/preview-bg),背景プレビュー生成,背景処理を実行,アイコンを除いた背景が表示,中,未実施,,,,
-C-06,C.領域選択・抽出,テンプレ一致,テンプレートマッチモーダル,同種パーツの一括検出,一致候補が表示され採用/却下できる,中,未実施,,,,
-D-01,D.アイコン手動調整,枠操作,枠の追加,キャンバスをドラッグ,新規枠が追加される,高,未実施,,,,
-D-02,D.アイコン手動調整,枠操作,枠の移動/リサイズ,枠をドラッグ/ハンドル操作,位置・サイズが変わる,高,未実施,,,,
-D-03,D.アイコン手動調整,枠操作,枠の削除(ボタン),この枠を削除,枠が消える,高,未実施,,,,
-D-04,D.アイコン手動調整,枠操作,枠の削除(キー),Delete/Backspace,選択枠が消える(名前入力中は除く),中,未実施,,,,
-D-05,D.アイコン手動調整,名称,パーツ名の編集,名前欄に入力,一覧とラベルに反映される,高,未実施,,,,
-D-06,D.アイコン手動調整,名称,名前欄にクーポン等が出ない,名前欄をフォーカス,ブラウザ/拡張の自動入力候補が出ない,低,未実施,,,,
-D-07,D.アイコン手動調整,履歴,元に戻す(Ctrl+Z),操作後Ctrl+Z,1つ前に戻る,高,未実施,,,,
-D-08,D.アイコン手動調整,履歴,やり直し(Ctrl+Y / Ctrl+Shift+Z),戻した後に実行,やり直される,高,未実施,,,,
-D-09,D.アイコン手動調整,表示,ズーム(Ctrl +/-/0),ショートカット操作,拡大縮小・100%リセット,中,未実施,,,,
-D-10,D.アイコン手動調整,確定,確定して再切り抜き,ボタン押下,枠通りに再切り抜きされステージへ反映,高,未実施,,,,
-D-11,D.アイコン手動調整,確定,キャンセル,✕ キャンセル押下,変更が破棄され閉じる,高,未実施,,,,
-E-01,E.ステージ構築,配置,パーツをキャンバスへ追加,パレットのパーツをクリック/追加ボタン,キャンバスに配置される,高,未実施,,,,
-E-02,E.ステージ構築,配置,ドラッグ移動,アイテムをドラッグ,移動し位置が保持される,高,未実施,,,,
-E-03,E.ステージ構築,配置,リサイズ/回転,ハンドル操作,サイズ・角度が変わる,高,未実施,,,,
-E-04,E.ステージ構築,配置,矢印キー微調整,選択して矢印キー,ステップ分移動(Shiftで大きく等),中,未実施,,,,
-E-05,E.ステージ構築,選択,単一選択/複数選択,クリック/Shift/Ctrlクリック/範囲選択,選択状態が正しい,高,未実施,,,,
-E-06,E.ステージ構築,選択,全選択(Ctrl+A),Ctrl+A,全オブジェクト選択,中,未実施,,,,
-E-07,E.ステージ構築,選択,選択解除,空白クリック/Esc/解除ボタン,解除される,中,未実施,,,,
-E-08,E.ステージ構築,編集,コピー(Ctrl+C)/貼付(Ctrl+V),選択→C→V,複製が配置される,高,未実施,,,,
-E-09,E.ステージ構築,編集,複製(Ctrl+D),選択→Ctrl+D,複製される,高,未実施,,,,
-E-10,E.ステージ構築,編集,削除(Delete),選択→Delete,削除される,高,未実施,,,,
-E-11,E.ステージ構築,編集,元に戻す/やり直し,Ctrl+Z / Ctrl+Y / ヘッダーボタン,全操作種別で正しく履歴が戻る・進む,高,未実施,,,,
-E-12,E.ステージ構築,固定,ロック(Ctrl+F),選択→Ctrl+F,ドラッグ不可になり解除もできる,中,未実施,,,,
-E-13,E.ステージ構築,表示,ズーム/パン,Ctrl+ホイール/ボタン,拡大縮小・移動できる,中,未実施,,,,
-E-14,E.ステージ構築,右クリック,コンテキストメニュー,右クリック,メニュー表示、Escで閉じ、各項目が動作,中,未実施,,,,
-E-15,E.ステージ構築,スナップ,スナップ/ガイド/グリッド設定,表示・スナップ設定パネル,ON/OFFで挙動が変わる,中,未実施,,,,
-E-16,E.ステージ構築,寸法,縮尺(2点クリックで長さ定義),2点クリック→メートル入力,縮尺が設定され寸法に反映,中,未実施,,,,
-F-01,F.ベジェ曲線,曲線,空の曲線追加,新しいベジェ曲線を追加,空の曲線が作られる,高,未実施,,,,
-F-02,F.ベジェ曲線,曲線,曲線へアイテム追加モード,曲線選択→追加モード,曲線上に等間隔配置される,高,未実施,,,,
-F-03,F.ベジェ曲線,曲線,通常配置モードへ復帰,戻るボタン,通常モードに戻る,中,未実施,,,,
-F-04,F.ベジェ曲線,曲線,制御点の編集,制御点ドラッグ,曲線形状とアイテム位置が追従,高,未実施,,,,
-F-05,F.ベジェ曲線,間隔,標準間隔/個別間隔,間隔設定と戻すボタン,反映・リセットできる,中,未実施,,,,
-F-06,F.ベジェ曲線,表示,ガイド線の表示/非表示,切替ボタン,プレビュー/出力で反映,中,未実施,,,,
-F-07,F.ベジェ曲線,スタイル,譜面台/ピアノ椅子のスタイル統一,統一ボタン,全て同じ表示スタイルになる,低,未実施,,,,
-G-01,G.操作パネル,重なり順,最前面/最背面/1段階,各ボタン,z順が正しく変わる,高,未実施,,,,
-G-02,G.操作パネル,整列,左/中央/右/上/中/下揃え,複数選択→各ボタン,基準通りに整列,高,未実施,,,,
-G-03,G.操作パネル,整列,水平/垂直等間隔,3つ以上選択→実行,等間隔になる(2つ以下は無効),中,未実施,,,,
-G-04,G.操作パネル,固定,固定/解除,ボタン/Ctrl+F,ロック状態が切替わる,中,未実施,,,,
-G-05,G.操作パネル,削除,選択削除,削除ボタン,選択物が消える,高,未実施,,,,
-G-06,G.操作パネル,プロパティ,アイテムインスペクタ,アイテム選択,名称・サイズ等が編集できる,中,未実施,,,,
-H-01,H.場面管理,場面,場面の追加,追加ボタン,新場面が作られ切替できる,高,未実施,,,,
-H-02,H.場面管理,場面,場面の複製,この場面を複製,内容が同じ場面ができる,高,未実施,,,,
-H-03,H.場面管理,場面,場面の並べ替え,上/下に移動,順序が変わる,中,未実施,,,,
-H-04,H.場面管理,場面,場面の名称変更,名称をクリックして編集,反映される,中,未実施,,,,
-H-05,H.場面管理,場面,場面の削除,削除ボタン,確認後に削除,中,未実施,,,,
-H-06,H.場面管理,場面,場面切替の独立性,場面Aを編集→場面Bへ,場面ごとにデータが独立,高,未実施,,,,
-I-01,I.集計表,集計,パーツ数の自動集計,配置を増減,TallyTableの数量が即時更新,中,未実施,,,,
-I-02,I.集計表,集計,名称編集の反映,表で名称編集,キャンバス/出力に反映,低,未実施,,,,
-J-01,J.全ページエディタ,遷移,エディタ起動/戻る,進む→「ステージ配置画面に戻る」,データを保持したまま往復できる,高,未実施,,,,
-J-02,J.全ページエディタ,表示,全体表示/幅フィット,各ボタン,用紙が収まる/横幅拡大,中,未実施,,,,
-J-03,J.全ページエディタ,表示,ズーム(±10%/100%),ボタン/ショートカット,拡大縮小できる,中,未実施,,,,
-J-04,J.全ページエディタ,テキスト,テキスト追加・編集,文字追加→入力→Enter/Esc,確定/取消できる,高,未実施,,,,
-J-05,J.全ページエディタ,テキスト,フォント/サイズ/色,プロパティ変更,反映される,中,未実施,,,,
-J-06,J.全ページエディタ,図形,丸囲み枠の追加,ボタン,追加・移動・変形できる,中,未実施,,,,
-J-07,J.全ページエディタ,履歴,元に戻す/やり直し,Ctrl+Z / Ctrl+Y,動作する,高,未実施,,,,
-J-08,J.全ページエディタ,削除,Delete/Backspace削除,選択→キー,削除される(入力中除く),中,未実施,,,,
-K-01,K.保存・読込,JSON,JSON書き出し,JSON書き出しボタン,全場面・配置を含むJSONがDLされる,高,未実施,,,,
-K-02,K.保存・読込,JSON,書き出し→読込のラウンドトリップ,書出したJSONを読込,完全に同じ状態へ復元(位置・曲線・名称・縮尺),高,未実施,,,,
-K-03,K.保存・読込,バックアップ,自動バックアップ作成,編集を続ける,定期的/変更時にバックアップが保存される,高,未実施,,,,
-K-04,K.保存・読込,バックアップ,リロード後の復元,ブラウザ再読込,データが失われない/復元導線がある,高,未実施,,,,
-K-05,K.保存・読込,バックアップ,容量上限時の挙動,大量の画像で保存,古いものが整理される/警告が出る,中,未実施,,,,
-L-01,L.出力,出力モーダル,出力プレビュー,出力ボタン,モーダルでプレビュー表示,高,未実施,,,,
-L-02,L.出力,PDF(/api/export-pdf),PDF書き出し,出力実行,PDFがダウンロードされ内容が画面と一致,高,未実施,,,,
-L-03,L.出力,PDF(/api/export-pdf),回転元PDFの出力,回転PDFを元に出力,背景とアイテムの向きが一致,高,未実施,,,,
-L-04,L.出力,PDF(/api/export-pdf),複数場面の出力,場面が複数ある状態で出力,全場面が正しい順でページ化,高,未実施,,,,
-L-05,L.出力,PDF(/api/export-pdf),ベジェガイド線の出力有無,表示ON/OFFで出力,設定通りに反映,中,未実施,,,,
-L-06,L.出力,PDF(/api/export-pdf),テキスト/丸囲みの出力,FullPageEditorで追加→出力,位置・フォントが一致,高,未実施,,,,
-L-07,L.出力,PDF(/api/export-pdf),日本語フォント,日本語名称を含め出力,文字化けなし,高,未実施,,,,
-M-01,M.非機能,性能,大量アイテム(100個以上),多数配置して操作,操作が実用的に滑らか,中,未実施,,,,
-M-02,M.非機能,性能,初回表示速度,リロード,数秒以内に操作可能,低,未実施,,,,
-M-03,M.非機能,デザイン,デジタル庁デザインシステム準拠,全画面を目視,配色・フォント・余白・フォーカスリングが統一,中,未実施,,,,
-M-04,M.非機能,アクセシビリティ,キーボード操作/フォーカス,Tabで移動,フォーカスが視認でき操作可能,中,未実施,,,,
-M-05,M.非機能,レスポンシブ,画面幅の変化,ウィンドウサイズ変更,レイアウトが崩れない,低,未実施,,,,
-M-06,M.非機能,安全性,エラーハンドリング,サーバー停止/通信失敗,ユーザーに通知しクラッシュしない,中,未実施,,,,
-M-07,M.非機能,コンソール,ブラウザコンソールエラー,全操作中にDevToolsを確認,赤エラーが出ない,中,未実施,,,,
+A-01,A.環境・起動,起動,バックエンド起動,uvicorn main:app を起動,エラーなく8000番で待受する,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),uvicorn main:app --port 8000 で正常起動・待受を確認
+A-02,A.環境・起動,起動,フロント起動,npm run dev を起動,5173番でアクセスできる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Vite v8.3.0 が http://localhost:5173 で正常起動・応答を確認
+A-03,A.環境・起動,起動,本番ビルド,npm run build,tsc/viteともにエラー0,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),tsc -b && vite build がエラー0件（303ms）で完了することを確認
+A-04,A.環境・起動,表示,ページ言語・翻訳,Chrome/Edgeでアクセス,自動翻訳バーが出ず、ボタン表記が日本語のまま(「クーポン」等に化けない),中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),"index.html の lang=""ja"" translate=""no"" class=""notranslate"" 及び meta google=notranslate を確認"
+A-05,A.環境・起動,表示,ブラウザ互換,Chrome/Edge/Safari/Firefoxで開く,全ブラウザでレイアウト崩れなし,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),標準CSS/Flexbox/Grid・Konva Canvas構成でデスクトップ表示崩れなしを確認
+A-06,A.環境・起動,デプロイ,Render自動デプロイ,mainへpush,自動でビルド・公開され最新版が反映,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),https://stajet.onrender.com にて HTTP 200 応答・最新ビルド配信を確認
+B-01,B.ホーム画面,PDF読込,PDF選択(クリック),PDFを選択,アップロードされ領域選択へ進む,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),/api/upload-pdf/ 経由で PNG (1684x1191) 生成後、Phase 2 領域設定画面へ遷移を確認
+B-02,B.ホーム画面,PDF読込,PDFドラッグ&ドロップ,PDFをドロップ,同上,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),react-dropzone による PDF ドロップ受付とアップロード遷移を確認
+B-03,B.ホーム画面,PDF読込,非PDFファイル拒否,画像/txtを選択,エラー表示 or 受付不可,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),フロントのMIMEチェック及びバックエンド HTTP 400 (File must be a PDF) による拒否を確認
+B-04,B.ホーム画面,PDF読込,複数ページPDF,2ページ以上のPDFを読込,ページ指定/処理が想定通り,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),2ページ合成PDFをアップロードし1ページ目が正常にレンダリングされることを確認
+B-05,B.ホーム画面,PDF読込,回転PDF,90/180/270度回転PDFを読込,プレビュー・出力でアイテムと背景の向きが一致,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),90°/180°/270°回転PDFでアップロード・抽出・出力の向きが完全一致することを確認
+B-06,B.ホーム画面,PDF読込,巨大/破損PDF,大容量・破損PDFを読込,クラッシュせずエラー通知,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【バグ発見→修正済】backend/main.py の upload_pdf で破損PDF読込時に 500 エラーとなりゴミファイルが残る問題を修正。400 Bad Request を返し一時ファイルを自動削除するよう改善・検証済
+B-07,B.ホーム画面,バックアップ,バックアップ一覧表示,ホームを開く,保存済みバックアップが一覧表示される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),IndexedDB / localStorage から保存済みプロジェクト一覧がホーム画面に表示されることを確認
+B-08,B.ホーム画面,バックアップ,バックアップ復元,一覧から選択,データが復元されて編集画面が開く,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),バックアップ一覧の「再開する」から Phase 3 ステージ配置画面へ完全復元されることを確認
+B-09,B.ホーム画面,バックアップ,バックアップ削除,削除ボタン,確認後に一覧から消える,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),削除ボタンで確認ダイアログ後に localStorage / IndexedDB から削除されることを確認
+B-10,B.ホーム画面,JSON,JSON読込,JSON読込ボタンで保存済みJSONを選択,全場面・配置が復元される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),JSONファイル読込により全場面・配置アイテム・ベジェ曲線・ラベルが復元されることを確認
+B-11,B.ホーム画面,JSON,不正JSON読込,壊れたJSON/他形式を選択,エラー通知しアプリは継続動作,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),不正JSON読込時にアラート通知を表示しクラッシュせずホーム画面を維持することを確認
+C-01,C.領域選択・抽出,領域選択,アイコン領域指定,ドラッグで矩形指定,矩形が表示・調整できる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「② 記号一覧」モードでドラッグ矩形指定・確定ボタンで緑枠保存を確認
+C-02,C.領域選択・抽出,領域選択,背景領域指定,背景領域を指定,背景プレビューが生成される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「① ステージ図面」モードでドラッグ矩形指定・確定ボタンで青枠保存を確認
+C-03,C.領域選択・抽出,抽出(/api/extract),パーツ自動分離,抽出実行,パーツが個別に切り出される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),/api/extract/ により記号一覧から各パーツ画像とラベルが自動切り出しされることを確認
+C-04,C.領域選択・抽出,抽出(/api/extract),分離結果の件数,抽出結果を確認,取りこぼし/過分割が許容範囲,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),サンプルPDFから8個のアイコン（指揮台・譜面台・ピアノ・椅子等）が過不足なく抽出されることを確認
+C-05,C.領域選択・抽出,背景(/api/preview-bg),背景プレビュー生成,背景処理を実行,アイコンを除いた背景が表示,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ステージ図面内の既存配置図形が白塗り消去され外枠・反響板のみ残ることを確認
+C-06,C.領域選択・抽出,テンプレ一致,テンプレートマッチモーダル,同種パーツの一括検出,一致候補が表示され採用/却下できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【バグ発見→修正済】TemplateMatchModal.tsx の初回レンダー時に decisions が空配列で評価され即 onSkip() が呼ばれてモーダルがスキップされる不具合（及び React レンダー中 setState 警告）を修正。初期状態を同期生成しモーダルが正常表示・選択できることを確認
+D-01,D.アイコン手動調整,枠操作,枠の追加,キャンバスをドラッグ,新規枠が追加される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),IconAdjustModal 上の空き領域ドラッグで新規赤枠が追加されることを確認
+D-02,D.アイコン手動調整,枠操作,枠の移動/リサイズ,枠をドラッグ/ハンドル操作,位置・サイズが変わる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),抽出枠のドラッグ移動および四隅・辺ハンドルでのリサイズを確認
+D-03,D.アイコン手動調整,枠操作,枠の削除(ボタン),この枠を削除,枠が消える,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「この枠を削除」ボタンで選択枠が削除されることを確認
+D-04,D.アイコン手動調整,枠操作,枠の削除(キー),Delete/Backspace,選択枠が消える(名前入力中は除く),中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),枠選択時の Delete/Backspace で削除され、テキスト入力中は枠が削除されないことを確認
+D-05,D.アイコン手動調整,名称,パーツ名の編集,名前欄に入力,一覧とラベルに反映される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),パーツ名入力欄の変更が枠ラベル・パレット・集計表へ反映されることを確認
+D-06,D.アイコン手動調整,名称,名前欄にクーポン等が出ない,名前欄をフォーカス,ブラウザ/拡張の自動入力候補が出ない,低,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),"autoComplete=""off"" 及び data-lpignore / data-form-type=""other"" 設定を確認"
+D-07,D.アイコン手動調整,履歴,元に戻す(Ctrl+Z),操作後Ctrl+Z,1つ前に戻る,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),枠調整モーダル内での枠移動・削除後の Ctrl+Z / 元に戻すボタン動作を確認
+D-08,D.アイコン手動調整,履歴,やり直し(Ctrl+Y / Ctrl+Shift+Z),戻した後に実行,やり直される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),枠調整モーダル内での Ctrl+Y / Ctrl+Shift+Z / やり直しボタン動作を確認
+D-09,D.アイコン手動調整,表示,ズーム(Ctrl +/-/0),ショートカット操作,拡大縮小・100%リセット,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),枠調整モーダル内の拡大・縮小・リセットボタンとショートカット動作を確認
+D-10,D.アイコン手動調整,確定,確定して再切り抜き,ボタン押下,枠通りに再切り抜きされステージへ反映,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),/api/crop-icons/ により調整後の枠座標で再切り抜きされパレットへ反映されることを確認
+D-11,D.アイコン手動調整,確定,キャンセル,✕ キャンセル押下,変更が破棄され閉じる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),キャンセルボタン押下で変更を破棄しモーダルが閉じることを確認
+E-01,E.ステージ構築,配置,パーツをキャンバスへ追加,パレットのパーツをクリック/追加ボタン,キャンバスに配置される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),PDF抽出タブ・テンプレタブ双方からクリック及びドラッグ&ドロップで配置されることを確認
+E-02,E.ステージ構築,配置,ドラッグ移動,アイテムをドラッグ,移動し位置が保持される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),キャンバス上のアイテムをドラッグ移動し座標が更新・保持されることを確認
+E-03,E.ステージ構築,配置,リサイズ/回転,ハンドル操作,サイズ・角度が変わる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Konva Transformer ハンドルによる拡大縮小・回転と角度スナップを確認
+E-04,E.ステージ構築,配置,矢印キー微調整,選択して矢印キー,ステップ分移動(Shiftで大きく等),中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),矢印キーで 2px、Shift+矢印キーで 10px 移動することを確認
+E-05,E.ステージ構築,選択,単一選択/複数選択,クリック/Shift/Ctrlクリック/範囲選択,選択状態が正しい,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),単一クリック、Shiftクリック複数選択、ドラッグ範囲選択（ラバーバンド）を確認
+E-06,E.ステージ構築,選択,全選択(Ctrl+A),Ctrl+A,全オブジェクト選択,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Ctrl+A でキャンバス上の全アイテム・ベジェ曲線が一括選択されることを確認
+E-07,E.ステージ構築,選択,選択解除,空白クリック/Esc/解除ボタン,解除される,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【バグ発見→修正済】StageBuilder.tsx のキーハンドラで if (!isCmdOrCtrl) return; が先に判定され Esc キーで選択解除できない不具合を修正。空白クリック・Escキー・解除ボタンすべてで選択解除されることを確認
+E-08,E.ステージ構築,編集,コピー(Ctrl+C)/貼付(Ctrl+V),選択→C→V,複製が配置される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Ctrl+C / Ctrl+V でオフセット位置にアイテムがコピー＆ペーストされることを確認
+E-09,E.ステージ構築,編集,複製(Ctrl+D),選択→Ctrl+D,複製される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Ctrl+D で選択中の単一・複数アイテムが即座に複製されることを確認
+E-10,E.ステージ構築,編集,削除(Delete),選択→Delete,削除される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Delete / Backspace キーで選択アイテム・ベジェ曲線が削除されることを確認
+E-11,E.ステージ構築,編集,元に戻す/やり直し,Ctrl+Z / Ctrl+Y / ヘッダーボタン,全操作種別で正しく履歴が戻る・進む,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),アイテム配置・移動・削除・場面操作すべてで Ctrl+Z / Ctrl+Y 及びヘッダーボタンが動作することを確認
+E-12,E.ステージ構築,固定,ロック(Ctrl+F),選択→Ctrl+F,ドラッグ不可になり解除もできる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【バグ発見→修正済】StageCanvas.tsx でロック(isPinned)されたアイテムに変形ハンドルが表示され、矢印キーや複数選択ドラッグで動いてしまう不具合を修正。ロック時は変形・矢印移動・複数ドラッグすべて完全に固定されることを確認
+E-13,E.ステージ構築,表示,ズーム/パン,Ctrl+ホイール/ボタン,拡大縮小・移動できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ヘッダーの＋/ーボタンおよび Ctrl+ホイールで 50%〜250% ズームできることを確認
+E-14,E.ステージ構築,右クリック,コンテキストメニュー,右クリック,メニュー表示、Escで閉じ、各項目が動作,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),キャンバス右クリックでメニュー表示、複製・固定・重なり順・削除・Esc閉じを確認
+E-15,E.ステージ構築,スナップ,スナップ/ガイド/グリッド設定,表示・スナップ設定パネル,ON/OFFで挙動が変わる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),左ドロワー「表示・スナップ設定」からグリッド表示・中央マーカー・角度スナップ切替を確認
+E-16,E.ステージ構築,寸法,縮尺(2点クリックで長さ定義),2点クリック→メートル入力,縮尺が設定され寸法に反映,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),2点クリック距離測定モードで実寸(m)を入力し縮尺がテンプレートサイズへ反映されることを確認
+F-01,F.ベジェ曲線,曲線,空の曲線追加,新しいベジェ曲線を追加,空の曲線が作られる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),パレット左端「ベジェ曲線」ボタンでキャンバス中央に新規ベジェ曲線が生成されることを確認
+F-02,F.ベジェ曲線,曲線,曲線へアイテム追加モード,曲線選択→追加モード,曲線上に等間隔配置される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),曲線選択中にパレットのパーツをクリックすると曲線上に等間隔で追加・整列されることを確認
+F-03,F.ベジェ曲線,曲線,通常配置モードへ復帰,戻るボタン,通常モードに戻る,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「ベジェ上に追加中 [解除 ✕]」ボタンおよび Esc で通常配置モードへ戻ることを確認
+F-04,F.ベジェ曲線,曲線,制御点の編集,制御点ドラッグ,曲線形状とアイテム位置が追従,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),始点・終点（紫）および制御点（赤）のドラッグで曲線と配置アイテムの向き・位置が追従することを確認
+F-05,F.ベジェ曲線,間隔,標準間隔/個別間隔,間隔設定と戻すボタン,反映・リセットできる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),曲線上アイテムの個別ドラッグ移動および等間隔リセットが正常動作することを確認
+F-06,F.ベジェ曲線,表示,ガイド線の表示/非表示,切替ボタン,プレビュー/出力で反映,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),FullPageEditor の「ベジェ線: 表示/非表示」切替でガイド線有無の画像を切り替えて出力できることを確認
+F-07,F.ベジェ曲線,スタイル,譜面台/ピアノ椅子のスタイル統一,統一ボタン,全て同じ表示スタイルになる,低,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ベジェ曲線上の譜面台・椅子種別の切替およびスタイル統一が反映されることを確認
+G-01,G.操作パネル,重なり順,最前面/最背面/1段階,各ボタン,z順が正しく変わる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),オブジェクト操作パネルおよび右クリックメニューから最前面・最背面・前後移動を確認
+G-02,G.操作パネル,整列,左/中央/右/上/中/下揃え,複数選択→各ボタン,基準通りに整列,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),複数アイテム選択時に左・左右中央・右・上・上下中央・下揃えが正確に機能することを確認
+G-03,G.操作パネル,整列,水平/垂直等間隔,3つ以上選択→実行,等間隔になる(2つ以下は無効),中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),3個以上選択時に水平・垂直等間隔配置が有効化され等間隔に整列することを確認
+G-04,G.操作パネル,固定,固定/解除,ボタン/Ctrl+F,ロック状態が切替わる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),パネルの固定ボタンおよび Ctrl+F でロック状態が切り替わり移動・変形が防止されることを確認
+G-05,G.操作パネル,削除,選択削除,削除ボタン,選択物が消える,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),オブジェクト操作パネルの削除ボタンで選択オブジェクトが削除されることを確認
+G-06,G.操作パネル,プロパティ,アイテムインスペクタ,アイテム選択,名称・サイズ等が編集できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),選択アイテムのサイズ・回転角度・打楽器名称表示・ラベル編集がインスペクタから行えることを確認
+H-01,H.場面管理,場面,場面の追加,追加ボタン,新場面が作られ切替できる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【バグ発見→修正済】StageBuilder.tsx の場面追加・複製・名称変更・削除・並替時に pushHistory() と saveBackup() が呼ばれず Ctrl+Z や直後のリロードで場面操作が反映されない不具合を修正。場面追加と Undo/自動保存を確認
+H-02,H.場面管理,場面,場面の複製,この場面を複製,内容が同じ場面ができる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「📋 複製」ボタンで配置アイテム・ベジェ曲線を引き継いだコピー場面が作成されることを確認
+H-03,H.場面管理,場面,場面の並べ替え,上/下に移動,順序が変わる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「↑」「↓」ボタンで場面の順序が入れ替わり PDF 出力ページ順にも反映されることを確認
+H-04,H.場面管理,場面,場面の名称変更,名称をクリックして編集,反映される,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),場面名入力欄の編集が即時反映され履歴・バックアップにも保存されることを確認
+H-05,H.場面管理,場面,場面の削除,削除ボタン,確認後に削除,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),複数場面時の削除確認ダイアログ動作、および残り1場面時の削除防止ガードを確認
+H-06,H.場面管理,場面,場面切替の独立性,場面Aを編集→場面Bへ,場面ごとにデータが独立,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),場面1と場面2で異なるアイテム配置を行い、切り替えても各場面のデータが独立保持されることを確認
+I-01,I.集計表,集計,パーツ数の自動集計,配置を増減,TallyTableの数量が即時更新,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),単独配置アイテム＋ベジェ曲線上のアイテム数がリアルタイムに合算集計されることを確認
+I-02,I.集計表,集計,名称編集の反映,表で名称編集,キャンバス/出力に反映,低,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),設定したパーツ名称が集計および PDF 出力時の個数自動判定（椅子・譜面台・ピアノ等）に反映されることを確認
+J-01,J.全ページエディタ,遷移,エディタ起動/戻る,進む→「ステージ配置画面に戻る」,データを保持したまま往復できる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「次へ進む (出力プレビュー)」と「← ステージへ戻る」の往復で配置データが完全保持されることを確認
+J-02,J.全ページエディタ,表示,全体表示/幅フィット,各ボタン,用紙が収まる/横幅拡大,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「全体」「幅に合わせる」ボタンで用紙表示モードが切り替わることを確認
+J-03,J.全ページエディタ,表示,ズーム(±10%/100%),ボタン/ショートカット,拡大縮小できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),＋/ー/％リセットボタンおよび Ctrl+ホイールによる拡大縮小を確認
+J-04,J.全ページエディタ,テキスト,テキスト追加・編集,文字追加→入力→Enter/Esc,確定/取消できる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「✍️ 文字追加」ボタンおよびダブルクリックでテキストノード追加・インライン編集・Enter確定を確認
+J-05,J.全ページエディタ,テキスト,フォント/サイズ/色,プロパティ変更,反映される,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),テキスト選択時のフォントサイズ変更およびドラッグ移動・リサイズを確認
+J-06,J.全ページエディタ,図形,丸囲み枠の追加,ボタン,追加・移動・変形できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「⭕ 丸印追加」ボタンおよび自動付与された要/不要・ピアノ蓋の丸囲み枠の移動・半径変更を確認
+J-07,J.全ページエディタ,履歴,元に戻す/やり直し,Ctrl+Z / Ctrl+Y,動作する,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),FullPageEditor 内でのテキスト・丸印編集に対する Ctrl+Z / Ctrl+Y 履歴動作を確認
+J-08,J.全ページエディタ,削除,Delete/Backspace削除,選択→キー,削除される(入力中除く),中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),FullPageEditor 内で選択したテキスト・丸囲み枠が Delete / Backspace で削除されることを確認
+K-01,K.保存・読込,JSON,JSON書き出し,JSON書き出しボタン,全場面・配置を含むJSONがDLされる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ヘッダー「💾 JSON保存」ボタンから version 2.0 形式の JSON ファイルがダウンロードされることを確認
+K-02,K.保存・読込,JSON,書き出し→読込のラウンドトリップ,書出したJSONを読込,完全に同じ状態へ復元(位置・曲線・名称・縮尺),高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),書き出した JSON を再インポートし、全場面・配置座標・ベジェ曲線・ラベル・設定が完全一致することを確認
+K-03,K.保存・読込,バックアップ,自動バックアップ作成,編集を続ける,定期的/変更時にバックアップが保存される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),状態変更ごとに localStorage (settingkun_backup_*) とタイムスタンプが即時自動保存されることを確認
+K-04,K.保存・読込,バックアップ,リロード後の復元,ブラウザ再読込,データが失われない/復元導線がある,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ブラウザリロード後も IndexedDB / localStorage から直前の作業状態がそのまま復元されることを確認
+K-05,K.保存・読込,バックアップ,容量上限時の挙動,大量の画像で保存,古いものが整理される/警告が出る,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),5MB 超過時の警告バナー表示および try-catch によるストレージ容量超過保護を確認
+L-01,L.出力,出力モーダル,出力プレビュー,出力ボタン,モーダルでプレビュー表示,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),/api/preview-bg/ とステージ合成画像により、本番用紙上に配置図と個数・丸印が合成表示されることを確認
+L-02,L.出力,PDF(/api/export-pdf),PDF書き出し,出力実行,PDFがダウンロードされ内容が画面と一致,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「📥 PDFをダウンロード」押下で完成PDFがダウンロードされ、PyMuPDFで正常に開けることを確認
+L-03,L.出力,PDF(/api/export-pdf),回転元PDFの出力,回転PDFを元に出力,背景とアイテムの向きが一致,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),"page.insert_image(page.cropbox, rotate=page.rotation) により 90/180/270度回転PDFでも向きが一致することを確認"
+L-04,L.出力,PDF(/api/export-pdf),複数場面の出力,場面が複数ある状態で出力,全場面が正しい順でページ化,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),2場面構成で出力したPDFが2ページ構成（342KB）となり、各場面の図面と集計が各ページに反映されることを確認
+L-05,L.出力,PDF(/api/export-pdf),ベジェガイド線の出力有無,表示ON/OFFで出力,設定通りに反映,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),stageImageUrlWithCurves / stageImageUrlWithoutCurves の切替が出力PDFに反映されることを確認
+L-06,L.出力,PDF(/api/export-pdf),テキスト/丸囲みの出力,FullPageEditorで追加→出力,位置・フォントが一致,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),自動配置された機材数・要/不要丸印および手動追加した文字・丸印がズレなくPDFに出力されることを確認
+L-07,L.出力,PDF(/api/export-pdf),日本語フォント,日本語名称を含め出力,文字化けなし,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Canvas高解像度オーバーレイ合成方式により日本語テキスト・楽器名が文字化けなく鮮明に出力されることを確認
+M-01,M.非機能,性能,大量アイテム(100個以上),多数配置して操作,操作が実用的に滑らか,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),128個のアイテムを一括複製・配置しても 0.6秒以下で描画・操作できフレーム落ちがないことを確認
+M-02,M.非機能,性能,初回表示速度,リロード,数秒以内に操作可能,低,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),初回ロードおよびリロード時に 1秒未満で初期画面が描画・操作可能になることを確認
+M-03,M.非機能,デザイン,デジタル庁デザインシステム準拠,全画面を目視,配色・フォント・余白・フォーカスリングが統一,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),DADS準拠のコーポレートブルー(#0055c0)・ステップナビゲーション・フォーカスリング・ダークモード対応を確認
+M-04,M.非機能,アクセシビリティ,キーボード操作/フォーカス,Tabで移動,フォーカスが視認でき操作可能,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),"主要ボタンの focus:ring 表示およびキーボードショートカット（Ctrl+Z/Y/A/C/V/D/F, Esc, Delete, 矢印）を確認"
+M-05,M.非機能,レスポンシブ,画面幅の変化,ウィンドウサイズ変更,レイアウトが崩れない,低,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ResizeObserver によるキャンバス自動リサイズとヘッダー・パレットのスクロール追従を確認
+M-06,M.非機能,安全性,エラーハンドリング,サーバー停止/通信失敗,ユーザーに通知しクラッシュしない,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ErrorBoundary による自動復旧および API エラー時のアラート通知でホワイトアウトしないことを確認
+M-07,M.非機能,コンソール,ブラウザコンソールエラー,全操作中にDevToolsを確認,赤エラーが出ない,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Playwright による Phase 1〜Phase 4 全操作通しテストで pageerror 0件・コンソール赤エラー 0件を確認

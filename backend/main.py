@@ -73,7 +73,10 @@ async def upload_pdf(file: UploadFile = File(...)):
         # Open PDF with PyMuPDF
         doc = fitz.open(pdf_path)
         if len(doc) == 0:
-            raise HTTPException(status_code=400, detail="PDF is empty")
+            doc.close()
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+            raise HTTPException(status_code=400, detail="PDFが空です。")
             
         # Get first page
         page = doc[0]
@@ -97,8 +100,12 @@ async def upload_pdf(file: UploadFile = File(...)):
             "height": pix.height
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+        raise HTTPException(status_code=400, detail=f"PDFファイルの読み込みに失敗しました（破損または未対応のファイル形式）: {str(e)}")
 
 class RegionCrop(BaseModel):
     x: float

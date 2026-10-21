@@ -433,12 +433,28 @@ const StageBuilder: React.FC<Props> = ({
     setCanRedo(redoStackRef.current.length > 0);
   };
 
-  // Keyboard shortcuts for Undo / Redo (Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z)
+  // Auto-save post-action state to localStorage backup whenever stage state changes
+  useEffect(() => {
+    if (isRestoringRef.current) return;
+    saveBackup(buildSnapshot());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placedItems, curveObjects, scenes, currentSceneId, snapSettings, iconLabels]);
+
+  // Keyboard shortcuts for Undo / Redo / Select All / Pin / Deselect (Escape)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
       if (isExportModalOpen) return;
+
+      if (e.key === 'Escape') {
+        if (selectedIds.length > 0 || selectedCurveIds.length > 0) {
+          e.preventDefault();
+          handleDeselectAll();
+        }
+        return;
+      }
+
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
       if (!isCmdOrCtrl) return;
 
@@ -470,7 +486,7 @@ const StageBuilder: React.FC<Props> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExportModalOpen, canUndo, canRedo, placedItems, curveObjects, scenes, currentSceneId, snapSettings]);
+  }, [isExportModalOpen, canUndo, canRedo, placedItems, curveObjects, scenes, currentSceneId, snapSettings, selectedIds, selectedCurveIds]);
 
   const scrollPalette = (direction: 'left' | 'right') => {
     if (paletteScrollRef.current) {
@@ -1217,6 +1233,7 @@ const StageBuilder: React.FC<Props> = ({
   };
 
   const handleAddScene = () => {
+    pushHistory();
     // Save current active scene
     const updatedScenes = scenes.map(sc =>
       sc.id === currentSceneId
@@ -1251,6 +1268,7 @@ const StageBuilder: React.FC<Props> = ({
     const source = currentScenes.find(sc => sc.id === sceneId);
     if (!source) return;
 
+    pushHistory();
     const newId = `scene_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const clonedItems: PlacedItem[] = (source.placedItems || []).map(item => ({
       ...item,
@@ -1278,6 +1296,7 @@ const StageBuilder: React.FC<Props> = ({
   };
 
   const handleRenameScene = (sceneId: string, newName: string) => {
+    pushHistory();
     setScenes(prev => prev.map(sc => (sc.id === sceneId ? { ...sc, name: newName } : sc)));
   };
 
@@ -1291,6 +1310,7 @@ const StageBuilder: React.FC<Props> = ({
       return;
     }
 
+    pushHistory();
     const nextScenes = scenes.filter(sc => sc.id !== sceneId);
     setScenes(nextScenes);
 
@@ -1313,6 +1333,7 @@ const StageBuilder: React.FC<Props> = ({
     if (direction === 'up' && idx === 0) return;
     if (direction === 'down' && idx === scenes.length - 1) return;
 
+    pushHistory();
     const updated = scenes.map(sc =>
       sc.id === currentSceneId
         ? { ...sc, placedItems, curveObjects, snapSettings }

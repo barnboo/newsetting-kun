@@ -230,7 +230,7 @@ const CanvasItem: React.FC<{
           if (stage) {
             activeItemIds.forEach(id => {
               const node = stage.findOne(`#${id}`);
-              if (node) {
+              if (node && node.draggable()) {
                 multiDragStartRef.current.set(id, { x: node.x(), y: node.y() });
               }
             });
@@ -1287,12 +1287,14 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     };
   }, []);
 
-  // Attach Transformer to selected placed items
+  // Attach Transformer to selected placed items (excluding pinned items)
   useEffect(() => {
     if (!trRef.current || !stageRef.current) return;
     if (activeItemIds.length > 0 && activeCurveIds.length === 0) {
       const nodes: Konva.Node[] = [];
       activeItemIds.forEach(id => {
+        const itemObj = placedItems.find(it => it.id === id);
+        if (itemObj?.isPinned) return;
         const node = stageRef.current?.findOne(`#${id}`);
         if (node) nodes.push(node);
       });
@@ -1367,7 +1369,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
           const updates: { id: string; attrs: Partial<PlacedItem> }[] = [];
           activeItemIds.forEach(id => {
             const cur = placedItems.find(it => it.id === id);
-            if (!cur) return;
+            if (!cur || cur.isPinned) return;
             let { x, y } = cur;
             if (e.key === 'ArrowUp') y -= step;
             if (e.key === 'ArrowDown') y += step;
@@ -1384,7 +1386,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
         if (hasCurveSelection) {
           activeCurveIds.forEach(id => {
             const cur = curveObjects.find(c => c.id === id);
-            if (!cur) return;
+            if (!cur || cur.isPinned) return;
             let { x, y } = cur;
             if (e.key === 'ArrowUp') y -= step;
             if (e.key === 'ArrowDown') y += step;
