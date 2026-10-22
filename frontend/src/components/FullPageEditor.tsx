@@ -336,6 +336,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   const [sceneNodesMap, setSceneNodesMap] = useState<Record<string, OverlayNode[]>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [dragOverSceneId, setDragOverSceneId] = useState<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
   const editingNodeIdRef = useRef<string | null>(null);
@@ -699,6 +700,27 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
       handleStartTextEdit();
       setEditingNodeId(newId);
     }
+  };
+
+  const handleDropTallyNumber = (targetSceneId: string, text: string, docX: number, docY: number) => {
+    const newId = `text_${Date.now()}`;
+    const nextNodes = [
+      ...(sceneNodesMap[targetSceneId] || []),
+      {
+        id: newId,
+        type: 'text' as const,
+        text,
+        x: Math.max(0, docX - 10),
+        y: Math.max(0, docY - 10),
+        fontSize: 22,
+        radius: 15,
+      },
+    ];
+    pushHistory({
+      ...sceneNodesMap,
+      [targetSceneId]: nextNodes,
+    });
+    setSelectedId(newId);
   };
 
   const handleAddCircle = () => {
@@ -1210,12 +1232,48 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                     isActive
                       ? 'ring-4 ring-blue-500/80 shadow-2xl'
                       : 'ring-1 ring-slate-300 shadow-lg opacity-95 hover:opacity-100 hover:ring-2 hover:ring-slate-400'
-                  }`}
+                  } ${dragOverSceneId === sc.sceneId ? 'ring-4 ring-emerald-500 shadow-2xl' : ''}`}
                   style={{
                     width: dimensions.width,
                     height: dimensions.height,
                   }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                    if (dragOverSceneId !== sc.sceneId) {
+                      setDragOverSceneId(sc.sceneId);
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      setDragOverSceneId(null);
+                    }
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverSceneId(null);
+                    setActiveSceneIdx(idx);
+
+                    const textData = e.dataTransfer.getData('application/settingkun-tally-number') || e.dataTransfer.getData('text/plain');
+                    if (!textData) return;
+
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const scale = dimensions.scale > 0 ? dimensions.scale : 1;
+                    const docX = Math.round((e.clientX - rect.left) / scale);
+                    const docY = Math.round((e.clientY - rect.top) / scale);
+
+                    handleDropTallyNumber(sc.sceneId, textData, docX, docY);
+                  }}
                 >
+                  {/* Drag Over Visual Guide */}
+                  {dragOverSceneId === sc.sceneId && (
+                    <div className="absolute inset-0 z-30 bg-emerald-500/10 backdrop-blur-[0.5px] border-2 border-dashed border-emerald-500 rounded-xs flex items-center justify-center pointer-events-none transition-all">
+                      <div className="bg-emerald-600 text-white font-bold text-sm px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+                        <span>✍️</span>
+                        <span>ここにドロップして数字を配置</span>
+                      </div>
+                    </div>
+                  )}
                   <SingleSceneCanvas
                     ref={(el) => {
                       stageRefs.current[sc.sceneId] = el;
@@ -1449,6 +1507,10 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
               <p className="text-[11px] text-emerald-800 leading-relaxed">
                 表内の「本・脚・台」の数字や「要・不要」の丸印は自動配置されています。キャンバス上でクリックして直接ドラッグ移動や編集・削除が可能です。
               </p>
+              <div className="pt-1 border-t border-emerald-200/60 text-[10px] text-emerald-700 flex items-center gap-1 font-medium">
+                <span>💡</span>
+                <span>下の各パーツ行をプレビューへドラッグ＆ドロップすると個数の数字を文字配置できます。</span>
+              </div>
             </div>
 
             {/* 3. Tally Breakdown: PDF extracted items */}
@@ -1472,14 +1534,26 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                   pdfTallies.map(t => (
                     <div
                       key={t.icon_id}
-                      className="flex justify-between items-center py-2 px-3 hover:bg-slate-50/60 transition-colors"
+                      draggable={t.count > 0}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', String(t.count));
+                        e.dataTransfer.setData('application/settingkun-tally-number', String(t.count));
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      className="flex justify-between items-center py-2 px-3 hover:bg-blue-50/70 transition-colors cursor-grab active:cursor-grabbing group select-none"
+                      title={`ドラッグ＆ドロップでこの数字「${t.count}」をプレビュー上に配置`}
                     >
-                      <span className="text-slate-700 font-medium truncate pr-2">
+                      <span className="text-slate-700 font-medium truncate pr-2 group-hover:text-blue-700">
                         {t.label}
                       </span>
-                      <span className="font-bold text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full text-xs shrink-0">
-                        {t.count}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-slate-300 group-hover:text-blue-400 font-mono">
+                          ⋮⋮
+                        </span>
+                        <span className="font-bold text-blue-600 bg-blue-50 group-hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full text-xs shadow-2xs">
+                          {t.count}
+                        </span>
+                      </div>
                     </div>
                   ))
                 )}
@@ -1507,14 +1581,26 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                   tmplTallies.map(t => (
                     <div
                       key={t.icon_id}
-                      className="flex justify-between items-center py-2 px-3 hover:bg-slate-50/60 transition-colors"
+                      draggable={t.count > 0}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', String(t.count));
+                        e.dataTransfer.setData('application/settingkun-tally-number', String(t.count));
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      className="flex justify-between items-center py-2 px-3 hover:bg-indigo-50/70 transition-colors cursor-grab active:cursor-grabbing group select-none"
+                      title={`ドラッグ＆ドロップでこの数字「${t.count}」をプレビュー上に配置`}
                     >
-                      <span className="text-slate-700 font-medium truncate pr-2">
+                      <span className="text-slate-700 font-medium truncate pr-2 group-hover:text-indigo-700">
                         {t.label}
                       </span>
-                      <span className="font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full text-xs shrink-0">
-                        {t.count}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-slate-300 group-hover:text-indigo-400 font-mono">
+                          ⋮⋮
+                        </span>
+                        <span className="font-bold text-indigo-600 bg-indigo-50 group-hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-full text-xs shadow-2xs">
+                          {t.count}
+                        </span>
+                      </div>
                     </div>
                   ))
                 )}
