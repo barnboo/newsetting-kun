@@ -43,7 +43,7 @@ E-07,E.ステージ構築,選択,選択解除,空白クリック/Esc/解除ボ�
 E-08,E.ステージ構築,編集,コピー(Ctrl+C)/貼付(Ctrl+V),選択→C→V,複製が配置される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Ctrl+C / Ctrl+V でオフセット位置にアイテムがコピー＆ペーストされることを確認
 E-09,E.ステージ構築,編集,複製(Ctrl+D),選択→Ctrl+D,複製される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Ctrl+D で選択中の単一・複数アイテムが即座に複製されることを確認
 E-10,E.ステージ構築,編集,削除(Delete),選択→Delete,削除される,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),Delete / Backspace キーで選択アイテム・ベジェ曲線が削除されることを確認
-E-11,E.ステージ構築,編集,元に戻す/やり直し,Ctrl+Z / Ctrl+Y / ヘッダーボタン,全操作種別で正しく履歴が戻る・進む,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),アイテム配置・移動・削除・場面操作すべてで Ctrl+Z / Ctrl+Y 及びヘッダーボタンが動作することを確認
+E-11,E.ステージ構築,編集,元に戻す/やり直し,Ctrl+Z / Ctrl+Y / ヘッダーボタン,全操作種別で正しく履歴が戻る・進む,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【改善・修正済】ドラッグ移動・ベジェ曲線制御点変更・Transformer変形・矢印キー微調整時に1px毎に履歴が積まれず一連の操作単位（ドラッグ離脱時・キー連打離脱時）で1操作としてUndo/Redoできるよう改修。一発で元の位置・形状に戻ることを確認
 E-12,E.ステージ構築,固定,ロック(Ctrl+F),選択→Ctrl+F,ドラッグ不可になり解除もできる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【バグ発見→修正済】StageCanvas.tsx でロック(isPinned)されたアイテムに変形ハンドルが表示され、矢印キーや複数選択ドラッグで動いてしまう不具合を修正。ロック時は変形・矢印移動・複数ドラッグすべて完全に固定されることを確認
 E-13,E.ステージ構築,表示,ズーム/パン,Ctrl+ホイール/ボタン,拡大縮小・移動できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ヘッダーの＋/ーボタンおよび Ctrl+ホイールで 50%〜250% ズームできることを確認
 E-14,E.ステージ構築,右クリック,コンテキストメニュー,右クリック,メニュー表示、Escで閉じ、各項目が動作,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),キャンバス右クリックでメニュー表示、複製・固定・重なり順・削除・Esc閉じを確認
