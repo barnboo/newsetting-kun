@@ -116,7 +116,7 @@ const TallyTable: React.FC<Props> = ({
               return (
                 <div
                   key={icon.id}
-                  className={`group flex items-center gap-2 p-2 rounded-md transition-all border ${
+                  className={`group flex items-center gap-2 p-2 rounded-md transition-all border relative ${
                     matchedTmpl
                       ? `bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 hover:border-emerald-400 ${
                           isLinkedHovered ? 'ring-2 ring-emerald-400 bg-emerald-100/60 dark:bg-emerald-900/40' : ''
@@ -125,38 +125,51 @@ const TallyTable: React.FC<Props> = ({
                   }`}
                   title={matchedTmpl ? `ホバー中: PDF元画像を表示 | ${label}` : label}
                 >
-                  <div className={`w-10 h-10 rounded flex items-center justify-center p-0.5 shrink-0 relative overflow-hidden transition-all ${
-                    matchedTmpl
-                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 group-hover:border-blue-400 group-hover:bg-white dark:group-hover:bg-slate-800'
-                      : 'bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600'
-                  }`}>
-                    {matchedTmpl ? (
-                      <>
-                        {/* 通常表示: テンプレートベクター画像 */}
-                        <img
-                          src={getTemplateDataUrl(matchedTmpl)}
-                          alt={matchedTmpl.label}
-                          className={`max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 ${
-                            isLinkedHovered ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'
-                          }`}
-                        />
-                        {/* ホバー時: PDFから切り出した元画像に切り替え */}
-                        <img
-                          src={icon.url}
-                          alt={`${icon.id} (PDF元画像)`}
-                          className={`absolute inset-0.5 m-auto max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 ${
-                            isLinkedHovered ? 'opacity-100 scale-105' : 'opacity-0 group-hover:opacity-100 group-hover:scale-105'
-                          }`}
-                        />
-                        {/* ホバー時の「PDF画像」マイクロバッジ */}
-                        <span className={`absolute bottom-0 inset-x-0 bg-blue-600 text-white text-[7px] font-bold text-center py-0.2 pointer-events-none transition-opacity duration-150 ${
-                          isLinkedHovered ? 'opacity-90' : 'opacity-0 group-hover:opacity-90'
-                        }`}>
+                  {/* 画像ラッパー (バッジを枠の外側に配置するため relative) */}
+                  <div className="relative shrink-0">
+                    <div className={`w-10 h-10 rounded flex items-center justify-center p-0.5 relative overflow-hidden transition-all ${
+                      matchedTmpl
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 group-hover:border-blue-400 group-hover:bg-white dark:group-hover:bg-slate-800'
+                        : 'bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600'
+                    }`}>
+                      {matchedTmpl ? (
+                        <>
+                          {/* 通常表示: テンプレートベクター画像 */}
+                          <img
+                            src={getTemplateDataUrl(matchedTmpl)}
+                            alt={matchedTmpl.label}
+                            className={`max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 ${
+                              isLinkedHovered ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'
+                            }`}
+                          />
+                          {/* ホバー時: PDFから切り出した元画像に切り替え */}
+                          <img
+                            src={icon.url}
+                            alt={`${icon.id} (PDF元画像)`}
+                            className={`absolute inset-0.5 m-auto max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 ${
+                              isLinkedHovered ? 'opacity-100 scale-105' : 'opacity-0 group-hover:opacity-100 group-hover:scale-105'
+                            }`}
+                          />
+                        </>
+                      ) : (
+                        <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain pointer-events-none" />
+                      )}
+                    </div>
+
+                    {/* ホバー時: 画像枠の外側上部に表示する「PDF画像」フキダシバッジ */}
+                    {matchedTmpl && (
+                      <div
+                        className={`absolute -top-3.5 left-1/2 -translate-x-1/2 pointer-events-none z-20 transition-all duration-150 flex flex-col items-center ${
+                          isLinkedHovered
+                            ? 'opacity-100 -translate-y-0.5'
+                            : 'opacity-0 translate-y-0.5 group-hover:opacity-100 group-hover:-translate-y-0.5'
+                        }`}
+                      >
+                        <span className="bg-blue-600 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap leading-none">
                           PDF画像
                         </span>
-                      </>
-                    ) : (
-                      <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain pointer-events-none" />
+                        <div className="w-0 h-0 border-x-[3px] border-x-transparent border-t-[3px] border-t-blue-600 -mt-px" />
+                      </div>
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
