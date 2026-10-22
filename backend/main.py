@@ -672,6 +672,12 @@ async def preview_bg(req: PreviewRequest):
                 "tmpls": ["tmpl_extensionCord"],
                 "neg": [],
             },
+            {
+                "key": "mic",
+                "names": ["マイク", "マイクロフォン", "マイクロホン", "アナウンスマイク"],
+                "tmpls": ["tmpl_mic", "tmpl_microphone"],
+                "neg": [],
+            },
         ]
 
         # 1. ユーザーの配置パーツ群を照合（怪しい・確信が持てないものは他へ足さず保留）
