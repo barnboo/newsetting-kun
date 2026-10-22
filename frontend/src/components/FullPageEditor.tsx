@@ -1,15 +1,21 @@
 import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, forwardRef } from 'react';
-import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Circle } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Circle, Line } from 'react-konva';
 import useImage from 'use-image';
+
+export type ShapeKind = 'circle' | 'cross' | 'rect' | 'triangle';
 
 export interface OverlayNode {
   id: string;
-  type: 'text' | 'circle';
+  type: 'text' | 'circle' | 'shape';
   text: string;
   x: number;
   y: number;
   fontSize: number;
   radius: number;
+  shapeKind?: ShapeKind;
+  isFilled?: boolean;
+  color?: string;
+  strokeWidth?: number;
 }
 
 export interface SceneExportData {
@@ -165,11 +171,18 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
         )}
       </Layer>
 
-      {/* Editable Overlay Elements (Text & Circles) */}
+      {/* Editable Overlay Elements (Text & Shapes) */}
       <Layer id="overlayLayer">
         {nodes.map(t => {
           const isSelected = t.id === selectedId;
-          const isCircle = t.type === 'circle';
+          const isShape = t.type === 'circle' || t.type === 'shape';
+          const shapeKind: ShapeKind = t.shapeKind || (t.type === 'circle' ? 'circle' : 'circle');
+          const isFilled = Boolean(t.isFilled);
+          const r = t.radius || 15;
+
+          const strokeColor = isSelected ? '#2563eb' : (t.color || '#111827');
+          const fillColor = isFilled ? strokeColor : 'rgba(0, 0, 0, 0.001)';
+          const strokeWidth = 2;
 
           return (
             <Group
@@ -222,7 +235,7 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
               }}
             >
               {/* Selection Box Outline */}
-              {isSelected && !isCircle && (
+              {isSelected && !isShape && (
                 <Rect
                   x={-4}
                   y={-4}
@@ -234,12 +247,12 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
                   cornerRadius={3}
                 />
               )}
-              {isSelected && isCircle && (
+              {isSelected && isShape && (
                 <Rect
-                  x={-(t.radius + 4)}
-                  y={-(t.radius + 4)}
-                  width={(t.radius + 4) * 2}
-                  height={(t.radius + 4) * 2}
+                  x={-(r + 4)}
+                  y={-(r + 4)}
+                  width={(r + 4) * 2}
+                  height={(r + 4) * 2}
                   stroke="#2563eb"
                   strokeWidth={1.5}
                   dash={[4, 3]}
@@ -247,19 +260,108 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
                 />
               )}
 
-              {isCircle ? (
-                <Circle
-                  radius={t.radius}
-                  stroke={isSelected ? '#2563eb' : '#111827'}
-                  strokeWidth={2}
-                  fill="rgba(0, 0, 0, 0.001)"
-                  hitFunc={(context, shape) => {
-                    context.beginPath();
-                    context.arc(0, 0, t.radius, 0, Math.PI * 2, true);
-                    context.closePath();
-                    context.fillStrokeShape(shape);
-                  }}
-                />
+              {/* Render Shape or Text */}
+              {isShape ? (
+                (() => {
+                  switch (shapeKind) {
+                    case 'circle':
+                      return (
+                        <Circle
+                          radius={r}
+                          stroke={strokeColor}
+                          strokeWidth={strokeWidth}
+                          fill={fillColor}
+                          hitFunc={(context, shape) => {
+                            context.beginPath();
+                            context.arc(0, 0, r, 0, Math.PI * 2, true);
+                            context.closePath();
+                            context.fillStrokeShape(shape);
+                          }}
+                        />
+                      );
+                    case 'rect':
+                      return (
+                        <Rect
+                          x={-r}
+                          y={-r}
+                          width={r * 2}
+                          height={r * 2}
+                          stroke={strokeColor}
+                          strokeWidth={strokeWidth}
+                          fill={fillColor}
+                        />
+                      );
+                    case 'triangle':
+                      // 正三角形（頂点が上、底辺が下）
+                      return (
+                        <Line
+                          points={[
+                            0, -r,
+                            r * 0.95, r * 0.75,
+                            -r * 0.95, r * 0.75,
+                          ]}
+                          closed
+                          stroke={strokeColor}
+                          strokeWidth={strokeWidth}
+                          fill={fillColor}
+                        />
+                      );
+                    case 'cross':
+                      // ばつ印
+                      if (isFilled) {
+                        const arm = r * 0.35;
+                        const len = r;
+                        return (
+                          <Line
+                            points={[
+                              0, -arm,
+                              len - arm, -len,
+                              len, -len + arm,
+                              arm, 0,
+                              len, len - arm,
+                              len - arm, len,
+                              0, arm,
+                              -len + arm, len,
+                              -len, len - arm,
+                              -arm, 0,
+                              -len, -len + arm,
+                              -len + arm, -len,
+                            ]}
+                            closed
+                            stroke={strokeColor}
+                            strokeWidth={1.5}
+                            fill={strokeColor}
+                          />
+                        );
+                      }
+                      return (
+                        <Group>
+                          <Line
+                            points={[-r * 0.75, -r * 0.75, r * 0.75, r * 0.75]}
+                            stroke={strokeColor}
+                            strokeWidth={strokeWidth + 0.8}
+                            lineCap="round"
+                          />
+                          <Line
+                            points={[r * 0.75, -r * 0.75, -r * 0.75, r * 0.75]}
+                            stroke={strokeColor}
+                            strokeWidth={strokeWidth + 0.8}
+                            lineCap="round"
+                          />
+                          {/* Hit area for cross */}
+                          <Rect
+                            x={-r}
+                            y={-r}
+                            width={r * 2}
+                            height={r * 2}
+                            fill="rgba(0,0,0,0.001)"
+                          />
+                        </Group>
+                      );
+                    default:
+                      return null;
+                  }
+                })()
               ) : (
                 <Text
                   text={t.text}
@@ -723,13 +825,20 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     setSelectedId(newId);
   };
 
-  const handleAddCircle = () => {
-    const newId = `circle_${Date.now()}`;
+  const [selectedShapeKind, setSelectedShapeKind] = useState<ShapeKind>('circle');
+  const [selectedShapeFilled, setSelectedShapeFilled] = useState<boolean>(false);
+
+  const handleAddShape = (kind: ShapeKind = selectedShapeKind, isFilled: boolean = selectedShapeFilled) => {
+    setSelectedShapeKind(kind);
+    setSelectedShapeFilled(isFilled);
+    const newId = `shape_${Date.now()}`;
     const nextNodes = [
       ...(sceneNodesMap[activeSceneId] || []),
       {
         id: newId,
-        type: 'circle' as const,
+        type: 'shape' as const,
+        shapeKind: kind,
+        isFilled,
         text: '',
         x: 300,
         y: 150,
@@ -742,6 +851,30 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
       [activeSceneId]: nextNodes,
     });
     setSelectedId(newId);
+  };
+
+  const handleUpdateSelectedShapeKind = (kind: ShapeKind) => {
+    if (!selectedId) return;
+    setSelectedShapeKind(kind);
+    const nextNodes = (sceneNodesMap[activeSceneId] || []).map(t =>
+      t.id === selectedId ? { ...t, type: 'shape' as const, shapeKind: kind } : t
+    );
+    pushHistory({
+      ...sceneNodesMap,
+      [activeSceneId]: nextNodes,
+    });
+  };
+
+  const handleUpdateSelectedShapeFill = (isFilled: boolean) => {
+    if (!selectedId) return;
+    setSelectedShapeFilled(isFilled);
+    const nextNodes = (sceneNodesMap[activeSceneId] || []).map(t =>
+      t.id === selectedId ? { ...t, isFilled } : t
+    );
+    pushHistory({
+      ...sceneNodesMap,
+      [activeSceneId]: nextNodes,
+    });
   };
 
   const handleDeleteSelected = () => {
@@ -1103,12 +1236,12 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
           <button
             type="button"
-            onClick={handleAddCircle}
+            onClick={() => handleAddShape()}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-2xs transition-colors shrink-0 cursor-pointer"
-            title="丸囲み枠を追加"
+            title="図形（丸・ばつ・四角・三角）を追加して配置"
           >
-            <span>⭕</span>
-            <span>丸印追加</span>
+            <span>🔷</span>
+            <span>図形追加</span>
           </button>
 
           {/* Toggle Bezier Curves in Output */}
@@ -1391,106 +1524,221 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
               </div>
             )}
 
-            {/* 1. Selected Node Inspector */}
-            {selectedNode && (
-              <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 space-y-3">
+            {/* 1. Selected Node Inspector / Shapes Palette */}
+            {selectedNode ? (
+              (() => {
+                const isShape = selectedNode.type === 'circle' || selectedNode.type === 'shape';
+                const currentKind: ShapeKind = selectedNode.shapeKind || (selectedNode.type === 'circle' ? 'circle' : 'circle');
+                const isFilled = Boolean(selectedNode.isFilled);
+
+                return (
+                  <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-blue-950 flex items-center gap-1">
+                        <span>✏️</span>
+                        <span>選択中{isShape ? '図形' : 'テキスト'}の編集</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleDeleteSelected}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded font-semibold text-[11px] transition-colors cursor-pointer flex items-center gap-1"
+                        title="BackspaceまたはDeleteキーでも削除できます"
+                      >
+                        <span>🗑</span>
+                        <span>削除 (Backspace)</span>
+                      </button>
+                    </div>
+
+                    {selectedNode.type === 'text' && (
+                      <>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            入力文字:
+                          </label>
+                          <input
+                            type="text"
+                            value={selectedNode.text}
+                            onFocus={handleStartTextEdit}
+                            onChange={(e) => handleUpdateSelectedText(e.target.value)}
+                            onBlur={handleCommitTextEdit}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleCommitTextEdit();
+                                (e.target as HTMLElement).blur();
+                              }
+                            }}
+                            className="w-full bg-white border border-blue-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:ring-2 focus:ring-blue-400 focus:outline-none shadow-2xs"
+                            placeholder="文字を入力..."
+                          />
+                          {selectedNode.id === 'text_org' && effectiveScenes.length > 1 && (
+                            <p className="text-[10px] text-blue-600 mt-1">
+                              ※団体名はすべての場面に自動で同期反映されます。
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            文字サイズ:
+                          </label>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {[16, 20, 24, 32].map(size => (
+                              <button
+                                key={size}
+                                type="button"
+                                onClick={() => handleUpdateSelectedFontSize(size)}
+                                className={`py-1 text-[11px] font-bold rounded-md border transition-all ${
+                                  selectedNode.fontSize === size
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                }`}
+                              >
+                                {size}px
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {isShape && (
+                      <div className="space-y-3">
+                        {/* Shape Kind Selector */}
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            図形の種類:
+                          </label>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {[
+                              { kind: 'circle', label: '丸', icon: '⭕' },
+                              { kind: 'cross', label: 'ばつ', icon: '❌' },
+                              { kind: 'rect', label: '四角', icon: '⬛' },
+                              { kind: 'triangle', label: '三角', icon: '🔺' },
+                            ].map(({ kind, label, icon }) => (
+                              <button
+                                key={kind}
+                                type="button"
+                                onClick={() => handleUpdateSelectedShapeKind(kind as ShapeKind)}
+                                className={`py-1.5 px-1 text-xs font-bold rounded-md border flex flex-col items-center gap-0.5 transition-all ${
+                                  currentKind === kind
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span className="text-sm leading-none">{icon}</span>
+                                <span className="text-[10px]">{label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Fill Mode Selector */}
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            塗りつぶし:
+                          </label>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSelectedShapeFill(false)}
+                              className={`py-1.5 text-xs font-semibold rounded-md border transition-all flex items-center justify-center gap-1.5 ${
+                                !isFilled
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs font-bold'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              <span>◻️</span>
+                              <span>枠線のみ</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSelectedShapeFill(true)}
+                              className={`py-1.5 text-xs font-semibold rounded-md border transition-all flex items-center justify-center gap-1.5 ${
+                                isFilled
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs font-bold'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              <span>◼️</span>
+                              <span>塗りつぶし</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Size Selector */}
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            図形の大きさ (半径/幅):
+                          </label>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {[10, 15, 20, 25].map(radius => (
+                              <button
+                                key={radius}
+                                type="button"
+                                onClick={() => handleUpdateSelectedRadius(radius)}
+                                className={`py-1 text-[11px] font-bold rounded-md border transition-all ${
+                                  selectedNode.radius === radius
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                }`}
+                              >
+                                {radius}px
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-slate-500 leading-tight space-y-0.5">
+                      <span>※キャンバス上の{isShape ? '図形' : '文字'}を直接ドラッグして移動できます。</span>
+                      <br />
+                      <span className="text-slate-600 font-medium">※選択中にBackspaceまたはDeleteキーで削除できます。</span>
+                    </p>
+                  </div>
+                );
+              })()
+            ) : (
+              /* Shape Quick-Add Panel when nothing is selected */
+              <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5 shadow-2xs">
                 <div className="flex justify-between items-center">
-                  <span className="font-bold text-blue-950 flex items-center gap-1">
-                    <span>✏️</span>
-                    <span>選択中{selectedNode.type === 'circle' ? '丸囲み' : 'テキスト'}の編集</span>
-                  </span>
+                  <div className="font-bold text-slate-700 text-xs flex items-center gap-1.5">
+                    <span>🔷</span>
+                    <span>図形の追加</span>
+                  </div>
+                  {/* Fill mode toggle for quick add */}
                   <button
                     type="button"
-                    onClick={handleDeleteSelected}
-                    className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded font-semibold text-[11px] transition-colors cursor-pointer flex items-center gap-1"
-                    title="BackspaceまたはDeleteキーでも削除できます"
+                    onClick={() => setSelectedShapeFilled(prev => !prev)}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 cursor-pointer ${
+                      selectedShapeFilled
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                    title="追加する図形の塗りつぶし状態を切り替えます"
                   >
-                    <span>🗑</span>
-                    <span>削除 (Backspace)</span>
+                    <span>{selectedShapeFilled ? '◼️ 塗りつぶし' : '◻️ 枠線のみ'}</span>
                   </button>
                 </div>
-
-                {selectedNode.type === 'text' && (
-                  <>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        入力文字:
-                      </label>
-                      <input
-                        type="text"
-                        value={selectedNode.text}
-                        onFocus={handleStartTextEdit}
-                        onChange={(e) => handleUpdateSelectedText(e.target.value)}
-                        onBlur={handleCommitTextEdit}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleCommitTextEdit();
-                            (e.target as HTMLElement).blur();
-                          }
-                        }}
-                        className="w-full bg-white border border-blue-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:ring-2 focus:ring-blue-400 focus:outline-none shadow-2xs"
-                        placeholder="文字を入力..."
-                      />
-                      {selectedNode.id === 'text_org' && effectiveScenes.length > 1 && (
-                        <p className="text-[10px] text-blue-600 mt-1">
-                          ※団体名はすべての場面に自動で同期反映されます。
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        文字サイズ:
-                      </label>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {[16, 20, 24, 32].map(size => (
-                          <button
-                            key={size}
-                            type="button"
-                            onClick={() => handleUpdateSelectedFontSize(size)}
-                            className={`py-1 text-[11px] font-bold rounded-md border transition-all ${
-                              selectedNode.fontSize === size
-                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                            }`}
-                          >
-                            {size}px
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {selectedNode.type === 'circle' && (
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                      丸の大きさ (半径):
-                    </label>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {[10, 15, 20, 25].map(radius => (
-                        <button
-                          key={radius}
-                          type="button"
-                          onClick={() => handleUpdateSelectedRadius(radius)}
-                          className={`py-1 text-[11px] font-bold rounded-md border transition-all ${
-                            selectedNode.radius === radius
-                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          {radius}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <p className="text-[10px] text-slate-500 leading-tight space-y-0.5">
-                  <span>※キャンバス上の{selectedNode.type === 'circle' ? '丸' : '文字'}を直接ドラッグして移動できます。</span>
-                  <br />
-                  <span className="text-slate-600 font-medium">※選択中にBackspaceまたはDeleteキーで削除できます。</span>
-                </p>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { kind: 'circle', label: '丸', icon: '⭕' },
+                    { kind: 'cross', label: 'ばつ', icon: '❌' },
+                    { kind: 'rect', label: '四角', icon: '⬛' },
+                    { kind: 'triangle', label: '三角', icon: '🔺' },
+                  ].map(({ kind, label, icon }) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => handleAddShape(kind as ShapeKind, selectedShapeFilled)}
+                      className="py-1.5 px-1 text-xs font-semibold rounded-md border border-slate-200 bg-slate-50 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-all flex flex-col items-center gap-0.5 cursor-pointer shadow-2xs"
+                      title={`「${label}」をキャンバスに追加`}
+                    >
+                      <span className="text-base leading-none">{icon}</span>
+                      <span className="text-[10px]">{label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
