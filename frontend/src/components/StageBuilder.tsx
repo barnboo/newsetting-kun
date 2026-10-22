@@ -284,7 +284,8 @@ const StageBuilder: React.FC<Props> = ({
   // Global mouse wheel zoom for phase 3
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
-      if (isExportModalOpen) return;
+      // モーダル表示中（枠調整、エクスポート、スケール設定）は背面ステージのズームを行わない
+      if (isExportModalOpen || isAdjusting || isMeasuringScale) return;
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         setZoomMultiplier(prev => {
@@ -295,7 +296,7 @@ const StageBuilder: React.FC<Props> = ({
     };
     window.addEventListener('wheel', handleWheel, { passive: false });
     return () => window.removeEventListener('wheel', handleWheel);
-  }, [isExportModalOpen]);
+  }, [isExportModalOpen, isAdjusting, isMeasuringScale]);
 
   const placedItemsRef = useRef(placedItems);
   placedItemsRef.current = placedItems;
@@ -464,7 +465,7 @@ const StageBuilder: React.FC<Props> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
-      if (isExportModalOpen) return;
+      if (isExportModalOpen || isAdjusting || isMeasuringScale) return;
 
       if (e.key === 'Escape') {
         if (selectedIds.length > 0 || selectedCurveIds.length > 0) {
@@ -505,7 +506,7 @@ const StageBuilder: React.FC<Props> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExportModalOpen, canUndo, canRedo, placedItems, curveObjects, scenes, currentSceneId, snapSettings, selectedIds, selectedCurveIds]);
+  }, [isExportModalOpen, isAdjusting, isMeasuringScale, canUndo, canRedo, placedItems, curveObjects, scenes, currentSceneId, snapSettings, selectedIds, selectedCurveIds]);
 
   const scrollPalette = (direction: 'left' | 'right') => {
     if (paletteScrollRef.current) {

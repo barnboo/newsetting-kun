@@ -239,14 +239,16 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         setZoomMultiplier(prev => {
           const newZoom = e.deltaY < 0 ? prev + 0.15 : prev - 0.15;
           return Math.min(Math.max(Number(newZoom.toFixed(2)), 0.4), 3.0);
         });
       }
     };
-    window.addEventListener('wheel', handleWheel, { passive: false });
-    return () => window.removeEventListener('wheel', handleWheel);
+    window.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+    return () => window.removeEventListener('wheel', handleWheel, { capture: true });
   }, []);
 
   // Keyboard shortcuts: Undo/Redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z), Zoom (+, -, 0), Delete
@@ -495,7 +497,10 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div
+      onWheel={(e) => e.stopPropagation()}
+      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+    >
       <div className="bg-white rounded-lg shadow-xl w-full max-w-7xl flex flex-col h-[88vh]">
         
         <div className="p-3.5 px-5 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 shrink-0 bg-white">
