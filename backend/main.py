@@ -610,113 +610,115 @@ async def preview_bg(req: PreviewRequest):
             rect = fitz.Rect(unit_rect.x0 - 45, unit_rect.y0 - 2, unit_rect.x0 - 4, unit_rect.y1 + 15)
             page.insert_textbox(rect, str(num_str), fontname="helv", fontsize=11, align=fitz.TEXT_ALIGN_RIGHT, color=color)
 
-        # Robust count aggregator combining template items and extracted icons
-        def calculate_counts(tallies):
-            res = {
-                "stand": 0,         # 合奏用譜面台
-                "chair": 0,         # 合奏用椅子
-                "p_chair": 0,       # ピアノ椅子
-                "turner_chair": 0,  # 譜めくり椅子 (独立集計)
-                "table": 0,         # 長机
-                "podium": 0,        # 指揮台
-                "p_stand": 0,       # 指揮譜面台
-                "piano": 0,         # ピアノ
-                "cord": 0,          # 延長コード
-            }
+        # ─── 根本解決: 最長一致・厳格除外による備品シグネチャ定義 ──────────────────
+        STD_DEFS = [
+            {
+                "key": "piano",
+                "names": ["ピアノ", "グランドピアノ", "アップライトピアノ"],
+                "tmpls": ["tmpl_piano", "tmpl_grandPiano"],
+                "neg": ["蓋", "反響板", "椅子", "イス", "いす", "譜めくり", "めくり"],
+            },
+            {
+                "key": "piano_lid",
+                "names": ["ピアノの蓋", "ピアノ蓋"],
+                "tmpls": [],
+                "neg": [],
+            },
+            {
+                "key": "podium",
+                "names": ["指揮台"],
+                "tmpls": ["tmpl_podium"],
+                "neg": [],
+            },
+            {
+                "key": "p_stand",
+                "names": ["指揮用譜面台", "指揮譜面台", "指揮者用譜面台", "指揮者譜面台", "指揮者用"],
+                "tmpls": ["tmpl_conductorStand"],
+                "neg": ["合奏"],
+            },
+            {
+                "key": "stand",
+                "names": ["合奏用譜面台", "合奏譜面台", "譜面台"],
+                "tmpls": ["tmpl_ensembleStand"],
+                "neg": ["指揮"],
+            },
+            {
+                "key": "p_chair",
+                "names": ["ピアノ椅子", "ピアノイス", "ピアノ用椅子", "ピアノ用イス"],
+                "tmpls": ["tmpl_pianoChair"],
+                "neg": ["譜めくり", "めくり", "合奏"],
+            },
+            {
+                "key": "turner_chair",
+                "names": ["譜めくり椅子", "譜めくりイス", "譜捲り椅子", "めくり椅子", "譜めくり用椅子"],
+                "tmpls": ["tmpl_turnerChair"],
+                "neg": ["ピアノ"],
+            },
+            {
+                "key": "chair",
+                "names": ["合奏用椅子", "合奏椅子", "パイプ椅子", "普通椅子", "椅子"],
+                "tmpls": ["tmpl_chorusChair", "tmpl_pipeChair"],
+                "neg": ["ピアノ", "指揮", "パーカッション", "打楽器", "譜めくり", "めくり", "コントラバス", "バス", "チェロ", "補助", "立奏"],
+            },
+            {
+                "key": "table",
+                "names": ["長机", "机", "テーブル", "デスク"],
+                "tmpls": ["tmpl_longDesk", "tmpl_desk"],
+                "neg": [],
+            },
+            {
+                "key": "cord",
+                "names": ["延長コード", "電源コード", "コード", "電源"],
+                "tmpls": ["tmpl_extensionCord"],
+                "neg": [],
+            },
+        ]
 
-            for t in tallies:
-                c = t.count
-                if c <= 0:
+        # 1. ユーザーの配置パーツ群を照合（怪しい・確信が持てないものは他へ足さず保留）
+        assigned_counts = {d["key"]: 0 for d in STD_DEFS}
+        unmapped_tallies = []
+
+        for t in req.tallies:
+            c = t.count
+            if c <= 0:
+                continue
+            lbl = (t.label or "").strip()
+            iid = (t.icon_id or "").strip()
+
+            best_def = None
+            best_score = 0
+
+            for d in STD_DEFS:
+                # テンプレートID完全一致
+                if iid in d["tmpls"]:
+                    best_def = d
+                    best_score = 1000
+                    break
+
+                # 除外キーワードが含まれていたら絶対に弾く（誤爆防止）
+                if any(neg in lbl for neg in d["neg"]):
                     continue
-                label = (t.label or "").strip()
-                icon_id = (t.icon_id or "").strip()
 
-                # 1. 譜めくり椅子 (最優先: ピアノ椅子に絶対に混ざらないよう真っ先に判定)
-                if icon_id in ['tmpl_turnerChair'] or \
-                   any(k in label for k in ['譜めくり', '譜捲り', 'めくり']):
-                    res["turner_chair"] += c
-                    continue
+                for name in d["names"]:
+                    if name == lbl:
+                        score = len(name) * 2  # 完全一致最優先
+                    elif name in lbl:
+                        # 「椅子」「机」「台」等の一般名詞は、接頭辞（例: コントラバス椅子）がある場合は誤爆防止のため弾く
+                        if name in ["椅子", "机", "台"] and len(lbl) > len(name):
+                            continue
+                        score = len(name)
+                    else:
+                        continue
 
-                # 2. ピアノ椅子 (合奏用椅子や譜めくり椅子と混同しないよう判定)
-                if icon_id in ['tmpl_pianoChair'] or \
-                   ('ピアノ' in label and any(k in label for k in ['椅子', 'イス', 'いす']) and not any(k in label for k in ['譜めくり', '譜捲り', 'めくり'])):
-                    res["p_chair"] += c
-                    continue
+                    if score > best_score:
+                        best_score = score
+                        best_def = d
 
-                # 3. 合奏用椅子 (パイプ椅子 / 普通椅子)
-                if icon_id in ['tmpl_chorusChair', 'tmpl_pipeChair'] or \
-                   (not any(ex in label for ex in ['ピアノ', '指揮', 'パーカッション', '打楽器', '譜めくり', 'めくり']) and
-                    any(k in label for k in ['合奏用椅子', '合奏椅子', 'パイプ椅子', '普通椅子', '椅子', 'イス', 'いす'])):
-                    res["chair"] += c
-                    continue
-
-                # 4. 指揮譜面台
-                if icon_id in ['tmpl_conductorStand'] or \
-                   ('指揮' in label and any(k in label for k in ['譜面台', 'ふめんだい', 'スタンド'])):
-                    res["p_stand"] += c
-                    continue
-
-                # 5. 合奏用譜面台
-                if icon_id in ['tmpl_ensembleStand'] or \
-                   (not any(ex in label for ex in ['指揮']) and
-                    any(k in label for k in ['合奏用譜面台', '合奏譜面台', '譜面台', 'ふめんだい'])):
-                    res["stand"] += c
-                    continue
-
-                # 6. 指揮台
-                if icon_id in ['tmpl_podium'] or ('指揮台' in label or 'しきだい' in label):
-                    res["podium"] += c
-                    continue
-
-                # 7. 長机
-                if icon_id in ['tmpl_longDesk', 'tmpl_desk'] or \
-                   any(k in label for k in ['長机', '机', 'デスク', 'テーブル']):
-                    res["table"] += c
-                    continue
-
-                # 8. ピアノ
-                if icon_id in ['tmpl_piano', 'tmpl_grandPiano'] or \
-                   (not any(ex in label for ex in ['椅子', 'イス', 'いす', '譜めくり', 'めくり']) and 'ピアノ' in label):
-                    res["piano"] += c
-                    continue
-
-                # 9. 延長コード
-                if icon_id in ['tmpl_extensionCord'] or \
-                   any(k in label for k in ['延長コード', 'コード', '電源']):
-                    res["cord"] += c
-                    continue
-
-                # フォールバック: デフォルトIDマッピング (未命名アイコン用)
-                if 'パーツ' in label or not label:
-                    if icon_id == 'icon_4':
-                        res["chair"] += c
-                    elif icon_id == 'icon_3':
-                        res["stand"] += c
-                    elif icon_id == 'icon_5':
-                        res["p_chair"] += c
-                    elif icon_id == 'icon_0':
-                        res["podium"] += c
-                    elif icon_id == 'icon_1':
-                        res["p_stand"] += c
-                    elif icon_id == 'icon_2':
-                        res["piano"] += c
-                    elif icon_id == 'icon_6':
-                        res["table"] += c
-                    elif icon_id == 'icon_7':
-                        res["cord"] += c
-
-            return res
-
-        counts = calculate_counts(req.tallies)
-        chair_count = counts["chair"]
-        stand_count = counts["stand"]
-        p_chair_count = counts["p_chair"]
-        turner_chair_count = counts["turner_chair"]
-        table_count = counts["table"]
-        podium_count = counts["podium"]
-        p_stand_count = counts["p_stand"]
-        piano_count = counts["piano"]
-        cord_count = counts["cord"]
+            if best_def and best_score >= 2:
+                assigned_counts[best_def["key"]] += c
+            else:
+                # 確信が持てない・未知のパーツは安全に保留リストへ（絶対に他のバケツに足さない）
+                unmapped_tallies.append(t)
 
         auto_nodes = []
         words = page.get_text("words")
@@ -748,8 +750,7 @@ async def preview_bg(req: PreviewRequest):
 
         def circle_yo_or_fuyo(word_list, is_yo, name_id):
             """
-            単語リスト内から『不要・要』または『要』『不要』を検出し、
-            is_yo=True なら『要』に、is_yo=False なら『不要』に○を追加する。
+            行内の単語リストから『不要・要』または『要』『不要』を安全に特定して○をつける。
             """
             for w in word_list:
                 w_text = w[4]
@@ -770,7 +771,7 @@ async def preview_bg(req: PreviewRequest):
                     return True
             return False
 
-        # Step 1: Group words into horizontal lines to handle separated characters (e.g. 'ピ','ア','ノ' or '指','揮','台')
+        # Step 1: 単語を水平行（バンド）にグループ化
         lines = []
         for w in words:
             y_mid = (w[1] + w[3]) / 2
@@ -785,167 +786,128 @@ async def preview_bg(req: PreviewRequest):
                 lines.append({'y_mid': y_mid, 'words': [w]})
 
         lines.sort(key=lambda l: l['y_mid'])
+        for l in lines:
+            l['words'].sort(key=lambda w: w[0])
+            l['text'] = "".join(w[4] for w in l['words'])
 
-        added_keys = set()
         piano_lid_setting = (req.piano_lid or "半開").strip()
+        matched_keys = set()
 
-        # Step 2: Iterate through lines to detect items and place auto numbers / circles
+        # Step 2: 各行内の備品アンカー（X座標）を検出し、セル単位に分割して安全に自動記入
         for line in lines:
             line['words'].sort(key=lambda w: w[0])
-            line_text = "".join(w[4] for w in line['words'])
+            full_line_text = "".join(w[4] for w in line['words'])
 
-            # 1. ピアノ (要 / 不要)
-            if 'piano' not in added_keys and 'ピアノ' in line_text and not any(k in line_text for k in ['蓋', '反響板', '椅子', 'イス']):
-                if circle_yo_or_fuyo(line['words'], piano_count > 0, "piano"):
-                    added_keys.add('piano')
+            # 注意書きなどの長文注釈行は誤爆防止のためスキップ
+            if any(skip_kw in full_line_text for skip_kw in ['（注）', '原則禁止', 'お借りします', 'ご相談ください', '提出書類']):
+                continue
 
-            # 2. ピアノ蓋 (閉 / 蒲鉾板 / 半開 / 全開)
-            if 'piano_lid' not in added_keys and piano_count > 0 and ('ピアノ蓋' in line_text or ('閉' in line_text and '開' in line_text)):
-                for w in line['words']:
-                    w_text = w[4]
-                    w_r = fitz.Rect(w[:4])
-                    if w_text == piano_lid_setting:
-                        add_auto_circle(w_r, "piano_lid")
-                        added_keys.add('piano_lid')
-                        break
-
-            # 3. 指揮台 (要 / 不要)
-            if 'podium' not in added_keys and '指揮台' in line_text:
-                if circle_yo_or_fuyo(line['words'], podium_count > 0, "podium"):
-                    added_keys.add('podium')
-
-            # 4. 指揮用譜面台 (要 / 不要)
-            if 'p_stand' not in added_keys and ('指揮用譜面台' in line_text or '指揮譜面台' in line_text or '指揮者用譜面台' in line_text or '指揮者譜面台' in line_text):
-                if circle_yo_or_fuyo(line['words'], p_stand_count > 0, "p_stand"):
-                    added_keys.add('p_stand')
-
-            # 5. 延長コード (要 / 不要)
-            if 'cord' not in added_keys and ('延長コード' in line_text or ('コード' in line_text and ('要' in line_text or '不要' in line_text))):
-                if circle_yo_or_fuyo(line['words'], cord_count > 0, "cord"):
-                    added_keys.add('cord')
-
-            # 6. 合奏用譜面台 (本 / 要・不要)
-            if 'stand' not in added_keys and ('合奏用譜面台' in line_text or ('譜面台' in line_text and '指揮' not in line_text)):
-                if stand_count > 0:
+            # 行内の備品アンカーを検出
+            anchors = []
+            for d in STD_DEFS:
+                k = d["key"]
+                if k in matched_keys:
+                    continue
+                for name in d["names"]:
+                    found_w = None
                     for w in line['words']:
-                        if w[4] == '本':
-                            add_auto_num(fitz.Rect(w[:4]), stand_count, "stand")
-                            added_keys.add('stand')
+                        if name in w[4]:
+                            if any(neg in w[4] for neg in d["neg"]):
+                                continue
+                            if name in ["椅子", "机", "台"] and len(w[4]) > len(name):
+                                continue
+                            found_w = w
                             break
-                circle_yo_or_fuyo(line['words'], stand_count > 0, "stand")
 
-            # 7. 合奏用椅子 (脚 / 要・不要)
-            if 'chair' not in added_keys and ('合奏用椅子' in line_text or '合奏椅子' in line_text or ('椅子' in line_text and not any(ex in line_text for ex in ['ピアノ', '指揮', '譜めくり', 'めくり']))):
-                if chair_count > 0:
-                    for w in line['words']:
-                        if w[4] == '脚':
-                            add_auto_num(fitz.Rect(w[:4]), chair_count, "chair")
-                            added_keys.add('chair')
+                    # 1文字ずつ分かれている場合（例: 指 揮 台、ピ ア ノ、長 机 など）のフォールバック
+                    if not found_w:
+                        joined = ""
+                        positions = []
+                        for w in line['words']:
+                            for ch in w[4]:
+                                joined += ch
+                                positions.append(w[0])
+                        if name in joined and not any(neg in joined for neg in d["neg"]):
+                            if not (name in ["椅子", "机", "台"] and len(joined) > len(name) + 4):
+                                idx = joined.find(name)
+                                anchors.append({
+                                    "def": d,
+                                    "key": k,
+                                    "x_start": positions[idx],
+                                    "name": name,
+                                })
+                    else:
+                        anchors.append({
+                            "def": d,
+                            "key": k,
+                            "x_start": found_w[0],
+                            "name": name,
+                        })
+
+            if not anchors:
+                continue
+
+            # 各定義キーごとに一番長い name のアンカーを残す（重複排除）
+            best_by_key = {}
+            for a in anchors:
+                k = a["key"]
+                if k not in best_by_key or len(a["name"]) > len(best_by_key[k]["name"]):
+                    best_by_key[k] = a
+            final_anchors = sorted(best_by_key.values(), key=lambda a: a["x_start"])
+
+            # セル境界（X座標）を算出: 次のアンカーの手前25ptを境界とする
+            splits = [0.0]
+            for i in range(len(final_anchors) - 1):
+                splits.append(final_anchors[i+1]["x_start"] - 25.0)
+            splits.append(99999.0)
+
+            # 各セルごとに独立して集計結果を適用
+            for i, a in enumerate(final_anchors):
+                k = a["key"]
+                matched_keys.add(k)
+                cnt = assigned_counts.get(k, 0)
+                x_min = splits[i]
+                x_max = splits[i+1]
+                cell_words = [w for w in line['words'] if x_min <= w[0] < x_max]
+
+                # ピアノ蓋の処理
+                if k == "piano_lid":
+                    if assigned_counts.get("piano", 0) > 0:
+                        lid_targets = [piano_lid_setting]
+                        if piano_lid_setting == "蒲鉾板":
+                            lid_targets.append("ｶﾏﾎﾞｺ")
+                        elif piano_lid_setting == "ｶﾏﾎﾞｺ":
+                            lid_targets.append("蒲鉾板")
+
+                        for w in cell_words:
+                            w_text = w[4]
+                            w_r = fitz.Rect(w[:4])
+                            found = False
+                            for target in lid_targets:
+                                if target in w_text:
+                                    if w_text == target:
+                                        add_auto_circle(w_r, "piano_lid")
+                                    else:
+                                        # 複合文字列（全開・半開・ｶﾏﾎﾞｺ・閉など）内の部分文字列位置を算出
+                                        idx = w_text.find(target)
+                                        char_w = w_r.width / len(w_text)
+                                        target_r = fitz.Rect(w_r.x0 + idx * char_w, w_r.y0, w_r.x0 + (idx + len(target)) * char_w, w_r.y1)
+                                        add_auto_circle(target_r, "piano_lid")
+                                    found = True
+                                    break
+                            if found:
+                                break
+                    continue
+
+                # 個数欄の記入（cnt > 0 の時のみ記入）
+                if cnt > 0:
+                    for w in cell_words:
+                        if w[4] in ['脚', '本', '台', '個']:
+                            add_auto_num(fitz.Rect(w[:4]), cnt, k)
                             break
-                circle_yo_or_fuyo(line['words'], chair_count > 0, "chair")
 
-            # 8. ピアノ椅子 (脚 / 要・不要) - 譜めくり椅子は絶対に含めない
-            if 'p_chair' not in added_keys and ('ピアノ椅子' in line_text or 'ピアノイス' in line_text or 'ピアノ用椅子' in line_text) and not any(k in line_text for k in ['譜めくり', '譜捲り', 'めくり']):
-                if p_chair_count > 0:
-                    for w in line['words']:
-                        if w[4] == '脚':
-                            add_auto_num(fitz.Rect(w[:4]), p_chair_count, "p_chair")
-                            break
-                if circle_yo_or_fuyo(line['words'], p_chair_count > 0, "p_chair"):
-                    added_keys.add('p_chair')
-
-            # 8-2. 譜めくり椅子 (要・不要 / 脚) - 独立処理
-            if 'turner_chair' not in added_keys and any(k in line_text for k in ['譜めくり', '譜捲り', 'めくり']):
-                if turner_chair_count > 0:
-                    for w in line['words']:
-                        if w[4] == '脚':
-                            add_auto_num(fitz.Rect(w[:4]), turner_chair_count, "turner")
-                            break
-                if circle_yo_or_fuyo(line['words'], turner_chair_count > 0, "turner"):
-                    added_keys.add('turner_chair')
-
-            # 9. 長机 (台 / 要・不要)
-            if 'table' not in added_keys and ('長机' in line_text or ('机' in line_text and '台' in line_text)):
-                if table_count > 0:
-                    for w in line['words']:
-                        if w[4] == '台':
-                            add_auto_num(fitz.Rect(w[:4]), table_count, "table")
-                            added_keys.add('table')
-                            break
-                circle_yo_or_fuyo(line['words'], table_count > 0, "table")
-
-        # Step 3: Fallback for sheets with unusual layouts or text structures
-        for w in words:
-            text = w[4]
-            r = fitz.Rect(w[:4])
-            
-            # ピアノ: fallback
-            if 'piano' not in added_keys:
-                if (140 < r.y0 < 170) or (120 < r.y0 < 148):
-                    if text == '要' and piano_count > 0:
-                        add_auto_circle(r, "piano_yo")
-                        added_keys.add('piano')
-                    elif text == '不要' and piano_count == 0:
-                        add_auto_circle(r, "piano_fuyo")
-                        added_keys.add('piano')
-
-            # ピアノ蓋: fallback
-            if 'piano_lid' not in added_keys and piano_count > 0:
-                if (170 < r.y0 < 200):
-                    if text == piano_lid_setting:
-                        add_auto_circle(r, "piano_lid")
-                        added_keys.add('piano_lid')
-
-            # 譜面台: fallback
-            if 'stand' not in added_keys and stand_count > 0 and text == '本':
-                if (160 < r.y0 < 230):
-                    add_auto_num(r, stand_count, "stand")
-                    added_keys.add('stand')
-
-            # 合奏用椅子: fallback
-            if 'chair' not in added_keys and chair_count > 0 and text == '脚':
-                if (190 < r.y0 < 255):
-                    add_auto_num(r, chair_count, "chair")
-                    added_keys.add('chair')
-
-            # ピアノ椅子: fallback
-            if 'p_chair' not in added_keys and p_chair_count > 0 and text == '脚':
-                if (215 < r.y0 < 285):
-                    add_auto_num(r, p_chair_count, "p_chair")
-                    added_keys.add('p_chair')
-
-            # 長机: fallback
-            if 'table' not in added_keys and table_count > 0 and text == '台':
-                if (235 < r.y0 < 315):
-                    add_auto_num(r, table_count, "table")
-                    added_keys.add('table')
-
-            # 指揮台: fallback
-            if 'podium' not in added_keys and (70 < r.y0 < 110):
-                if text == '要' and podium_count > 0:
-                    add_auto_circle(r, "podium_yo")
-                    added_keys.add('podium')
-                elif text == '不要' and podium_count == 0:
-                    add_auto_circle(r, "podium_fuyo")
-                    added_keys.add('podium')
-
-            # 指揮用譜面台: fallback
-            if 'p_stand' not in added_keys and (98 < r.y0 < 140):
-                if text == '要' and p_stand_count > 0:
-                    add_auto_circle(r, "p_stand_yo")
-                    added_keys.add('p_stand')
-                elif text == '不要' and p_stand_count == 0:
-                    add_auto_circle(r, "p_stand_fuyo")
-                    added_keys.add('p_stand')
-
-            # 延長コード: fallback
-            if 'cord' not in added_keys and (255 < r.y0 < 345):
-                if text == '要' and cord_count > 0:
-                    add_auto_circle(r, "cord_yo")
-                    added_keys.add('cord')
-                elif text == '不要' and cord_count == 0:
-                    add_auto_circle(r, "cord_fuyo")
-                    added_keys.add('cord')
+                # 要・不要の丸つけ
+                circle_yo_or_fuyo(cell_words, cnt > 0, k)
 
         # Render clean page image without baked-in text/circles
         mat = fitz.Matrix(2.0, 2.0)
