@@ -193,7 +193,8 @@ function App() {
     let extractedIcons = sess?.extractedData?.extractedIcons || localBackup?.extractedIcons || [];
     let pageImageUrl = sess?.fileData?.image_url || localBackup?.pageImageUrl || '';
     let selectedRegions = sess?.selectedRegions || [];
-    let iconLabels = sess?.iconLabels || localBackup?.iconLabels || {};
+    let rawIconLabels = localBackup?.iconLabels || sess?.iconLabels || {};
+    let iconLabels: Record<string, string> = {};
 
     // Auto-heal extractedIcons if their URLs are missing or point to ephemeral /static/ paths
     if (iconsRegionUrl && extractedIcons.length > 0) {
@@ -228,9 +229,7 @@ function App() {
     }
 
     extractedIcons.forEach((ic: ExtractedIcon, idx: number) => {
-      if (!iconLabels[ic.id]) {
-        iconLabels[ic.id] = ic.label || `パーツ ${idx + 1}`;
-      }
+      iconLabels[ic.id] = rawIconLabels[ic.id] || ic.label || `パーツ ${idx + 1}`;
       ic.label = iconLabels[ic.id];
     });
 
@@ -425,6 +424,12 @@ function App() {
     } catch (e) {
       console.warn('Failed to convert page image to data URL:', e);
     }
+    // 新しいPDFを読み込んだ際は前回のセッション状態（ラベルやテンプレ置換設定）を完全にリセット
+    setExtractedData(null);
+    setSelectedRegions([]);
+    setIconLabels({});
+    setTemplateReplacements({});
+    setShowTemplateModal(false);
     setFileData({
       ...data,
       image_url: permanentImageUrl,
@@ -451,7 +456,7 @@ function App() {
         extractedIcons: data.extracted_icons
       });
 
-      // Populate auto-detected iconLabels from backend
+      // Populate auto-detected iconLabels from backend (do NOT merge stale prev labels from previous files)
       const detectedLabels: Record<string, string> = {};
       if (data.icon_labels) {
         Object.assign(detectedLabels, data.icon_labels);
@@ -462,7 +467,8 @@ function App() {
         }
         ic.label = detectedLabels[ic.id];
       });
-      setIconLabels(prev => ({ ...detectedLabels, ...prev }));
+      setIconLabels(detectedLabels);
+      setTemplateReplacements({});
 
       // Check if there are any matching templates — modal will auto-skip if none
       setShowTemplateModal(true);
@@ -565,7 +571,9 @@ function App() {
       setFileData(null);
       setExtractedData(null);
       setSelectedRegions([]);
+      setIconLabels({});
       setTemplateReplacements({});
+      setShowTemplateModal(false);
       setCurrentPhase(1);
     }
   };
@@ -574,6 +582,9 @@ function App() {
     setFileData(null);
     setExtractedData(null);
     setSelectedRegions([]);
+    setIconLabels({});
+    setTemplateReplacements({});
+    setShowTemplateModal(false);
     setCurrentPhase(1);
   };
 
@@ -835,11 +846,29 @@ function App() {
                 fileId={fileData.file_id}
                 pageImageUrl={fileData.image_url}
                 initialIconLabels={iconLabels}
+                onIconLabelsChange={(nextLabels) => {
+                  setIconLabels(nextLabels);
+                }}
                 onIconsUpdated={async (icons, newLabels) => {
+                  // 新しいアイコン配列に対応するクリーンなラベルマップを構築（古いキーの残留を防止）
+                  const cleanLabels: Record<string, string> = {};
+                  icons.forEach((ic, idx) => {
+                    cleanLabels[ic.id] = newLabels?.[ic.id] || ic.label || `パーツ ${idx + 1}`;
+                  });
+                  // 枠の追加・削除等でIDとラベルの対応が変わった場合、ズレた古いテンプレ置換設定を除去
+                  const cleanReplacements: Record<string, string> = {};
+                  icons.forEach((ic) => {
+                    const prevLbl = iconLabels[ic.id];
+                    const nextLbl = cleanLabels[ic.id];
+                    if (templateReplacements[ic.id] && prevLbl && prevLbl === nextLbl) {
+                      cleanReplacements[ic.id] = templateReplacements[ic.id];
+                    }
+                  });
+
                   setExtractedData(prev => prev ? { ...prev, extractedIcons: icons } : null);
-                  if (newLabels) {
-                    setIconLabels(prev => ({ ...prev, ...newLabels }));
-                  }
+                  setIconLabels(cleanLabels);
+                  setTemplateReplacements(cleanReplacements);
+
                   if (fileData?.file_id) {
                     try {
                       const sess = await loadSessionFromIndexedDB(fileData.file_id);
@@ -857,8 +886,8 @@ function App() {
                             iconsRegionUrl: sess.extractedData?.iconsRegionUrl || '',
                             extractedIcons: iconsWithDataUrls,
                           },
-                          iconLabels: newLabels ? { ...sess.iconLabels, ...newLabels } : sess.iconLabels,
-                          templateReplacements,
+                          iconLabels: cleanLabels,
+                          templateReplacements: cleanReplacements,
                           updatedAt: Date.now(),
                         });
                       }

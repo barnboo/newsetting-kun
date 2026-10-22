@@ -104,7 +104,7 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
 
   useEffect(() => {
     setDecisions(buildDecisions());
-  }, [extractedIcons, iconLabels]);
+  }, [extractedIcons, iconLabels, currentReplacements]);
 
   const hasAnyMatch = decisions.some(d => d.suggestedTemplate !== null || d.selectedTemplate !== null);
 

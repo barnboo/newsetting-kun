@@ -46,6 +46,7 @@ interface Props {
   pageImageUrl: string;
   initialIconLabels?: Record<string, string>;
   templateReplacements?: Record<string, string>;
+  onIconLabelsChange?: (labels: Record<string, string>) => void;
   onIconsUpdated: (icons: ExtractedIcon[], newLabels?: Record<string, string>) => void;
   onOpenTemplateModal?: () => void;
   onBack: () => void;
@@ -63,6 +64,7 @@ const StageBuilder: React.FC<Props> = ({
   pageImageUrl,
   initialIconLabels,
   templateReplacements,
+  onIconLabelsChange,
   onIconsUpdated,
   onOpenTemplateModal,
   onBack,
@@ -171,20 +173,36 @@ const StageBuilder: React.FC<Props> = ({
   const iconLabelsRef = useRef(iconLabels);
   iconLabelsRef.current = iconLabels;
 
+  // Keep iconLabels in sync when parent initialIconLabels updates
+  useEffect(() => {
+    if (initialIconLabels && Object.keys(initialIconLabels).length > 0) {
+      setIconLabels(prev => {
+        const next = { ...prev, ...initialIconLabels };
+        iconLabelsRef.current = next;
+        return next;
+      });
+    }
+  }, [initialIconLabels]);
+
   useEffect(() => {
     setIconLabels(prev => {
-      const next = { ...prev };
+      const next: Record<string, string> = {};
       let changed = false;
       extractedIcons.forEach((ic, idx) => {
-        if (!next[ic.id]) {
-          next[ic.id] = ic.label || `パーツ ${idx + 1}`;
-          changed = true;
-        } else if (ic.label && ic.label !== next[ic.id]) {
-          next[ic.id] = ic.label;
+        const val = prev[ic.id] || ic.label || `パーツ ${idx + 1}`;
+        next[ic.id] = val;
+        if (prev[ic.id] !== val) {
           changed = true;
         }
       });
-      return changed ? next : prev;
+      if (Object.keys(prev).length !== Object.keys(next).length) {
+        changed = true;
+      }
+      if (changed) {
+        iconLabelsRef.current = next;
+        return next;
+      }
+      return prev;
     });
   }, [extractedIcons]);
 
@@ -1141,6 +1159,7 @@ const StageBuilder: React.FC<Props> = ({
     setIconLabels(prev => {
       const next = { ...prev, [iconId]: label };
       iconLabelsRef.current = next;
+      onIconLabelsChange?.(next);
       saveBackup({ ...buildSnapshot(), iconLabels: next });
       return next;
     });
@@ -1993,15 +2012,14 @@ const StageBuilder: React.FC<Props> = ({
           iconLabels={iconLabels}
           onClose={() => setIsAdjusting(false)}
           onSave={(newIcons, newLabels) => {
-            if (newLabels) {
-              setIconLabels(prev => {
-                const next = { ...prev, ...newLabels };
-                iconLabelsRef.current = next;
-                saveBackup({ ...buildSnapshot(), iconLabels: next });
-                return next;
-              });
-            }
-            onIconsUpdated(newIcons, newLabels);
+            const cleanLabels: Record<string, string> = {};
+            newIcons.forEach((ic, idx) => {
+              cleanLabels[ic.id] = newLabels?.[ic.id] || ic.label || `パーツ ${idx + 1}`;
+            });
+            setIconLabels(cleanLabels);
+            iconLabelsRef.current = cleanLabels;
+            saveBackup({ ...buildSnapshot(), extractedIcons: newIcons, iconLabels: cleanLabels });
+            onIconsUpdated(newIcons, cleanLabels);
             setIsAdjusting(false);
           }}
         />
