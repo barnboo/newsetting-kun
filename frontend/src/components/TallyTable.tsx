@@ -10,6 +10,7 @@ interface Props {
   curveObjects?: CurveObject[];
   iconLabels: Record<string, string>;
   templateReplacements?: Record<string, string>;
+  hoveredIconId?: string | null;
   onUpdateLabel: (iconId: string, label: string) => void;
   onAddIcon: (iconId: string) => void;
 }
@@ -20,6 +21,7 @@ const TallyTable: React.FC<Props> = ({
   curveObjects = [],
   iconLabels,
   templateReplacements,
+  hoveredIconId,
   onUpdateLabel,
   onAddIcon,
 }) => {
@@ -109,23 +111,50 @@ const TallyTable: React.FC<Props> = ({
               const tmplCount = effectiveTmplId ? (counts[effectiveTmplId] || 0) : 0;
               const count = rawCount + tmplCount;
               const label = iconLabels[icon.id] ?? (matchedTmpl?.label || `アイテム ${idx + 1}`);
+              const isLinkedHovered = hoveredIconId === icon.id;
 
               return (
                 <div
                   key={icon.id}
-                  className={`flex items-center gap-2 p-2 rounded-md transition-colors border ${
+                  className={`group flex items-center gap-2 p-2 rounded-md transition-all border ${
                     matchedTmpl
-                      ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/40'
+                      ? `bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 hover:border-emerald-400 ${
+                          isLinkedHovered ? 'ring-2 ring-emerald-400 bg-emerald-100/60 dark:bg-emerald-900/40' : ''
+                        }`
                       : 'border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700/60'
                   }`}
+                  title={matchedTmpl ? `ホバー中: PDF元画像を表示 | ${label}` : label}
                 >
-                  <div className={`w-10 h-10 rounded flex items-center justify-center p-0.5 shrink-0 relative ${
+                  <div className={`w-10 h-10 rounded flex items-center justify-center p-0.5 shrink-0 relative overflow-hidden transition-all ${
                     matchedTmpl
-                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 group-hover:border-blue-400 group-hover:bg-white dark:group-hover:bg-slate-800'
                       : 'bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600'
                   }`}>
                     {matchedTmpl ? (
-                      <img src={getTemplateDataUrl(matchedTmpl)} alt={matchedTmpl.label} className="max-w-full max-h-full object-contain pointer-events-none" />
+                      <>
+                        {/* 通常表示: テンプレートベクター画像 */}
+                        <img
+                          src={getTemplateDataUrl(matchedTmpl)}
+                          alt={matchedTmpl.label}
+                          className={`max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 ${
+                            isLinkedHovered ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'
+                          }`}
+                        />
+                        {/* ホバー時: PDFから切り出した元画像に切り替え */}
+                        <img
+                          src={icon.url}
+                          alt={`${icon.id} (PDF元画像)`}
+                          className={`absolute inset-0.5 m-auto max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 ${
+                            isLinkedHovered ? 'opacity-100 scale-105' : 'opacity-0 group-hover:opacity-100 group-hover:scale-105'
+                          }`}
+                        />
+                        {/* ホバー時の「PDF画像」マイクロバッジ */}
+                        <span className={`absolute bottom-0 inset-x-0 bg-blue-600 text-white text-[7px] font-bold text-center py-0.2 pointer-events-none transition-opacity duration-150 ${
+                          isLinkedHovered ? 'opacity-90' : 'opacity-0 group-hover:opacity-90'
+                        }`}>
+                          PDF画像
+                        </span>
+                      </>
                     ) : (
                       <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain pointer-events-none" />
                     )}
