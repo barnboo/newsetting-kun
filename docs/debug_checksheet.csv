@@ -73,7 +73,7 @@ I-02,I.集計表,集計,名称編集の反映,表で名称編集,キャンバス
 J-01,J.全ページエディタ,遷移,エディタ起動/戻る,進む→「ステージ配置画面に戻る」,データを保持したまま往復できる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「次へ進む (出力プレビュー)」と「← ステージへ戻る」の往復で配置データが完全保持されることを確認
 J-02,J.全ページエディタ,表示,全体表示/幅フィット,各ボタン,用紙が収まる/横幅拡大,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「全体」「幅に合わせる」ボタンで用紙表示モードが切り替わることを確認
 J-03,J.全ページエディタ,表示,ズーム(±10%/100%),ボタン/ショートカット,拡大縮小できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),＋/ー/％リセットボタンおよび Ctrl+ホイールによる拡大縮小を確認
-J-04,J.全ページエディタ,テキスト,テキスト追加・編集,文字追加→入力→Enter/Esc,確定/取消できる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「✍️ 文字追加」ボタンおよびダブルクリックでテキストノード追加・インライン編集・Enter確定を確認
+J-04,J.全ページエディタ,テキスト,テキスト追加・編集,文字追加→入力→Enter/Esc / 集計ドラッグ&ドロップ,確定/取消できる / 集計数字がドロップ配置できる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【機能追加・確認済】「✍️ 文字追加」およびダブルクリックに加え、右メニューの各パーツ集計セルをプレビュー上に直接ドラッグ＆ドロップすることで、その個数の数字を文字ノードとして即座に配置できることを確認
 J-05,J.全ページエディタ,テキスト,フォント/サイズ/色,プロパティ変更,反映される,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),テキスト選択時のフォントサイズ変更およびドラッグ移動・リサイズを確認
 J-06,J.全ページエディタ,図形,丸囲み枠の追加,ボタン,追加・移動・変形できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「⭕ 丸印追加」ボタンおよび自動付与された要/不要・ピアノ蓋の丸囲み枠の移動・半径変更を確認
 J-07,J.全ページエディタ,履歴,元に戻す/やり直し,Ctrl+Z / Ctrl+Y,動作する,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),FullPageEditor 内でのテキスト・丸印編集に対する Ctrl+Z / Ctrl+Y 履歴動作を確認
