@@ -514,13 +514,17 @@ function App() {
   };
 
   const handleTemplateModalConfirm = (decisions: MatchingDecision[]) => {
-    // Apply icon labels from template decisions while preserving auto-detected labels
+    // Apply icon labels from template decisions while preserving auto-detected PDF labels
     const newReplacements: Record<string, string> = { ...templateReplacements };
     const newLabels: Record<string, string> = { ...iconLabels };
     for (const d of decisions) {
       if (d.matchedTemplate && d.useTemplate) {
         newReplacements[d.iconId] = d.matchedTemplate.id || `tmpl_${d.matchedTemplate.type}`;
-        newLabels[d.iconId] = d.matchedTemplate.label;
+        const existingLbl = (newLabels[d.iconId] || d.iconLabel || '').trim();
+        const isGeneric = !existingLbl || /^(パーツ|アイテム|icon)[_\s]*\d*$/i.test(existingLbl);
+        if (isGeneric) {
+          newLabels[d.iconId] = d.matchedTemplate.label;
+        }
       } else {
         delete newReplacements[d.iconId];
       }

@@ -680,16 +680,18 @@ async def preview_bg(req: PreviewRequest):
             },
         ]
 
-        # 1. ユーザーの配置パーツ群を照合（怪しい・確信が持てないものは他へ足さず保留）
+        # 1. ユーザーの配置パーツ群を照合（定型定義 STD_DEFS ＋ 未知のラベルは動的定義 DYNAMIC_DEFS として自動生成）
+        import re as _re
         assigned_counts = {d["key"]: 0 for d in STD_DEFS}
+        dynamic_defs = {}
         unmapped_tallies = []
 
         for t in req.tallies:
-            c = t.count
-            if c <= 0:
-                continue
+            c = max(0, int(t.count or 0))
             lbl = (t.label or "").strip()
             iid = (t.icon_id or "").strip()
+            if not lbl:
+                continue
 
             best_def = None
             best_score = 0
@@ -723,8 +725,29 @@ async def preview_bg(req: PreviewRequest):
             if best_def and best_score >= 2:
                 assigned_counts[best_def["key"]] += c
             else:
-                # 確信が持てない・未知のパーツは安全に保留リストへ（絶対に他のバケツに足さない）
-                unmapped_tallies.append(t)
+                # STD_DEFSに事前登録されていない未知の備品（例: 平台、立奏台、ワイヤレスマイク等）も
+                # 他のバケツには絶対に混ぜず、そのラベル自体を動的アンカー定義として自動登録する（根本解決）
+                clean_lbl = _re.sub(r'^[0-9０-９①-⑳\.\s・]+', '', lbl).strip()
+                if clean_lbl and not _re.match(r'^(パーツ|アイテム|icon)[_\s]*\d*$', clean_lbl, _re.IGNORECASE):
+                    dyn_key = f"dyn_{clean_lbl}"
+                    if dyn_key not in dynamic_defs:
+                        names_list = [clean_lbl]
+                        # 括弧書き（例: 立奏台（大））がある場合は括弧を除いた基本名も候補に追加
+                        base_lbl = _re.sub(r'[（\(].*?[）\)]', '', clean_lbl).strip()
+                        if base_lbl and base_lbl != clean_lbl and len(base_lbl) >= 2:
+                            names_list.append(base_lbl)
+                        dynamic_defs[dyn_key] = {
+                            "key": dyn_key,
+                            "names": names_list,
+                            "tmpls": [],
+                            "neg": [],
+                        }
+                        assigned_counts[dyn_key] = 0
+                    assigned_counts[dyn_key] += c
+                if c > 0:
+                    unmapped_tallies.append(t)
+
+        ALL_DEFS = STD_DEFS + list(dynamic_defs.values())
 
         auto_nodes = []
         words = page.get_text("words")
@@ -808,9 +831,9 @@ async def preview_bg(req: PreviewRequest):
             if any(skip_kw in full_line_text for skip_kw in ['（注）', '原則禁止', 'お借りします', 'ご相談ください', '提出書類']):
                 continue
 
-            # 行内の備品アンカーを検出
+            # 行内の備品アンカーを検出（STD_DEFS ＋ 動的生成 DYNAMIC_DEFS の両方）
             anchors = []
-            for d in STD_DEFS:
+            for d in ALL_DEFS:
                 k = d["key"]
                 if k in matched_keys:
                     continue
@@ -908,7 +931,7 @@ async def preview_bg(req: PreviewRequest):
                 # 個数欄の記入（cnt > 0 の時のみ記入）
                 if cnt > 0:
                     for w in cell_words:
-                        if w[4] in ['脚', '本', '台', '個']:
+                        if w[4] in ['脚', '本', '台', '個', '枚', '組', '式', '張', '対']:
                             add_auto_num(fitz.Rect(w[:4]), cnt, k)
                             break
 

@@ -680,7 +680,15 @@ export function matchIconsToTemplates(
     usedTemplates.add(cand.template.type);
   }
 
-  // 4. Fallback based on standard Kumamoto row order (only if not already matched and template not used)
+  // 4. Fallback based on standard Kumamoto row order ONLY when the icon label is empty/generic placeholder.
+  // If a specific item name (e.g. "マイク", "立奏台") was extracted from the PDF and did not match any template,
+  // never force-assign an unrelated template by row index.
+  const isGenericPlaceholder = (lbl: string) => {
+    const trimmed = (lbl || '').trim();
+    if (!trimmed) return true;
+    return /^(パーツ|アイテム|icon)[_\s]*\d*$/i.test(trimmed);
+  };
+
   const standardRowOrder = [
     'podium',
     'conductorStand',
@@ -694,6 +702,7 @@ export function matchIconsToTemplates(
 
   for (const icon of icons) {
     if (matchedIcons.has(icon.id)) continue;
+    if (!isGenericPlaceholder(icon.label)) continue;
     if (icon.index >= 0 && icon.index < standardRowOrder.length) {
       const fallbackType = standardRowOrder[icon.index];
       // Only assign if the fallback template has not been used by any icon with a higher/direct match
@@ -715,7 +724,7 @@ export function matchIconsToTemplates(
  * Matching heuristics to associate a PDF-extracted icon with a standard template
  */
 export function findMatchingTemplate(iconLabel: string, iconIndex: number): TemplateShape | null {
-  const norm = iconLabel.toLowerCase();
+  const norm = iconLabel.toLowerCase().trim();
   
   if (norm.includes('めくり') || norm.includes('turner')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'turnerChair') || null;
@@ -740,25 +749,26 @@ export function findMatchingTemplate(iconLabel: string, iconIndex: number): Temp
   if (norm.includes('机') || norm.includes('デスク') || norm.includes('desk')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'longDesk') || null;
   }
-  if (norm.includes('コード') || norm.includes('cord')) {
+  if (norm.includes('コード') || norm.includes('cord') || norm.includes('電源')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'extensionCord') || null;
   }
 
-  // Fallback match based on standard Kumamoto wind orchestra table row order
-  // Row 0: 指揮台, Row 1: 指揮譜面台, Row 2: ピアノ, Row 3: 譜面台, Row 4: 椅子, Row 5: ピアノ椅子, Row 6: 長机, Row 7: コード
-  const standardRowOrder = [
-    'podium',
-    'conductorStand',
-    'piano',
-    'ensembleStand',
-    'chorusChair',
-    'pianoChair',
-    'longDesk',
-    'extensionCord',
-  ];
-  if (iconIndex >= 0 && iconIndex < standardRowOrder.length) {
-    const type = standardRowOrder[iconIndex];
-    return TEMPLATE_SHAPES.find(t => t.type === type) || null;
+  // Fallback match based on standard row order ONLY when label is empty or generic placeholder
+  if (!norm || /^(パーツ|アイテム|icon)[_\s]*\d*$/i.test(norm)) {
+    const standardRowOrder = [
+      'podium',
+      'conductorStand',
+      'piano',
+      'ensembleStand',
+      'chorusChair',
+      'pianoChair',
+      'longDesk',
+      'extensionCord',
+    ];
+    if (iconIndex >= 0 && iconIndex < standardRowOrder.length) {
+      const type = standardRowOrder[iconIndex];
+      return TEMPLATE_SHAPES.find(t => t.type === type) || null;
+    }
   }
 
   return null;

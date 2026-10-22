@@ -1193,18 +1193,34 @@ const StageBuilder: React.FC<Props> = ({
       }
     }
 
-    // Build tallies from extracted icons
-    const iconTallies = extractedIcons.map((icon) => ({
-      icon_id: icon.id,
-      label: iconLabels[icon.id] || icon.label || 'パーツ',
-      count: counts[icon.id] || 0,
-      source: 'pdf' as const,
-    }));
+    // Build tallies from extracted icons (including linked template counts so TallyTable and Export match 100%)
+    const replacedTmplIdSet = new Set<string>();
+    const iconTallies = extractedIcons.map((icon) => {
+      const tmplId = templateReplacements?.[icon.id];
+      const matchedTmpl = tmplId
+        ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
+        : null;
+      const effectiveTmplId = matchedTmpl ? (matchedTmpl.id || `tmpl_${matchedTmpl.type}`) : null;
+      if (effectiveTmplId) {
+        replacedTmplIdSet.add(effectiveTmplId);
+      }
 
-    // Add template-only tallies (placed items or curve items using templates)
+      const rawCount = counts[icon.id] || 0;
+      const tmplCount = effectiveTmplId ? (counts[effectiveTmplId] || 0) : 0;
+      const totalForIcon = rawCount + tmplCount;
+
+      return {
+        icon_id: icon.id,
+        label: iconLabels[icon.id] || icon.label || matchedTmpl?.label || 'パーツ',
+        count: totalForIcon,
+        source: 'pdf' as const,
+      };
+    });
+
+    // Add standalone template-only tallies (templates not linked to any PDF icon)
     const templateKeys = Object.keys(counts).filter(k => k.startsWith('tmpl_'));
     const templateTallies = templateKeys
-      .filter(k => !extractedIcons.some(ic => ic.id === k))
+      .filter(k => !extractedIcons.some(ic => ic.id === k) && !replacedTmplIdSet.has(k))
       .map(k => {
         const tmplType = k.slice(5);
         const tmpl = TEMPLATE_SHAPES.find(t => t.type === tmplType);
