@@ -142,7 +142,6 @@ const StageBuilder: React.FC<Props> = ({
   }, [selectedCurveId]);
 
   const [paletteTab, setPaletteTab] = useState<PaletteTab>('pdf');
-  const [hoveredPaletteIconId, setHoveredPaletteIconId] = useState<string | null>(null);
 
   // テンプレ置換されたID一覧と、テンプレタブに表示する残りのテンプレ一覧
   const replacedTmplIdSet = React.useMemo(() => {
@@ -1976,14 +1975,12 @@ const StageBuilder: React.FC<Props> = ({
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => handlePaletteItemClick(effectiveTmplId)}
-                        onMouseEnter={() => setHoveredPaletteIconId(icon.id)}
-                        onMouseLeave={() => setHoveredPaletteIconId(null)}
                         className={`flex flex-col items-center justify-between w-16 h-[72px] py-1 px-0.5 rounded-lg shrink-0 transition-all group shadow-2xs relative cursor-pointer border ${
                           selectedCurveId
                             ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500' : 'bg-purple-50/60 hover:bg-purple-100/90 border border-purple-300 hover:border-purple-400')
                             : (isDarkMode ? 'bg-emerald-950/40 hover:bg-emerald-900/60 border-emerald-600/70 cursor-grab active:cursor-grabbing' : 'bg-emerald-50/80 hover:bg-emerald-100 border-emerald-300 cursor-grab active:cursor-grabbing')
                         }`}
-                        title={selectedCurveId ? `「${label}」をベジェ曲線に追加` : `[テンプレ置換済] ${label} (ホバーでPDF元画像表示)`}
+                        title={selectedCurveId ? `「${label}」をベジェ曲線に追加` : `[テンプレ置換済] ${label}`}
                       >
                         <span className="absolute -top-1.5 -left-1 bg-emerald-600 text-white text-[7px] font-bold px-1 rounded-full shadow-2xs">
                           テンプレ
@@ -1993,16 +1990,11 @@ const StageBuilder: React.FC<Props> = ({
                             +追加
                           </span>
                         )}
-                        <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5 relative overflow-hidden">
+                        <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
                           <img
                             src={getTemplateDataUrl(matchedTmpl)}
                             alt={label}
-                            className="max-w-full max-h-full object-contain transition-opacity duration-150 group-hover:opacity-0"
-                          />
-                          <img
-                            src={icon.url}
-                            alt={`${icon.id} (PDF元画像)`}
-                            className="absolute inset-0 m-auto max-w-full max-h-full object-contain transition-opacity duration-150 opacity-0 group-hover:opacity-100"
+                            className="max-w-full max-h-full object-contain"
                           />
                         </div>
                         <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
@@ -3029,7 +3021,6 @@ const StageBuilder: React.FC<Props> = ({
               curveObjects={curveObjects}
               iconLabels={iconLabels}
               templateReplacements={templateReplacements}
-              hoveredIconId={hoveredPaletteIconId}
               onUpdateLabel={handleUpdateLabel}
               onAddIcon={handleAddItem}
             />

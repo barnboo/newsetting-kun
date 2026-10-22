@@ -10,7 +10,6 @@ interface Props {
   curveObjects?: CurveObject[];
   iconLabels: Record<string, string>;
   templateReplacements?: Record<string, string>;
-  hoveredIconId?: string | null;
   onUpdateLabel: (iconId: string, label: string) => void;
   onAddIcon: (iconId: string) => void;
 }
@@ -21,7 +20,6 @@ const TallyTable: React.FC<Props> = ({
   curveObjects = [],
   iconLabels,
   templateReplacements,
-  hoveredIconId,
   onUpdateLabel,
   onAddIcon,
 }) => {
@@ -111,16 +109,12 @@ const TallyTable: React.FC<Props> = ({
               const tmplCount = effectiveTmplId ? (counts[effectiveTmplId] || 0) : 0;
               const count = rawCount + tmplCount;
               const label = iconLabels[icon.id] ?? (matchedTmpl?.label || `アイテム ${idx + 1}`);
-              const isLinkedHovered = hoveredIconId === icon.id;
-
               return (
                 <div
                   key={icon.id}
                   className={`group flex items-center gap-2 p-2 rounded-md transition-all border relative ${
                     matchedTmpl
-                      ? `bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 hover:border-emerald-400 ${
-                          isLinkedHovered ? 'ring-2 ring-emerald-400 bg-emerald-100/60 dark:bg-emerald-900/40' : ''
-                        }`
+                      ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 hover:border-emerald-400'
                       : 'border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700/60'
                   }`}
                   title={matchedTmpl ? `ホバー中: PDF元画像を表示 | ${label}` : label}
@@ -138,17 +132,13 @@ const TallyTable: React.FC<Props> = ({
                           <img
                             src={getTemplateDataUrl(matchedTmpl)}
                             alt={matchedTmpl.label}
-                            className={`max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 ${
-                              isLinkedHovered ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'
-                            }`}
+                            className="max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 opacity-100 group-hover:opacity-0"
                           />
                           {/* ホバー時: PDFから切り出した元画像に切り替え */}
                           <img
                             src={icon.url}
                             alt={`${icon.id} (PDF元画像)`}
-                            className={`absolute inset-0.5 m-auto max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 ${
-                              isLinkedHovered ? 'opacity-100 scale-105' : 'opacity-0 group-hover:opacity-100 group-hover:scale-105'
-                            }`}
+                            className="absolute inset-0.5 m-auto max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-150 opacity-0 group-hover:opacity-100 group-hover:scale-105"
                           />
                         </>
                       ) : (
@@ -159,11 +149,7 @@ const TallyTable: React.FC<Props> = ({
                     {/* ホバー時: 画像枠の外側上部に表示する「PDF画像」フキダシバッジ */}
                     {matchedTmpl && (
                       <div
-                        className={`absolute -top-3.5 left-1/2 -translate-x-1/2 pointer-events-none z-20 transition-all duration-150 flex flex-col items-center ${
-                          isLinkedHovered
-                            ? 'opacity-100 -translate-y-0.5'
-                            : 'opacity-0 translate-y-0.5 group-hover:opacity-100 group-hover:-translate-y-0.5'
-                        }`}
+                        className="absolute -top-3.5 left-1/2 -translate-x-1/2 pointer-events-none z-20 transition-all duration-150 flex flex-col items-center opacity-0 translate-y-0.5 group-hover:opacity-100 group-hover:-translate-y-0.5"
                       >
                         <span className="bg-blue-600 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap leading-none">
                           PDF画像
