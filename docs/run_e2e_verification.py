@@ -227,7 +227,7 @@ def test_frontend_e2e():
 
         # Phase 1: Initial Load & Dark Mode
         page.goto(FRONTEND_URL, wait_until="networkidle")
-        assert page.locator("text=セッティングくん").first.is_visible()
+        assert page.locator("text=StaJet").first.is_visible()
         log_ok("UI-PHASE1-LOAD", "Initial Phase 1 screen rendered")
 
         # Upload PDF via file input (accept="application/pdf,.pdf")

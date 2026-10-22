@@ -337,7 +337,7 @@ function App() {
       const data = JSON.parse(text);
 
       if (!data.scenes && !data.placedItems && !data.curveObjects) {
-        alert('セッティングくんのプロジェクトデータ形式と一致しませんでした。');
+        alert('StaJetのプロジェクトデータ形式と一致しませんでした。');
         return;
       }
 
@@ -568,16 +568,11 @@ function App() {
                 🎼
               </div>
               <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <h1 className="text-sm font-bold text-slate-900 leading-tight">
-                    舞台セッティング図 作成システム
-                  </h1>
-                  <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-100 text-blue-900 rounded border border-blue-300">
-                    公認様式
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-500 font-medium leading-tight mt-0.5">
-                  熊本県吹奏楽連盟 セッティングくん
+                <h1 className="text-sm font-bold text-slate-900 leading-tight">
+                  ステージレイアウトプランナー
+                </h1>
+                <p className="text-[11px] text-[#0055c0] font-bold leading-tight mt-0.5">
+                  StaJet
                 </p>
               </div>
             </div>

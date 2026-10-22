@@ -350,12 +350,12 @@ const StageBuilder: React.FC<Props> = ({
 
       const d = new Date();
       const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-      const fileName = `settingkun_${fileId ? fileId.substring(0, 8) : 'project'}_${dateStr}.json`;
+      const fileName = `stajet_${fileId ? fileId.substring(0, 8) : 'project'}_${dateStr}.json`;
 
       const exportPayload = {
         version: '2.0',
         projectId: fileId || 'default',
-        name: `セッティング_${dateStr}`,
+        name: `stajet_${dateStr}`,
         exportedAt: Date.now(),
         ...snap,
       };
@@ -1523,16 +1523,11 @@ const StageBuilder: React.FC<Props> = ({
               🎼
             </div>
             <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className={`font-bold text-sm leading-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                  舞台セッティング図 作成システム
-                </span>
-                <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 rounded border border-blue-300 dark:border-blue-800">
-                  公認様式
-                </span>
-              </div>
-              <span className={`text-[10px] leading-tight mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                熊本県吹奏楽連盟 セッティングくん
+              <span className={`font-bold text-sm leading-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                ステージレイアウトプランナー
+              </span>
+              <span className={`text-[11px] font-bold leading-tight mt-0.5 ${isDarkMode ? 'text-blue-400' : 'text-[#0055c0]'}`}>
+                StaJet
               </span>
             </div>
           </div>
