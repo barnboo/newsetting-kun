@@ -75,7 +75,7 @@ J-02,J.全ページエディタ,表示,全体表示/幅フィット,各ボタン
 J-03,J.全ページエディタ,表示,ズーム(±10%/100%),ボタン/ショートカット,拡大縮小できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),＋/ー/％リセットボタンおよび Ctrl+ホイールによる拡大縮小を確認
 J-04,J.全ページエディタ,テキスト,テキスト追加・編集,文字追加→入力→Enter/Esc / 集計ドラッグ&ドロップ,確定/取消できる / 集計数字がドロップ配置できる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【機能追加・確認済】「✍️ 文字追加」およびダブルクリックに加え、右メニューの各パーツ集計セルをプレビュー上に直接ドラッグ＆ドロップすることで、その個数の数字を文字ノードとして即座に配置できることを確認
 J-05,J.全ページエディタ,テキスト,フォント/サイズ/色,プロパティ変更,反映される,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),テキスト選択時のフォントサイズ変更およびドラッグ移動・リサイズを確認
-J-06,J.全ページエディタ,図形,丸囲み枠の追加,ボタン,追加・移動・変形できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),「⭕ 丸印追加」ボタンおよび自動付与された要/不要・ピアノ蓋の丸囲み枠の移動・半径変更を確認
+J-06,J.全ページエディタ,図形,図形追加・編集(丸/ばつ/四角/三角・塗りつぶし),ボタン/右メニュー,図形種別・塗りつぶし有無が切り替わり配置できる,中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),【機能拡張・確認済】「🔷 図形追加」および右メニューの図形パネルから丸・ばつ・四角・三角の追加、および選択中図形の種別切り替え・塗りつぶし有無（枠線のみ/塗りつぶし）・サイズ変更が正常に反映されることを確認
 J-07,J.全ページエディタ,履歴,元に戻す/やり直し,Ctrl+Z / Ctrl+Y,動作する,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),FullPageEditor 内でのテキスト・丸印編集に対する Ctrl+Z / Ctrl+Y 履歴動作を確認
 J-08,J.全ページエディタ,削除,Delete/Backspace削除,選択→キー,削除される(入力中除く),中,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),FullPageEditor 内で選択したテキスト・丸囲み枠が Delete / Backspace で削除されることを確認
 K-01,K.保存・読込,JSON,JSON書き出し,JSON書き出しボタン,全場面・配置を含むJSONがDLされる,高,OK,2026-10-22,自動検証 (Playwright/API),Chromium Headless / FastAPI + Vite (macOS),ヘッダー「💾 JSON保存」ボタンから version 2.0 形式の JSON ファイルがダウンロードされることを確認
