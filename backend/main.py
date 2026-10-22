@@ -613,14 +613,15 @@ async def preview_bg(req: PreviewRequest):
         # Robust count aggregator combining template items and extracted icons
         def calculate_counts(tallies):
             res = {
-                "stand": 0,    # 合奏用譜面台
-                "chair": 0,    # 合奏用椅子
-                "p_chair": 0,  # ピアノ椅子
-                "table": 0,    # 長机
-                "podium": 0,   # 指揮台
-                "p_stand": 0,  # 指揮譜面台
-                "piano": 0,    # ピアノ
-                "cord": 0,     # 延長コード
+                "stand": 0,         # 合奏用譜面台
+                "chair": 0,         # 合奏用椅子
+                "p_chair": 0,       # ピアノ椅子
+                "turner_chair": 0,  # 譜めくり椅子 (独立集計)
+                "table": 0,         # 長机
+                "podium": 0,        # 指揮台
+                "p_stand": 0,       # 指揮譜面台
+                "piano": 0,         # ピアノ
+                "cord": 0,          # 延長コード
             }
 
             for t in tallies:
@@ -630,51 +631,56 @@ async def preview_bg(req: PreviewRequest):
                 label = (t.label or "").strip()
                 icon_id = (t.icon_id or "").strip()
 
-                # 1. ピアノ椅子 (チェック優先: 合奏用椅子と混同しないよう先に判定)
-                if icon_id in ['tmpl_pianoChair', 'tmpl_turnerChair'] or \
-                   ('ピアノ' in label and any(k in label for k in ['椅子', 'イス', 'いす'])) or \
-                   ('譜めくり' in label):
+                # 1. 譜めくり椅子 (最優先: ピアノ椅子に絶対に混ざらないよう真っ先に判定)
+                if icon_id in ['tmpl_turnerChair'] or \
+                   any(k in label for k in ['譜めくり', '譜捲り', 'めくり']):
+                    res["turner_chair"] += c
+                    continue
+
+                # 2. ピアノ椅子 (合奏用椅子や譜めくり椅子と混同しないよう判定)
+                if icon_id in ['tmpl_pianoChair'] or \
+                   ('ピアノ' in label and any(k in label for k in ['椅子', 'イス', 'いす']) and not any(k in label for k in ['譜めくり', '譜捲り', 'めくり'])):
                     res["p_chair"] += c
                     continue
 
-                # 2. 合奏用椅子 (パイプ椅子 / 普通椅子)
+                # 3. 合奏用椅子 (パイプ椅子 / 普通椅子)
                 if icon_id in ['tmpl_chorusChair', 'tmpl_pipeChair'] or \
-                   (not any(ex in label for ex in ['ピアノ', '指揮', 'パーカッション', '打楽器']) and
+                   (not any(ex in label for ex in ['ピアノ', '指揮', 'パーカッション', '打楽器', '譜めくり', 'めくり']) and
                     any(k in label for k in ['合奏用椅子', '合奏椅子', 'パイプ椅子', '普通椅子', '椅子', 'イス', 'いす'])):
                     res["chair"] += c
                     continue
 
-                # 3. 指揮譜面台
+                # 4. 指揮譜面台
                 if icon_id in ['tmpl_conductorStand'] or \
                    ('指揮' in label and any(k in label for k in ['譜面台', 'ふめんだい', 'スタンド'])):
                     res["p_stand"] += c
                     continue
 
-                # 4. 合奏用譜面台
+                # 5. 合奏用譜面台
                 if icon_id in ['tmpl_ensembleStand'] or \
                    (not any(ex in label for ex in ['指揮']) and
                     any(k in label for k in ['合奏用譜面台', '合奏譜面台', '譜面台', 'ふめんだい'])):
                     res["stand"] += c
                     continue
 
-                # 5. 指揮台
+                # 6. 指揮台
                 if icon_id in ['tmpl_podium'] or ('指揮台' in label or 'しきだい' in label):
                     res["podium"] += c
                     continue
 
-                # 6. 長机
+                # 7. 長机
                 if icon_id in ['tmpl_longDesk', 'tmpl_desk'] or \
                    any(k in label for k in ['長机', '机', 'デスク', 'テーブル']):
                     res["table"] += c
                     continue
 
-                # 7. ピアノ
+                # 8. ピアノ
                 if icon_id in ['tmpl_piano', 'tmpl_grandPiano'] or \
-                   (not any(ex in label for ex in ['椅子', 'イス', 'いす', '譜めくり']) and 'ピアノ' in label):
+                   (not any(ex in label for ex in ['椅子', 'イス', 'いす', '譜めくり', 'めくり']) and 'ピアノ' in label):
                     res["piano"] += c
                     continue
 
-                # 8. 延長コード
+                # 9. 延長コード
                 if icon_id in ['tmpl_extensionCord'] or \
                    any(k in label for k in ['延長コード', 'コード', '電源']):
                     res["cord"] += c
@@ -705,6 +711,7 @@ async def preview_bg(req: PreviewRequest):
         chair_count = counts["chair"]
         stand_count = counts["stand"]
         p_chair_count = counts["p_chair"]
+        turner_chair_count = counts["turner_chair"]
         table_count = counts["table"]
         podium_count = counts["podium"]
         p_stand_count = counts["p_stand"]
@@ -739,6 +746,30 @@ async def preview_bg(req: PreviewRequest):
                 "radius": round(rad * 2.0),
             })
 
+        def circle_yo_or_fuyo(word_list, is_yo, name_id):
+            """
+            単語リスト内から『不要・要』または『要』『不要』を検出し、
+            is_yo=True なら『要』に、is_yo=False なら『不要』に○を追加する。
+            """
+            for w in word_list:
+                w_text = w[4]
+                w_r = fitz.Rect(w[:4])
+                if '不要・要' in w_text:
+                    if is_yo:
+                        target_r = fitz.Rect(w_r.x0 + w_r.width * 0.55, w_r.y0, w_r.x1, w_r.y1)
+                        add_auto_circle(target_r, f"{name_id}_yo")
+                    else:
+                        target_r = fitz.Rect(w_r.x0, w_r.y0, w_r.x0 + w_r.width * 0.45, w_r.y1)
+                        add_auto_circle(target_r, f"{name_id}_fuyo")
+                    return True
+                elif is_yo and w_text == '要':
+                    add_auto_circle(w_r, f"{name_id}_yo")
+                    return True
+                elif not is_yo and w_text == '不要':
+                    add_auto_circle(w_r, f"{name_id}_fuyo")
+                    return True
+            return False
+
         # Step 1: Group words into horizontal lines to handle separated characters (e.g. 'ピ','ア','ノ' or '指','揮','台')
         lines = []
         for w in words:
@@ -765,17 +796,8 @@ async def preview_bg(req: PreviewRequest):
 
             # 1. ピアノ (要 / 不要)
             if 'piano' not in added_keys and 'ピアノ' in line_text and not any(k in line_text for k in ['蓋', '反響板', '椅子', 'イス']):
-                for w in line['words']:
-                    w_text = w[4]
-                    w_r = fitz.Rect(w[:4])
-                    if w_text == '要' and piano_count > 0:
-                        add_auto_circle(w_r, "piano_yo")
-                        added_keys.add('piano')
-                        break
-                    elif w_text == '不要' and piano_count == 0:
-                        add_auto_circle(w_r, "piano_fuyo")
-                        added_keys.add('piano')
-                        break
+                if circle_yo_or_fuyo(line['words'], piano_count > 0, "piano"):
+                    added_keys.add('piano')
 
             # 2. ピアノ蓋 (閉 / 蒲鉾板 / 半開 / 全開)
             if 'piano_lid' not in added_keys and piano_count > 0 and ('ピアノ蓋' in line_text or ('閉' in line_text and '開' in line_text)):
@@ -789,47 +811,20 @@ async def preview_bg(req: PreviewRequest):
 
             # 3. 指揮台 (要 / 不要)
             if 'podium' not in added_keys and '指揮台' in line_text:
-                for w in line['words']:
-                    w_text = w[4]
-                    w_r = fitz.Rect(w[:4])
-                    if w_text == '要' and podium_count > 0:
-                        add_auto_circle(w_r, "podium_yo")
-                        added_keys.add('podium')
-                        break
-                    elif w_text == '不要' and podium_count == 0:
-                        add_auto_circle(w_r, "podium_fuyo")
-                        added_keys.add('podium')
-                        break
+                if circle_yo_or_fuyo(line['words'], podium_count > 0, "podium"):
+                    added_keys.add('podium')
 
             # 4. 指揮用譜面台 (要 / 不要)
-            if 'p_stand' not in added_keys and ('指揮用譜面台' in line_text or '指揮譜面台' in line_text or '指揮者用譜面台' in line_text):
-                for w in line['words']:
-                    w_text = w[4]
-                    w_r = fitz.Rect(w[:4])
-                    if w_text == '要' and p_stand_count > 0:
-                        add_auto_circle(w_r, "p_stand_yo")
-                        added_keys.add('p_stand')
-                        break
-                    elif w_text == '不要' and p_stand_count == 0:
-                        add_auto_circle(w_r, "p_stand_fuyo")
-                        added_keys.add('p_stand')
-                        break
+            if 'p_stand' not in added_keys and ('指揮用譜面台' in line_text or '指揮譜面台' in line_text or '指揮者用譜面台' in line_text or '指揮者譜面台' in line_text):
+                if circle_yo_or_fuyo(line['words'], p_stand_count > 0, "p_stand"):
+                    added_keys.add('p_stand')
 
             # 5. 延長コード (要 / 不要)
             if 'cord' not in added_keys and ('延長コード' in line_text or ('コード' in line_text and ('要' in line_text or '不要' in line_text))):
-                for w in line['words']:
-                    w_text = w[4]
-                    w_r = fitz.Rect(w[:4])
-                    if w_text == '要' and cord_count > 0:
-                        add_auto_circle(w_r, "cord_yo")
-                        added_keys.add('cord')
-                        break
-                    elif w_text == '不要' and cord_count == 0:
-                        add_auto_circle(w_r, "cord_fuyo")
-                        added_keys.add('cord')
-                        break
+                if circle_yo_or_fuyo(line['words'], cord_count > 0, "cord"):
+                    added_keys.add('cord')
 
-            # 6. 合奏用譜面台 (本)
+            # 6. 合奏用譜面台 (本 / 要・不要)
             if 'stand' not in added_keys and ('合奏用譜面台' in line_text or ('譜面台' in line_text and '指揮' not in line_text)):
                 if stand_count > 0:
                     for w in line['words']:
@@ -837,26 +832,39 @@ async def preview_bg(req: PreviewRequest):
                             add_auto_num(fitz.Rect(w[:4]), stand_count, "stand")
                             added_keys.add('stand')
                             break
+                circle_yo_or_fuyo(line['words'], stand_count > 0, "stand")
 
-            # 7. 合奏用椅子 (脚)
-            if 'chair' not in added_keys and ('合奏用椅子' in line_text or '合奏椅子' in line_text or ('椅子' in line_text and 'ピアノ' not in line_text and '指揮' not in line_text)):
+            # 7. 合奏用椅子 (脚 / 要・不要)
+            if 'chair' not in added_keys and ('合奏用椅子' in line_text or '合奏椅子' in line_text or ('椅子' in line_text and not any(ex in line_text for ex in ['ピアノ', '指揮', '譜めくり', 'めくり']))):
                 if chair_count > 0:
                     for w in line['words']:
                         if w[4] == '脚':
                             add_auto_num(fitz.Rect(w[:4]), chair_count, "chair")
                             added_keys.add('chair')
                             break
+                circle_yo_or_fuyo(line['words'], chair_count > 0, "chair")
 
-            # 8. ピアノ椅子 (脚)
-            if 'p_chair' not in added_keys and ('ピアノ椅子' in line_text or 'ピアノイス' in line_text or 'ピアノ用椅子' in line_text):
+            # 8. ピアノ椅子 (脚 / 要・不要) - 譜めくり椅子は絶対に含めない
+            if 'p_chair' not in added_keys and ('ピアノ椅子' in line_text or 'ピアノイス' in line_text or 'ピアノ用椅子' in line_text) and not any(k in line_text for k in ['譜めくり', '譜捲り', 'めくり']):
                 if p_chair_count > 0:
                     for w in line['words']:
                         if w[4] == '脚':
                             add_auto_num(fitz.Rect(w[:4]), p_chair_count, "p_chair")
-                            added_keys.add('p_chair')
                             break
+                if circle_yo_or_fuyo(line['words'], p_chair_count > 0, "p_chair"):
+                    added_keys.add('p_chair')
 
-            # 9. 長机 (台)
+            # 8-2. 譜めくり椅子 (要・不要 / 脚) - 独立処理
+            if 'turner_chair' not in added_keys and any(k in line_text for k in ['譜めくり', '譜捲り', 'めくり']):
+                if turner_chair_count > 0:
+                    for w in line['words']:
+                        if w[4] == '脚':
+                            add_auto_num(fitz.Rect(w[:4]), turner_chair_count, "turner")
+                            break
+                if circle_yo_or_fuyo(line['words'], turner_chair_count > 0, "turner"):
+                    added_keys.add('turner_chair')
+
+            # 9. 長机 (台 / 要・不要)
             if 'table' not in added_keys and ('長机' in line_text or ('机' in line_text and '台' in line_text)):
                 if table_count > 0:
                     for w in line['words']:
@@ -864,6 +872,7 @@ async def preview_bg(req: PreviewRequest):
                             add_auto_num(fitz.Rect(w[:4]), table_count, "table")
                             added_keys.add('table')
                             break
+                circle_yo_or_fuyo(line['words'], table_count > 0, "table")
 
         # Step 3: Fallback for sheets with unusual layouts or text structures
         for w in words:
