@@ -9,6 +9,7 @@ interface Props {
   placedItems: PlacedItem[];
   curveObjects?: CurveObject[];
   iconLabels: Record<string, string>;
+  templateReplacements?: Record<string, string>;
   onUpdateLabel: (iconId: string, label: string) => void;
   onAddIcon: (iconId: string) => void;
 }
@@ -18,6 +19,7 @@ const TallyTable: React.FC<Props> = ({
   placedItems,
   curveObjects = [],
   iconLabels,
+  templateReplacements,
   onUpdateLabel,
   onAddIcon,
 }) => {
@@ -67,9 +69,14 @@ const TallyTable: React.FC<Props> = ({
 
   const totalCount = placedItems.length + curveObjects.reduce((s, c) => s + (Array.isArray(c.items) ? c.items.length : c.itemCount), 0);
 
-  // Gather all template types that have a non-zero count
-  const templateKeysWithCount = Object.keys(counts)
-    .filter(k => k.startsWith('tmpl_') && counts[k] > 0);
+  // テンプレ置換されたID一覧
+  const replacedTmplIdSet = React.useMemo(() => {
+    return new Set(Object.values(templateReplacements || {}));
+  }, [templateReplacements]);
+
+  // テンプレートパーツ一覧のうち、PDFアイコンに置換（リンク）されていない独立テンプレートのみ
+  const standaloneTemplateKeys = Object.keys(counts)
+    .filter(k => k.startsWith('tmpl_') && counts[k] > 0 && !replacedTmplIdSet.has(k));
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 overflow-hidden w-full transition-colors">
@@ -91,16 +98,37 @@ const TallyTable: React.FC<Props> = ({
               PDF パーツ
             </p>
             {extractedIcons.map((icon, idx) => {
-              const count = counts[icon.id] || 0;
-              const label = iconLabels[icon.id] ?? `アイテム ${idx + 1}`;
+              const tmplId = templateReplacements?.[icon.id];
+              const matchedTmpl = tmplId
+                ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
+                : null;
+              const effectiveTmplId = matchedTmpl ? (matchedTmpl.id || `tmpl_${matchedTmpl.type}`) : null;
+
+              // 置換したテンプレパーツの数も含めて連動集計
+              const rawCount = counts[icon.id] || 0;
+              const tmplCount = effectiveTmplId ? (counts[effectiveTmplId] || 0) : 0;
+              const count = rawCount + tmplCount;
+              const label = iconLabels[icon.id] ?? (matchedTmpl?.label || `アイテム ${idx + 1}`);
 
               return (
                 <div
                   key={icon.id}
-                  className="flex items-center gap-2 p-2 rounded-md hover:bg-gray-50 dark:hover:bg-slate-700/60 border border-gray-100 dark:border-slate-700 transition-colors"
+                  className={`flex items-center gap-2 p-2 rounded-md transition-colors border ${
+                    matchedTmpl
+                      ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/40'
+                      : 'border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700/60'
+                  }`}
                 >
-                  <div className="w-10 h-10 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded flex items-center justify-center p-0.5 shrink-0">
-                    <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain pointer-events-none" />
+                  <div className={`w-10 h-10 rounded flex items-center justify-center p-0.5 shrink-0 relative ${
+                    matchedTmpl
+                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700'
+                      : 'bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600'
+                  }`}>
+                    {matchedTmpl ? (
+                      <img src={getTemplateDataUrl(matchedTmpl)} alt={matchedTmpl.label} className="max-w-full max-h-full object-contain pointer-events-none" />
+                    ) : (
+                      <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain pointer-events-none" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <input
@@ -111,16 +139,30 @@ const TallyTable: React.FC<Props> = ({
                       className="w-full text-xs font-medium text-gray-700 dark:text-slate-200 bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-slate-600 focus:border-blue-400 focus:bg-white dark:focus:bg-slate-700 rounded px-1 py-0.5 truncate outline-none transition-all"
                       title="クリックして名称を編集"
                     />
+                    {matchedTmpl && (
+                      <div className="flex items-center gap-1 mt-0.5 px-0.5">
+                        <span className="inline-flex items-center gap-0.5 text-[8.5px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-900/60 px-1.5 py-0.2 rounded-full border border-emerald-200 dark:border-emerald-800">
+                          <span>🔗</span>
+                          <span>テンプレ連動中</span>
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <span className={`inline-block min-w-7 px-1.5 py-0.5 text-xs font-bold rounded ${
-                    count > 0 ? 'bg-blue-600 text-white shadow-xs' : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-400'
+                    count > 0
+                      ? (matchedTmpl ? 'bg-emerald-600 text-white shadow-xs' : 'bg-blue-600 text-white shadow-xs')
+                      : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-400'
                   }`}>
                     {count}
                   </span>
                   <button
-                    onClick={() => onAddIcon(icon.id)}
-                    title="キャンバスに追加"
-                    className="w-6 h-6 rounded bg-gray-100 dark:bg-slate-700 hover:bg-blue-50 dark:hover:bg-blue-900/40 hover:text-blue-600 text-gray-500 dark:text-slate-300 flex items-center justify-center text-xs font-bold shrink-0 transition-colors"
+                    onClick={() => onAddIcon(effectiveTmplId || icon.id)}
+                    title={matchedTmpl ? `キャンバスに「${matchedTmpl.label}」を追加` : "キャンバスに追加"}
+                    className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold shrink-0 transition-colors ${
+                      matchedTmpl
+                        ? 'bg-emerald-100/80 dark:bg-emerald-900/40 hover:bg-emerald-200 dark:hover:bg-emerald-900/80 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-gray-100 dark:bg-slate-700 hover:bg-blue-50 dark:hover:bg-blue-900/40 hover:text-blue-600 text-gray-500 dark:text-slate-300'
+                    }`}
                   >
                     ＋
                   </button>
@@ -130,13 +172,13 @@ const TallyTable: React.FC<Props> = ({
           </div>
         )}
 
-        {/* Template Parts (with count) */}
-        {templateKeysWithCount.length > 0 && (
+        {/* Standalone Template Parts (not linked to any PDF icon) */}
+        {standaloneTemplateKeys.length > 0 && (
           <div className="mt-2">
             <p className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider mb-1 px-1">
-              テンプレート パーツ
+              その他のテンプレート
             </p>
-            {templateKeysWithCount.map(key => {
+            {standaloneTemplateKeys.map(key => {
               const tmplType = key.slice(5);
               const tmpl = TEMPLATE_SHAPES.find(t => t.type === tmplType);
               const count = counts[key] || 0;
@@ -172,7 +214,7 @@ const TallyTable: React.FC<Props> = ({
           </div>
         )}
 
-        {extractedIcons.length === 0 && templateKeysWithCount.length === 0 && (
+        {extractedIcons.length === 0 && standaloneTemplateKeys.length === 0 && (
           <p className="text-xs text-gray-400 dark:text-slate-500 text-center py-8">
             パーツを配置すると<br />ここに集計が表示されます
           </p>

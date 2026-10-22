@@ -2894,6 +2894,7 @@ const StageBuilder: React.FC<Props> = ({
               placedItems={placedItems}
               curveObjects={curveObjects}
               iconLabels={iconLabels}
+              templateReplacements={templateReplacements}
               onUpdateLabel={handleUpdateLabel}
               onAddIcon={handleAddItem}
             />
