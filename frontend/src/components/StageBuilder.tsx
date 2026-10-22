@@ -426,6 +426,81 @@ const StageBuilder: React.FC<Props> = ({
     saveBackup(snap);
   };
 
+  // ─── Drag Action Snapshot Management (One history step per complete drag action) ───
+  const dragStartSnapshotRef = useRef<StageSnapshot | null>(null);
+
+  const handleDragStartAction = () => {
+    if (!dragStartSnapshotRef.current && !isRestoringRef.current) {
+      dragStartSnapshotRef.current = buildSnapshot();
+    }
+  };
+
+  const handleDragEndAction = () => {
+    if (dragStartSnapshotRef.current) {
+      const startSnap = dragStartSnapshotRef.current;
+      dragStartSnapshotRef.current = null;
+      // Compare start state with current state; push only if an actual change occurred
+      const currentSnap = buildSnapshot();
+      const hasItemChanged = JSON.stringify(startSnap.placedItems) !== JSON.stringify(currentSnap.placedItems);
+      const hasCurveChanged = JSON.stringify(startSnap.curveObjects) !== JSON.stringify(currentSnap.curveObjects);
+      if (hasItemChanged || hasCurveChanged) {
+        historyRef.current = [...historyRef.current.slice(-HISTORY_MAX + 1), startSnap];
+        redoStackRef.current = [];
+        setCanUndo(true);
+        setCanRedo(false);
+        saveBackup(currentSnap);
+      }
+    }
+  };
+
+  // ─── Arrow Keys Nudging Grouping (Debounced into a single undo step) ───
+  const nudgeSnapshotRef = useRef<StageSnapshot | null>(null);
+  const nudgeTimerRef = useRef<any>(null);
+
+  const handleNudgeItems = (updates: { id: string; attrs: Partial<PlacedItem> }[]) => {
+    if (!nudgeSnapshotRef.current && !isRestoringRef.current) {
+      nudgeSnapshotRef.current = buildSnapshot();
+    }
+    setPlacedItems(prev => prev.map(item => {
+      const u = updates.find(x => x.id === item.id);
+      return u ? { ...item, ...u.attrs } : item;
+    }));
+
+    if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    nudgeTimerRef.current = setTimeout(() => {
+      if (nudgeSnapshotRef.current) {
+        historyRef.current = [...historyRef.current.slice(-HISTORY_MAX + 1), nudgeSnapshotRef.current];
+        redoStackRef.current = [];
+        setCanUndo(true);
+        setCanRedo(false);
+        saveBackup(buildSnapshot());
+        nudgeSnapshotRef.current = null;
+      }
+    }, 400);
+  };
+
+  const handleNudgeCurves = (curveUpdates: { id: string; attrs: Partial<CurveObject> }[]) => {
+    if (!nudgeSnapshotRef.current && !isRestoringRef.current) {
+      nudgeSnapshotRef.current = buildSnapshot();
+    }
+    setCurveObjects(prev => prev.map(c => {
+      const u = curveUpdates.find(x => x.id === c.id);
+      return u ? { ...c, ...u.attrs } : c;
+    }));
+
+    if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    nudgeTimerRef.current = setTimeout(() => {
+      if (nudgeSnapshotRef.current) {
+        historyRef.current = [...historyRef.current.slice(-HISTORY_MAX + 1), nudgeSnapshotRef.current];
+        redoStackRef.current = [];
+        setCanUndo(true);
+        setCanRedo(false);
+        saveBackup(buildSnapshot());
+        nudgeSnapshotRef.current = null;
+      }
+    }, 400);
+  };
+
   // Restore a snapshot to the React state
   const restoreSnapshot = (snap: StageSnapshot) => {
     isRestoringRef.current = true;
@@ -589,7 +664,10 @@ const StageBuilder: React.FC<Props> = ({
       );
       if (!isChanged) return;
     }
-    pushHistory();
+    // ドラッグ操作中の場合は handleDragEndAction でまとめて履歴に積むため、個別 push はスキップ
+    if (!dragStartSnapshotRef.current) {
+      pushHistory();
+    }
     setPlacedItems(prev => prev.map(item => item.id === id ? { ...item, ...newAttrs } : item));
   };
 
@@ -622,7 +700,10 @@ const StageBuilder: React.FC<Props> = ({
     });
     if (!hasAnyChange) return;
 
-    pushHistory();
+    // ドラッグ操作中の場合は handleDragEndAction でまとめて履歴に積むため、個別 push はスキップ
+    if (!dragStartSnapshotRef.current) {
+      pushHistory();
+    }
     setPlacedItems(prev => prev.map(item => {
       const u = updates.find(x => x.id === item.id);
       return u ? { ...item, ...u.attrs } : item;
@@ -1072,7 +1153,7 @@ const StageBuilder: React.FC<Props> = ({
     }
   };
 
-  const handleUpdateCurve = (id: string, updates: Partial<CurveObject>) => {
+  const handleUpdateCurve = (id: string, updates: Partial<CurveObject>, skipHistory = false) => {
     const currentCurve = curveObjectsRef.current.find(c => c.id === id);
     if (currentCurve) {
       const isChanged = Object.keys(updates).some(
@@ -1080,7 +1161,10 @@ const StageBuilder: React.FC<Props> = ({
       );
       if (!isChanged) return;
     }
-    pushHistory();
+    // ドラッグ操作中（制御点ハンドルや曲線ドラッグ）または skipHistory 指定時は個別 push をスキップ
+    if (!skipHistory && !dragStartSnapshotRef.current) {
+      pushHistory();
+    }
     setCurveObjects(prev => prev.map(c => {
       if (c.id !== id) return c;
       const nextCurve = { ...c, ...updates };
@@ -2882,6 +2966,10 @@ const StageBuilder: React.FC<Props> = ({
           onUpdateItem={handleUpdateItem}
           onUpdateItems={handleUpdateItems}
           onUpdateCurve={handleUpdateCurve}
+          onDragStartAction={handleDragStartAction}
+          onDragEndAction={handleDragEndAction}
+          onNudgeItems={handleNudgeItems}
+          onNudgeCurves={handleNudgeCurves}
           onAddItem={handleAddItem}
           onDeleteItem={handleDeleteItem}
           onDeleteSelected={handleDeleteSelected}

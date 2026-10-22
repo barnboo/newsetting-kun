@@ -63,7 +63,11 @@ interface StageCanvasProps {
   onSelectCurves?: (ids: string[]) => void;
   onUpdateItem: (id: string, newAttrs: Partial<PlacedItem>) => void;
   onUpdateItems?: (updates: { id: string; attrs: Partial<PlacedItem> }[]) => void;
-  onUpdateCurve: (id: string, newCurve: Partial<CurveObject>) => void;
+  onUpdateCurve: (id: string, newCurve: Partial<CurveObject>, skipHistory?: boolean) => void;
+  onDragStartAction?: () => void;
+  onDragEndAction?: () => void;
+  onNudgeItems?: (updates: { id: string; attrs: Partial<PlacedItem> }[]) => void;
+  onNudgeCurves?: (updates: { id: string; attrs: Partial<CurveObject> }[]) => void;
   onAddItem: (iconId: string, x: number, y: number) => void;
   onDeleteItem: (id: string) => void;
   onDeleteSelected?: () => void;
@@ -182,8 +186,10 @@ const CanvasItem: React.FC<{
   onSelect: (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onChange: (newAttrs: Partial<PlacedItem>) => void;
   onUpdateItems?: (updates: { id: string; attrs: Partial<PlacedItem> }[]) => void;
+  onDragStartAction?: () => void;
+  onDragEndAction?: () => void;
   onSnapGuideChange?: (guideX: number | null, guideY: number | null) => void;
-}> = ({ item, iconUrl, isSelected, activeItemIds, snapSettings, bgCenter, effectiveCenter, onSelect, onChange, onUpdateItems, onSnapGuideChange }) => {
+}> = ({ item, iconUrl, isSelected, activeItemIds, snapSettings, bgCenter, effectiveCenter, onSelect, onChange, onUpdateItems, onDragStartAction, onDragEndAction, onSnapGuideChange }) => {
   const [image] = useImage(iconUrl, 'anonymous');
   const groupRef = useRef<Konva.Group>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -223,6 +229,7 @@ const CanvasItem: React.FC<{
       onClick={(e) => { e.cancelBubble = true; onSelect(e); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(e); }}
       onDragStart={(e) => {
+        onDragStartAction?.();
         dragStartPosRef.current = { x: e.target.x(), y: e.target.y() };
         if (isSelected && activeItemIds && activeItemIds.length > 1) {
           multiDragStartRef.current.clear();
@@ -288,11 +295,16 @@ const CanvasItem: React.FC<{
           onChange({ x: e.target.x(), y: e.target.y() });
         }
         dragStartPosRef.current = null;
+        onDragEndAction?.();
+      }}
+      onTransformStart={() => {
+        onDragStartAction?.();
       }}
       onTransformEnd={() => {
         const node = groupRef.current;
         if (!node) return;
         onChange({ x: node.x(), y: node.y(), rotation: node.rotation(), scaleX: node.scaleX(), scaleY: node.scaleY() });
+        onDragEndAction?.();
       }}
     >
       {/* Invisible hit area: ensures the Group is always detectable for drag/click
@@ -632,8 +644,10 @@ const CurveCanvas: React.FC<{
   selectedCurveItemId?: string | null;
   onSelect: () => void;
   onSelectCurveItem?: (curveId: string, itemId: string) => void;
-  onUpdatePoints: (points: [number, number, number, number, number, number]) => void;
+  onUpdatePoints: (points: [number, number, number, number, number, number], isDragging?: boolean) => void;
   onUpdateCurvePos: (x: number, y: number) => void;
+  onDragStartAction?: () => void;
+  onDragEndAction?: () => void;
   scale: number;
   snapSettings?: SnapSettings;
   bgCenter: { x: number; y: number };
@@ -648,6 +662,8 @@ const CurveCanvas: React.FC<{
   onSelectCurveItem,
   onUpdatePoints,
   onUpdateCurvePos,
+  onDragStartAction,
+  onDragEndAction,
   scale,
   snapSettings,
   bgCenter,
@@ -690,6 +706,9 @@ const CurveCanvas: React.FC<{
       draggable={!curve.isPinned}
       onClick={(e) => { e.cancelBubble = true; onSelect(); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(); }}
+      onDragStart={() => {
+        onDragStartAction?.();
+      }}
       onDragMove={(e) => {
         if (e.target !== e.currentTarget) return;
         const isCtrl = Boolean(e.evt && (e.evt.ctrlKey || e.evt.metaKey));
@@ -713,6 +732,7 @@ const CurveCanvas: React.FC<{
         if (e.target !== e.currentTarget) return;
         onSnapGuideChange?.(null, null);
         onUpdateCurvePos(e.target.x(), e.target.y());
+        onDragEndAction?.();
       }}
     >
       {/* Bezier guide line */}
@@ -834,6 +854,7 @@ const CurveCanvas: React.FC<{
             draggable={!curve.isPinned}
             onDragStart={(e) => {
               e.cancelBubble = true;
+              onDragStartAction?.();
             }}
             onDragMove={(e) => {
               e.cancelBubble = true;
@@ -863,7 +884,7 @@ const CurveCanvas: React.FC<{
                 -nx,
                 ny,
               ];
-              onUpdatePoints(newPts);
+              onUpdatePoints(newPts, true);
             }}
             onDragEnd={(e) => {
               e.cancelBubble = true;
@@ -880,7 +901,8 @@ const CurveCanvas: React.FC<{
                 -nx,
                 ny,
               ];
-              onUpdatePoints(newPts);
+              onUpdatePoints(newPts, false);
+              onDragEndAction?.();
             }}
           />
 
@@ -896,6 +918,7 @@ const CurveCanvas: React.FC<{
             draggable={!curve.isPinned}
             onDragStart={(e) => {
               e.cancelBubble = true;
+              onDragStartAction?.();
             }}
             onDragMove={(e) => {
               e.cancelBubble = true;
@@ -925,7 +948,7 @@ const CurveCanvas: React.FC<{
                 nx,
                 ny,
               ];
-              onUpdatePoints(newPts);
+              onUpdatePoints(newPts, true);
             }}
             onDragEnd={(e) => {
               e.cancelBubble = true;
@@ -942,7 +965,8 @@ const CurveCanvas: React.FC<{
                 nx,
                 ny,
               ];
-              onUpdatePoints(newPts);
+              onUpdatePoints(newPts, false);
+              onDragEndAction?.();
             }}
           />
 
@@ -961,6 +985,7 @@ const CurveCanvas: React.FC<{
             draggable={!curve.isPinned}
             onDragStart={(e) => {
               e.cancelBubble = true;
+              onDragStartAction?.();
             }}
             onDragMove={(e) => {
               e.cancelBubble = true;
@@ -1020,7 +1045,7 @@ const CurveCanvas: React.FC<{
                 pts[4],
                 pts[5],
               ];
-              onUpdatePoints(newPts);
+              onUpdatePoints(newPts, true);
             }}
             onDragEnd={(e) => {
               e.cancelBubble = true;
@@ -1033,7 +1058,8 @@ const CurveCanvas: React.FC<{
                 pts[4],
                 pts[5],
               ];
-              onUpdatePoints(newPts);
+              onUpdatePoints(newPts, false);
+              onDragEndAction?.();
             }}
           />
         </>
@@ -1065,6 +1091,10 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     onUpdateItem,
     onUpdateItems,
     onUpdateCurve,
+    onDragStartAction,
+    onDragEndAction,
+    onNudgeItems,
+    onNudgeCurves,
     onAddItem,
     onDeleteItem,
     onDeleteSelected,
@@ -1377,13 +1407,16 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
             if (e.key === 'ArrowRight') x += step;
             updates.push({ id, attrs: { x, y } });
           });
-          if (onUpdateItems && updates.length > 0) {
+          if (onNudgeItems && updates.length > 0) {
+            onNudgeItems(updates);
+          } else if (onUpdateItems && updates.length > 0) {
             onUpdateItems(updates);
           } else if (updates[0]) {
             onUpdateItem(updates[0].id, updates[0].attrs);
           }
         }
         if (hasCurveSelection) {
+          const curveUpdates: { id: string; attrs: Partial<CurveObject> }[] = [];
           activeCurveIds.forEach(id => {
             const cur = curveObjects.find(c => c.id === id);
             if (!cur || cur.isPinned) return;
@@ -1392,8 +1425,13 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
             if (e.key === 'ArrowDown') y += step;
             if (e.key === 'ArrowLeft') x -= step;
             if (e.key === 'ArrowRight') x += step;
-            onUpdateCurve(id, { x, y });
+            curveUpdates.push({ id, attrs: { x, y } });
           });
+          if (onNudgeCurves && curveUpdates.length > 0) {
+            onNudgeCurves(curveUpdates);
+          } else {
+            curveUpdates.forEach(u => onUpdateCurve(u.id, u.attrs));
+          }
         }
       }
     };
@@ -1995,8 +2033,10 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                     onSelectCurve(curve.id);
                     onSelectItem(null);
                   }}
-                  onUpdatePoints={(points) => onUpdateCurve(curve.id, { points })}
+                  onUpdatePoints={(points, isDragging) => onUpdateCurve(curve.id, { points }, isDragging)}
                   onUpdateCurvePos={(x, y) => onUpdateCurve(curve.id, { x, y })}
+                  onDragStartAction={onDragStartAction}
+                  onDragEndAction={onDragEndAction}
                   scale={stageDimensions.scale}
                   snapSettings={snapSettings}
                   bgCenter={{ x: bgCenterX, y: bgCenterY }}
@@ -2052,6 +2092,8 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   }}
                   onChange={(attrs) => onUpdateItem(item.id, attrs)}
                   onUpdateItems={onUpdateItems}
+                  onDragStartAction={onDragStartAction}
+                  onDragEndAction={onDragEndAction}
                   onSnapGuideChange={(gx, gy) => {
                     setActiveGuideX(gx);
                     setActiveGuideY(gy);
@@ -2078,6 +2120,9 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
               anchorStroke="#2563eb"
               anchorFill="#ffffff"
               anchorSize={8}
+              onTransformStart={() => {
+                onDragStartAction?.();
+              }}
               onTransformEnd={() => {
                 if (!stageRef.current) return;
                 if (activeItemIds.length > 1 && onUpdateItems) {
@@ -2099,6 +2144,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   });
                   onUpdateItems(updates);
                 }
+                onDragEndAction?.();
               }}
             />
 
