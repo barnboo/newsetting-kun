@@ -16,7 +16,7 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({ onUploadSuccess }) => 
     if (!file) return;
     
     if (file.type !== 'application/pdf') {
-      setError('Please upload a valid PDF file.');
+      setError('PDFファイル（.pdf）をアップロードしてください。');
       return;
     }
 
@@ -35,7 +35,7 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({ onUploadSuccess }) => 
       onUploadSuccess(response.data);
     } catch (err: any) {
       console.error('Upload error:', err);
-      setError(err.response?.data?.detail || 'Failed to upload PDF');
+      setError(err.response?.data?.detail || 'PDFのアップロードに失敗しました。');
     } finally {
       setIsUploading(false);
     }
@@ -58,13 +58,13 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({ onUploadSuccess }) => 
         <input {...getInputProps()} />
         <UploadCloud className="mx-auto h-12 w-12 text-gray-400 mb-4" />
         {isUploading ? (
-          <p className="text-gray-600">Uploading and processing PDF...</p>
+          <p className="text-gray-600 font-medium">PDFをアップロード・処理中...</p>
         ) : isDragActive ? (
-          <p className="text-blue-500">Drop the PDF here...</p>
+          <p className="text-blue-500 font-medium">ここにPDFファイルをドロップしてください...</p>
         ) : (
           <div>
-            <p className="text-gray-700 text-lg font-medium">Drag & drop your stage setting PDF here</p>
-            <p className="text-gray-500 text-sm mt-2">or click to select file</p>
+            <p className="text-gray-800 text-lg font-medium">ここにステージ配置図のPDFをドラッグ＆ドロップ</p>
+            <p className="text-gray-500 text-sm mt-2">または クリックしてファイルを選択</p>
           </div>
         )}
       </div>
