@@ -422,7 +422,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               </span>
               <span className="text-[10px] text-slate-400 font-normal">
                 {selectedItem.chairType === 'pianoChairSvg'
-                  ? 'テンプレ画像 (🪑)'
+                  ? 'ピアノ椅子 (🪑)'
                   : selectedItem.chairType === 'pianoChair'
                   ? 'ピアノ椅子 (◎)'
                   : '合奏用椅子 (○)'}
@@ -463,11 +463,11 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 }`}
               >
                 <span className="text-sm leading-none">🪑</span>
-                <span className="text-[10px]">テンプレ画像</span>
+                <span className="text-[10px]">ピアノ椅子</span>
               </button>
             </div>
             <p className="text-[10px] text-slate-500 leading-tight">
-              ※「二重丸」または「テンプレ画像」を選択すると、提出書類の集計欄でもピアノ椅子として自動カウントされます。
+              ※「二重丸」または「ピアノ椅子」を選択すると、提出書類の集計欄でもピアノ椅子として自動カウントされます。
             </p>
           </div>
         )}
@@ -1024,7 +1024,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               </span>
               <span className="text-[10px] text-slate-400 font-normal">
                 {selectedCurve.chairType === 'pianoChairSvg'
-                  ? 'テンプレ画像 (🪑)'
+                  ? 'ピアノ椅子 (🪑)'
                   : selectedCurve.chairType === 'pianoChair'
                   ? 'ピアノ椅子 (◎)'
                   : '合奏用椅子 (○)'}
@@ -1098,7 +1098,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 }`}
               >
                 <span className="text-xs">🪑</span>
-                <span className="text-[10px]">テンプレ画像</span>
+                <span className="text-[10px]">ピアノ椅子</span>
               </button>
             </div>
           </div>
