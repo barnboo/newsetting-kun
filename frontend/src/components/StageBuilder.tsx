@@ -637,12 +637,18 @@ const StageBuilder: React.FC<Props> = ({
     const spawnX = x ?? (effCenter?.x ?? 600);
     const spawnY = y ?? (effCenter?.y ?? 300);
 
+    const isSymbol = templateType === 'symbol';
+
     const newItem: PlacedItem = {
       id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       iconId,
       templateType,
       percussionType,
       showPercussionName: true,
+      symbolShape: isSymbol ? 'circle' : undefined,
+      symbolFilled: isSymbol ? false : undefined,
+      symbolText: isSymbol ? '' : undefined,
+      symbolFontSize: isSymbol ? 16 : undefined,
       x: spawnX,
       y: spawnY,
       width: defaultWidth,

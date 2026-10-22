@@ -238,6 +238,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
 
     const isPercussion = selectedItem.templateType === 'percussion';
     const isPiano = selectedItem.templateType === 'piano';
+    const isSymbol = selectedItem.templateType === 'symbol';
     const isStand = selectedItem.templateType === 'ensembleStand' ||
                     selectedItem.templateType === 'conductorStand' ||
                     selectedItem.templateType === 'ensembleChairAndStand';
@@ -583,6 +584,119 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 <option value="全開">全開</option>
               </select>
             </label>
+          </div>
+        )}
+
+        {isSymbol && (
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex flex-col gap-3">
+            <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1">
+              <span>🔲</span> 記号の設定
+            </h4>
+
+            {/* 形状選択 */}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">図形の形状</span>
+              <div className="grid grid-cols-4 gap-1">
+                {[
+                  { shape: 'circle', label: '丸 ⭕' },
+                  { shape: 'cross', label: 'バツ ❌' },
+                  { shape: 'rect', label: '四角 ⬛' },
+                  { shape: 'triangle', label: '三角 🔺' },
+                ].map(({ shape, label }) => {
+                  const active = (selectedItem.symbolShape || 'circle') === shape;
+                  return (
+                    <button
+                      key={shape}
+                      type="button"
+                      onClick={() => onUpdateItem(selectedItem.id, { symbolShape: shape as any })}
+                      className={`py-1.5 px-1 text-xs rounded border text-center transition-all ${
+                        active
+                          ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold shadow-sm'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 塗りつぶしの有無 */}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">塗りつぶし</span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onUpdateItem(selectedItem.id, { symbolFilled: false })}
+                  className={`py-1.5 px-2 text-xs rounded border text-center transition-all ${
+                    !selectedItem.symbolFilled
+                      ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold shadow-sm'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  枠線のみ ◻️
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdateItem(selectedItem.id, { symbolFilled: true })}
+                  className={`py-1.5 px-2 text-xs rounded border text-center transition-all ${
+                    selectedItem.symbolFilled
+                      ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold shadow-sm'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  塗りつぶし ◼️
+                </button>
+              </div>
+            </div>
+
+            {/* 枠内の文字 */}
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">枠内の文字（Wクリックでも編集可）</span>
+              <input
+                type="text"
+                value={selectedItem.symbolText || ''}
+                onChange={(e) => onUpdateItem(selectedItem.id, { symbolText: e.target.value })}
+                placeholder="例: A, 1, Solo, 譜 等"
+                className="px-2.5 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </label>
+
+            {/* 文字サイズ */}
+            <div className="flex flex-col gap-1">
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">文字サイズ</span>
+                <span className="text-xs text-slate-400 font-mono">{selectedItem.symbolFontSize || 16}px</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {[12, 16, 20, 24].map((sz) => {
+                  const active = (selectedItem.symbolFontSize || 16) === sz;
+                  return (
+                    <button
+                      key={sz}
+                      type="button"
+                      onClick={() => onUpdateItem(selectedItem.id, { symbolFontSize: sz })}
+                      className={`py-1 text-xs rounded border text-center transition-all ${
+                        active
+                          ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {sz}px
+                    </button>
+                  );
+                })}
+              </div>
+              <input
+                type="range"
+                min={8}
+                max={36}
+                value={selectedItem.symbolFontSize || 16}
+                onChange={(e) => onUpdateItem(selectedItem.id, { symbolFontSize: Number(e.target.value) })}
+                className="w-full mt-1 accent-blue-600"
+              />
+            </div>
           </div>
         )}
 

@@ -24,6 +24,10 @@ export interface PlacedItem {
   color?: string;
   customIconStyle?: 'default' | 'xMark' | 'doubleCircle';
   chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg';
+  symbolShape?: 'circle' | 'cross' | 'rect' | 'triangle';
+  symbolFilled?: boolean;
+  symbolText?: string;
+  symbolFontSize?: number;
   isPinned?: boolean;
 }
 
@@ -174,6 +178,153 @@ function calculateSnapping({
   return { x: newX, y: newY, snappedX, snappedY };
 }
 
+function renderSymbolShape(
+  shape: 'circle' | 'cross' | 'rect' | 'triangle' = 'circle',
+  filled: boolean = false,
+  color: string = '#000000',
+  width: number,
+  height: number
+) {
+  const strokeColor = color;
+  const fillColor = filled ? color : 'transparent';
+  const strokeWidth = 2.5;
+
+  const pad = 3;
+  const w = width - pad * 2;
+  const h = height - pad * 2;
+  const cx = width / 2;
+  const cy = height / 2;
+  const r = Math.min(w, h) / 2;
+
+  switch (shape) {
+    case 'circle':
+      return (
+        <Circle
+          x={cx}
+          y={cy}
+          radius={r}
+          fill={fillColor}
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          listening={false}
+        />
+      );
+    case 'rect':
+      return (
+        <Rect
+          x={pad}
+          y={pad}
+          width={w}
+          height={h}
+          fill={fillColor}
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          cornerRadius={2}
+          listening={false}
+        />
+      );
+    case 'triangle':
+      return (
+        <Line
+          points={[cx, pad, width - pad, height - pad, pad, height - pad]}
+          closed
+          fill={fillColor}
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          lineJoin="round"
+          listening={false}
+        />
+      );
+    case 'cross': {
+      const d = r * 0.35;
+      const rawPoints = [
+        -d, -r,
+        d, -r,
+        d, -d,
+        r, -d,
+        r, d,
+        d, d,
+        d, r,
+        -d, r,
+        -d, d,
+        -r, d,
+        -r, -d,
+        -d, -d,
+      ];
+      const cos45 = Math.SQRT1_2;
+      const sin45 = Math.SQRT1_2;
+      const rotatedPoints: number[] = [];
+      for (let i = 0; i < rawPoints.length; i += 2) {
+        const px = rawPoints[i];
+        const py = rawPoints[i + 1];
+        const rx = cx + (px * cos45 - py * sin45);
+        const ry = cy + (px * sin45 + py * cos45);
+        rotatedPoints.push(rx, ry);
+      }
+      return (
+        <Line
+          points={rotatedPoints}
+          closed
+          fill={fillColor}
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          lineJoin="round"
+          listening={false}
+        />
+      );
+    }
+    default:
+      return null;
+  }
+}
+
+function renderSymbolText(
+  text: string | undefined,
+  shape: 'circle' | 'cross' | 'rect' | 'triangle' = 'circle',
+  filled: boolean = false,
+  fontSize: number = 16,
+  color: string = '#000000',
+  width: number,
+  height: number
+) {
+  if (!text) return null;
+
+  const textColor = filled ? '#ffffff' : color;
+  const cx = width / 2;
+  const cy = shape === 'triangle' ? height * 0.58 : height / 2;
+
+  let availableWidth = width * 0.72;
+  if (shape === 'rect') availableWidth = width * 0.85;
+  if (shape === 'triangle') availableWidth = width * 0.62;
+  if (shape === 'cross') availableWidth = width * 0.68;
+
+  let approxTextWidth = 0;
+  for (let i = 0; i < text.length; i++) {
+    approxTextWidth += text.charCodeAt(i) > 255 ? fontSize : fontSize * 0.55;
+  }
+
+  const scaleX = approxTextWidth > availableWidth ? Math.max(0.15, availableWidth / approxTextWidth) : 1;
+  const boxWidth = availableWidth / scaleX;
+
+  return (
+    <Text
+      text={text}
+      x={cx - availableWidth / 2}
+      y={cy - (fontSize * 1.2) / 2}
+      width={boxWidth}
+      height={fontSize * 1.2}
+      fontSize={fontSize}
+      fontFamily="Arial, sans-serif"
+      fontStyle="bold"
+      align="center"
+      verticalAlign="middle"
+      fill={textColor}
+      scaleX={scaleX}
+      listening={false}
+    />
+  );
+}
+
 // A single placed icon item on canvas (either template SVG or extracted image)
 const CanvasItem: React.FC<{
   item: PlacedItem;
@@ -228,6 +379,15 @@ const CanvasItem: React.FC<{
       draggable={!item.isPinned}
       onClick={(e) => { e.cancelBubble = true; onSelect(e); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(e); }}
+      onDblClick={(e) => {
+        if (item.templateType === 'symbol') {
+          e.cancelBubble = true;
+          const next = window.prompt('記号内の文字を入力してください:', item.symbolText || '');
+          if (next !== null) {
+            onChange({ symbolText: next });
+          }
+        }
+      }}
       onDragStart={(e) => {
         onDragStartAction?.();
         dragStartPosRef.current = { x: e.target.x(), y: e.target.y() };
@@ -404,12 +564,33 @@ const CanvasItem: React.FC<{
         </>
       )}
 
-      <KonvaImage
-        image={image}
-        width={effectiveWidth}
-        height={effectiveHeight}
-        listening={false}
-      />
+      {item.templateType === 'symbol' ? (
+        <Group listening={false}>
+          {renderSymbolShape(
+            item.symbolShape,
+            item.symbolFilled,
+            item.color || '#000000',
+            effectiveWidth,
+            effectiveHeight
+          )}
+          {renderSymbolText(
+            item.symbolText,
+            item.symbolShape,
+            item.symbolFilled,
+            item.symbolFontSize,
+            item.color || '#000000',
+            effectiveWidth,
+            effectiveHeight
+          )}
+        </Group>
+      ) : (
+        <KonvaImage
+          image={image}
+          width={effectiveWidth}
+          height={effectiveHeight}
+          listening={false}
+        />
+      )}
       {showText && percInfo && (() => {
         const text = percInfo.canvasName;
         const maxFontByW = (effectiveWidth * 0.95) / Math.max(text.length * 0.62, 1);
@@ -490,8 +671,9 @@ const CurveItemRenderer: React.FC<{
   const halfW = itemW / 2;
   const halfH = itemH / 2;
   const showText = isPerc && item.showPercussionName !== false && Boolean(percInfo?.canvasName);
+  const isSymbol = tmpl?.type === 'symbol';
 
-  if (img) {
+  if (img || isSymbol) {
     return (
       <Group
         x={x}
@@ -543,14 +725,35 @@ const CurveItemRenderer: React.FC<{
           />
         )}
 
-        <KonvaImage
-          image={img}
-          x={-halfW}
-          y={-halfH}
-          width={itemW}
-          height={itemH}
-          listening={false}
-        />
+        {isSymbol ? (
+          <Group x={-halfW} y={-halfH} listening={false}>
+            {renderSymbolShape(
+              item.symbolShape,
+              item.symbolFilled,
+              item.color || color || '#000000',
+              itemW,
+              itemH
+            )}
+            {renderSymbolText(
+              item.symbolText,
+              item.symbolShape,
+              item.symbolFilled,
+              item.symbolFontSize,
+              item.color || color || '#000000',
+              itemW,
+              itemH
+            )}
+          </Group>
+        ) : (
+          <KonvaImage
+            image={img}
+            x={-halfW}
+            y={-halfH}
+            width={itemW}
+            height={itemH}
+            listening={false}
+          />
+        )}
         {showText && percInfo && (() => {
           const text = percInfo.canvasName;
           const maxFontByW = (itemW * 0.95) / Math.max(text.length * 0.62, 1);

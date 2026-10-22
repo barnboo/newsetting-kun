@@ -27,6 +27,10 @@ export interface CurveItem {
   pianoLidState?: string;
   customIconStyle?: 'default' | 'xMark' | 'doubleCircle';
   chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg';
+  symbolShape?: 'circle' | 'cross' | 'rect' | 'triangle';
+  symbolFilled?: boolean;
+  symbolText?: string;
+  symbolFontSize?: number;
   // If custom extracted icon
   isCustom?: boolean;
   iconId?: string;

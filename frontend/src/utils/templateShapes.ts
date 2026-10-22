@@ -403,6 +403,17 @@ export const TEMPLATE_SHAPES: TemplateShape[] = [
     svg: PERCUSSION_DATA[0].svg,
     targetTallies: [{ label: '打楽器', multiplier: 1 }],
   },
+  {
+    id: 'tmpl_symbol',
+    type: 'symbol',
+    label: '記号',
+    category: 'stage',
+    defaultW: 34,
+    defaultH: 34,
+    origW: 40,
+    origH: 40,
+    targetTallies: [{ label: '記号', multiplier: 1 }],
+  },
 ];
 
 /**
@@ -432,6 +443,13 @@ export function generateSvgString(
   customIconStyle?: 'default' | 'xMark' | 'doubleCircle',
   chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg'
 ): string {
+  if (template.type === 'symbol') {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
+      <circle cx="20" cy="20" r="17" fill="none" stroke="${color}" stroke-width="2.5"/>
+      <text x="20" y="25" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="${color}">記</text>
+    </svg>`;
+  }
+
   // Special combination: 椅子＋譜面台 (ensembleChairAndStand)
   if (template.type === 'ensembleChairAndStand') {
     const isPianoCircle = chairType === 'pianoChair';
