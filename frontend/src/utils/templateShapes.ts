@@ -528,11 +528,198 @@ export function getPercussionDataUrl(percussionName: string, color = '#000000'):
 }
 
 /**
+ * Calculate match confidence score (0 to 100) between an extracted icon label and a template type.
+ * Higher score indicates better suitability. Score < 50 is treated as no match.
+ */
+export function calcTemplateMatchScore(iconLabel: string, template: TemplateShape): number {
+  const norm = iconLabel.toLowerCase().trim();
+  const tmplLabel = template.label.toLowerCase();
+  const type = template.type;
+
+  // 1. 完全一致
+  if (norm === tmplLabel) return 100;
+
+  // 2. めくり椅子 / 譜めくり椅子 (turnerChair)
+  if (type === 'turnerChair') {
+    if (norm.includes('めくり') || norm.includes('turner')) {
+      return norm.includes('椅子') || norm.includes('イス') ? 98 : 90;
+    }
+    return 0;
+  }
+
+  // 3. ピアノ椅子 (pianoChair)
+  if (type === 'pianoChair') {
+    if (norm.includes('めくり')) return 0; // めくり椅子は除外
+    if (norm.includes('ピアノ') && (norm.includes('椅子') || norm.includes('イス') || norm.includes('chair'))) {
+      return 98;
+    }
+    return 0;
+  }
+
+  // 4. 合奏用椅子 (chorusChair)
+  if (type === 'chorusChair') {
+    // ピアノ、めくり、譜面台が混ざっているものは合奏用椅子ではない
+    if (norm.includes('ピアノ') || norm.includes('めくり') || norm.includes('譜面台') || norm.includes('stand')) {
+      return 0;
+    }
+    if (norm.includes('合奏') && (norm.includes('椅子') || norm.includes('イス'))) return 96;
+    if (norm.includes('椅子') || norm.includes('イス') || norm === 'chair') return 85;
+    return 0;
+  }
+
+  // 5. 椅子＋譜面台 (ensembleChairAndStand)
+  if (type === 'ensembleChairAndStand') {
+    if ((norm.includes('椅子') || norm.includes('イス')) && (norm.includes('譜面台') || norm.includes('スタンド'))) {
+      return 98;
+    }
+    return 0;
+  }
+
+  // 6. 指揮譜面台 (conductorStand)
+  if (type === 'conductorStand') {
+    if (norm.includes('指揮') && (norm.includes('譜面台') || norm.includes('スタンド') || norm.includes('stand'))) {
+      return 98;
+    }
+    return 0;
+  }
+
+  // 7. 合奏用譜面台 (ensembleStand)
+  if (type === 'ensembleStand') {
+    if (norm.includes('指揮') || norm.includes('椅子') || norm.includes('イス')) return 0;
+    if (norm.includes('合奏') && (norm.includes('譜面台') || norm.includes('スタンド'))) return 96;
+    if (norm.includes('譜面台') || norm.includes('スタンド') || norm === 'stand') return 85;
+    return 0;
+  }
+
+  // 8. 指揮台 (podium)
+  if (type === 'podium') {
+    if (norm.includes('譜面台') || norm.includes('スタンド')) return 0; // 指揮譜面台を優先
+    if (norm.includes('指揮台') || norm.includes('podium')) return 98;
+    if (norm.includes('指揮') && !norm.includes('譜面台')) return 75;
+    return 0;
+  }
+
+  // 9. グランドピアノ (piano)
+  if (type === 'piano') {
+    if (norm.includes('椅子') || norm.includes('イス') || norm.includes('めくり')) return 0;
+    if (norm.includes('ピアノ') || norm.includes('piano')) return 95;
+    return 0;
+  }
+
+  // 10. 長机 (longDesk)
+  if (type === 'longDesk') {
+    if (norm.includes('机') || norm.includes('デスク') || norm.includes('desk') || norm.includes('テーブル')) return 95;
+    return 0;
+  }
+
+  // 11. 延長コード (extensionCord)
+  if (type === 'extensionCord') {
+    if (norm.includes('コード') || norm.includes('cord') || norm.includes('電源') || norm.includes('タップ')) return 95;
+    return 0;
+  }
+
+  // 12. 打楽器 (percussion)
+  if (type === 'percussion') {
+    if (norm.includes('打楽器') || norm.includes('percussion') || norm.includes('perc')) return 95;
+    const percussionNames = ['ティンパニ', 'timp', 'ドラム', 'drum', 'シンバル', 'cym', 'バスドラム', 'b.d', 'マリンバ', 'シロフォン', 'グロッケン', 'ビブラフォン', 'スネア', 'チャイム', 'タム'];
+    if (percussionNames.some(p => norm.includes(p))) return 90;
+    return 0;
+  }
+
+  return 0;
+}
+
+/**
+ * Match a list of extracted icons to templates without allowing multiple icons
+ * to be assigned to the same template (prevents duplicate recommendations).
+ * Each template can be recommended to at most ONE icon (the best match).
+ */
+export function matchIconsToTemplates(
+  icons: Array<{ id: string; label: string; index: number }>
+): Record<string, TemplateShape | null> {
+  const result: Record<string, TemplateShape | null> = {};
+  icons.forEach(icon => {
+    result[icon.id] = null;
+  });
+
+  // 1. Calculate scores for all (icon, template) pairs
+  const candidates: Array<{
+    iconId: string;
+    iconIndex: number;
+    template: TemplateShape;
+    score: number;
+  }> = [];
+
+  for (const icon of icons) {
+    for (const template of TEMPLATE_SHAPES) {
+      const score = calcTemplateMatchScore(icon.label, template);
+      if (score >= 50) {
+        candidates.push({
+          iconId: icon.id,
+          iconIndex: icon.index,
+          template,
+          score,
+        });
+      }
+    }
+  }
+
+  // 2. Sort by score descending (higher score takes priority)
+  candidates.sort((a, b) => b.score - a.score);
+
+  // 3. Greedy 1-to-1 matching: each template can be used at most once, and each icon at most once
+  const usedTemplates = new Set<string>();
+  const matchedIcons = new Set<string>();
+
+  for (const cand of candidates) {
+    if (matchedIcons.has(cand.iconId)) continue;
+    if (usedTemplates.has(cand.template.type)) continue;
+
+    result[cand.iconId] = cand.template;
+    matchedIcons.add(cand.iconId);
+    usedTemplates.add(cand.template.type);
+  }
+
+  // 4. Fallback based on standard Kumamoto row order (only if not already matched and template not used)
+  const standardRowOrder = [
+    'podium',
+    'conductorStand',
+    'piano',
+    'ensembleStand',
+    'chorusChair',
+    'pianoChair',
+    'longDesk',
+    'extensionCord',
+  ];
+
+  for (const icon of icons) {
+    if (matchedIcons.has(icon.id)) continue;
+    if (icon.index >= 0 && icon.index < standardRowOrder.length) {
+      const fallbackType = standardRowOrder[icon.index];
+      // Only assign if the fallback template has not been used by any icon with a higher/direct match
+      if (!usedTemplates.has(fallbackType)) {
+        const tmpl = TEMPLATE_SHAPES.find(t => t.type === fallbackType);
+        if (tmpl) {
+          result[icon.id] = tmpl;
+          matchedIcons.add(icon.id);
+          usedTemplates.add(fallbackType);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
  * Matching heuristics to associate a PDF-extracted icon with a standard template
  */
 export function findMatchingTemplate(iconLabel: string, iconIndex: number): TemplateShape | null {
   const norm = iconLabel.toLowerCase();
   
+  if (norm.includes('めくり') || norm.includes('turner')) {
+    return TEMPLATE_SHAPES.find(t => t.type === 'turnerChair') || null;
+  }
   if (norm.includes('椅子') && norm.includes('譜面台')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'ensembleChairAndStand') || null;
   }
