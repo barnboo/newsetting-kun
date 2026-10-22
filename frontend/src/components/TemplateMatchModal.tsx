@@ -13,6 +13,7 @@ interface MatchingDecision {
 interface TemplateMatchModalProps {
   extractedIcons: ExtractedIcon[];
   iconLabels: Record<string, string>;
+  currentReplacements?: Record<string, string>;
   onConfirm: (decisions: MatchingDecision[]) => void;
   onSkip: () => void;
 }
@@ -20,6 +21,7 @@ interface TemplateMatchModalProps {
 const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
   extractedIcons,
   iconLabels,
+  currentReplacements,
   onConfirm,
   onSkip,
 }) => {
@@ -27,12 +29,15 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
     extractedIcons.map((icon, idx) => {
       const label = iconLabels[icon.id] ?? icon.label ?? `パーツ ${idx + 1}`;
       const matched = findMatchingTemplate(label, idx);
+      const useTmpl = currentReplacements && Object.keys(currentReplacements).length > 0
+        ? Boolean(currentReplacements[icon.id])
+        : matched !== null;
       return {
         iconId: icon.id,
         iconLabel: label,
         iconUrl: icon.url,
         matchedTemplate: matched,
-        useTemplate: matched !== null,
+        useTemplate: matched !== null && useTmpl,
       };
     });
 

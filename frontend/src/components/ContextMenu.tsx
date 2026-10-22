@@ -9,6 +9,7 @@ export interface ContextMenuProps {
   selectedCount: number;
   extractedIcons: ExtractedIcon[];
   iconLabels: Record<string, string>;
+  templateReplacements?: Record<string, string>;
   onAddTemplate: (tmplId: string, x: number, y: number) => void;
   onAddPdfIcon: (iconId: string, x: number, y: number) => void;
   onAddCurve: (x: number, y: number) => void;
@@ -28,6 +29,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   selectedCount,
   extractedIcons,
   iconLabels,
+  templateReplacements,
   onAddTemplate,
   onAddPdfIcon,
   onAddCurve,
@@ -89,8 +91,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
     }, 250);
   };
 
-  // Main categories of templates
-  const coreTemplates = TEMPLATE_SHAPES;
+  // テンプレ置換されたID一覧
+  const replacedTmplIdSet = React.useMemo(() => {
+    return new Set(Object.values(templateReplacements || {}));
+  }, [templateReplacements]);
+
+  // Main categories of templates (置換済みテンプレは非表示)
+  const coreTemplates = TEMPLATE_SHAPES.filter(
+    t => !replacedTmplIdSet.has(t.id) && !replacedTmplIdSet.has(`tmpl_${t.type}`)
+  );
 
   return (
     <div
@@ -128,21 +137,49 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                 抽出パーツがありません
               </div>
             ) : (
-              extractedIcons.map((icon, idx) => (
-                <div
-                  key={icon.id}
-                  onClick={() => {
-                    onAddPdfIcon(icon.id, canvasPos.x, canvasPos.y);
-                    onClose();
-                  }}
-                  className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-blue-50 text-slate-700 hover:text-blue-600 cursor-pointer transition-colors"
-                >
-                  <div className="w-5 h-5 flex items-center justify-center shrink-0">
-                    <img src={icon.url} alt="" className="max-w-full max-h-full object-contain" />
+              extractedIcons.map((icon, idx) => {
+                const tmplId = templateReplacements?.[icon.id];
+                const matchedTmpl = tmplId
+                  ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
+                  : null;
+
+                if (matchedTmpl) {
+                  const effectiveTmplId = matchedTmpl.id || `tmpl_${matchedTmpl.type}`;
+                  return (
+                    <div
+                      key={icon.id}
+                      onClick={() => {
+                        onAddTemplate(effectiveTmplId, canvasPos.x, canvasPos.y);
+                        onClose();
+                      }}
+                      className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-emerald-50 text-emerald-800 hover:text-emerald-950 cursor-pointer transition-colors"
+                      title={`[テンプレ置換済] ${matchedTmpl.label}`}
+                    >
+                      <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                        <img src={getTemplateDataUrl(matchedTmpl)} alt="" className="max-w-full max-h-full object-contain" />
+                      </div>
+                      <span className="truncate flex-1 font-medium">{matchedTmpl.label}</span>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1 rounded">テンプレ</span>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={icon.id}
+                    onClick={() => {
+                      onAddPdfIcon(icon.id, canvasPos.x, canvasPos.y);
+                      onClose();
+                    }}
+                    className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-blue-50 text-slate-700 hover:text-blue-600 cursor-pointer transition-colors"
+                  >
+                    <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                      <img src={icon.url} alt="" className="max-w-full max-h-full object-contain" />
+                    </div>
+                    <span className="truncate">{iconLabels[icon.id] ?? `パーツ ${idx + 1}`}</span>
                   </div>
-                  <span className="truncate">{iconLabels[icon.id] ?? `パーツ ${idx + 1}`}</span>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}

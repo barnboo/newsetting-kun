@@ -22,6 +22,7 @@ export interface SavedSession {
     }>;
   } | null;
   iconLabels: Record<string, string>;
+  templateReplacements?: Record<string, string>;
   selectedRegions: any[];
   currentPhase: number;
   updatedAt: number;

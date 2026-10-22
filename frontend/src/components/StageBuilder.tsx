@@ -34,6 +34,7 @@ export interface StageSnapshot {
   iconsRegionUrl?: string;
   extractedIcons?: ExtractedIcon[];
   iconLabels?: Record<string, string>;
+  templateReplacements?: Record<string, string>;
 }
 
 interface Props {
@@ -44,7 +45,9 @@ interface Props {
   fileId: string | null;
   pageImageUrl: string;
   initialIconLabels?: Record<string, string>;
+  templateReplacements?: Record<string, string>;
   onIconsUpdated: (icons: ExtractedIcon[], newLabels?: Record<string, string>) => void;
+  onOpenTemplateModal?: () => void;
   onBack: () => void;
   onPhaseChange?: (phase: 3 | 4) => void;
 }
@@ -59,7 +62,9 @@ const StageBuilder: React.FC<Props> = ({
   fileId,
   pageImageUrl,
   initialIconLabels,
+  templateReplacements,
   onIconsUpdated,
+  onOpenTemplateModal,
   onBack,
   onPhaseChange,
 }) => {
@@ -135,6 +140,20 @@ const StageBuilder: React.FC<Props> = ({
   }, [selectedCurveId]);
 
   const [paletteTab, setPaletteTab] = useState<PaletteTab>('pdf');
+
+  // テンプレ置換されたID一覧と、テンプレタブに表示する残りのテンプレ一覧
+  const replacedTmplIdSet = React.useMemo(() => {
+    return new Set(Object.values(templateReplacements || {}));
+  }, [templateReplacements]);
+
+  const visibleTemplates = React.useMemo(() => {
+    return TEMPLATE_SHAPES.filter(tmpl => {
+      const id1 = tmpl.id;
+      const id2 = `tmpl_${tmpl.type}`;
+      return !replacedTmplIdSet.has(id1) && !replacedTmplIdSet.has(id2);
+    });
+  }, [replacedTmplIdSet]);
+
   const [iconLabels, setIconLabels] = useState<Record<string, string>>(() => {
     const merged: Record<string, string> = {
       ...(initialBackup?.iconLabels ?? {}),
@@ -1778,7 +1797,7 @@ const StageBuilder: React.FC<Props> = ({
 
           {paletteTab === 'template' ? (
             <>
-              {TEMPLATE_SHAPES.map(tmpl => (
+              {visibleTemplates.map(tmpl => (
                 <div
                   key={tmpl.id || tmpl.type}
                   draggable={!selectedCurveId}
@@ -1817,45 +1836,107 @@ const StageBuilder: React.FC<Props> = ({
               {extractedIcons.length === 0 ? (
                 <p className="text-xs text-slate-400 w-full text-center">PDFから切り出されたアイコンがありません</p>
               ) : (
-                extractedIcons.map((icon) => (
-                  <div
-                    key={icon.id}
-                    draggable={!selectedCurveId}
-                    onDragStart={e => { e.dataTransfer.setData('iconId', icon.id); e.dataTransfer.effectAllowed = 'copy'; }}
-                    onClick={() => handlePaletteItemClick(icon.id)}
-                    className={`flex flex-col items-center justify-between w-16 h-[72px] py-1 px-0.5 rounded-lg shrink-0 transition-all group shadow-2xs relative cursor-pointer ${
-                      selectedCurveId
-                        ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500' : 'bg-purple-50/60 hover:bg-purple-100/90 border border-purple-300 hover:border-purple-400')
-                        : (isDarkMode ? 'bg-slate-700/80 hover:bg-slate-700 border border-slate-600 cursor-grab active:cursor-grabbing' : 'bg-white hover:bg-blue-50/80 border border-slate-200 cursor-grab active:cursor-grabbing')
-                    }`}
-                    title={selectedCurveId ? `「${iconLabels[icon.id] || icon.label || 'パーツ'}」をベジェ曲線に追加` : (iconLabels[icon.id] || icon.label || 'パーツ')}
-                  >
-                    {selectedCurveId && (
-                      <span className="absolute -top-1.5 right-0.5 bg-purple-600 text-white text-[8px] font-bold px-1 rounded-full shadow-2xs">
-                        +追加
+                extractedIcons.map((icon) => {
+                  const tmplId = templateReplacements?.[icon.id];
+                  const matchedTmpl = tmplId
+                    ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
+                    : null;
+
+                  if (matchedTmpl) {
+                    // テンプレに置き換えた場合: 元の抽出画像は非表示にし、代わりにテンプレをPDF抽出欄に表示
+                    const effectiveTmplId = matchedTmpl.id || `tmpl_${matchedTmpl.type}`;
+                    const label = matchedTmpl.label;
+                    return (
+                      <div
+                        key={icon.id}
+                        draggable={!selectedCurveId}
+                        onDragStart={e => {
+                          e.dataTransfer.setData('iconId', effectiveTmplId);
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onClick={() => handlePaletteItemClick(effectiveTmplId)}
+                        className={`flex flex-col items-center justify-between w-16 h-[72px] py-1 px-0.5 rounded-lg shrink-0 transition-all group shadow-2xs relative cursor-pointer border ${
+                          selectedCurveId
+                            ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500' : 'bg-purple-50/60 hover:bg-purple-100/90 border border-purple-300 hover:border-purple-400')
+                            : (isDarkMode ? 'bg-emerald-950/40 hover:bg-emerald-900/60 border-emerald-600/70 cursor-grab active:cursor-grabbing' : 'bg-emerald-50/80 hover:bg-emerald-100 border-emerald-300 cursor-grab active:cursor-grabbing')
+                        }`}
+                        title={selectedCurveId ? `「${label}」をベジェ曲線に追加` : `[テンプレ置換済] ${label}`}
+                      >
+                        <span className="absolute -top-1.5 -left-1 bg-emerald-600 text-white text-[7px] font-bold px-1 rounded-full shadow-2xs">
+                          テンプレ
+                        </span>
+                        {selectedCurveId && (
+                          <span className="absolute -top-1.5 right-0.5 bg-purple-600 text-white text-[8px] font-bold px-1 rounded-full shadow-2xs">
+                            +追加
+                          </span>
+                        )}
+                        <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
+                          <img src={getTemplateDataUrl(matchedTmpl)} alt={label} className="max-w-full max-h-full object-contain" />
+                        </div>
+                        <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
+                          selectedCurveId
+                            ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
+                            : (isDarkMode ? 'text-emerald-300 group-hover:text-emerald-200' : 'text-emerald-800 group-hover:text-emerald-950')
+                        }`}>
+                          {label}
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={icon.id}
+                      draggable={!selectedCurveId}
+                      onDragStart={e => { e.dataTransfer.setData('iconId', icon.id); e.dataTransfer.effectAllowed = 'copy'; }}
+                      onClick={() => handlePaletteItemClick(icon.id)}
+                      className={`flex flex-col items-center justify-between w-16 h-[72px] py-1 px-0.5 rounded-lg shrink-0 transition-all group shadow-2xs relative cursor-pointer ${
+                        selectedCurveId
+                          ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500' : 'bg-purple-50/60 hover:bg-purple-100/90 border border-purple-300 hover:border-purple-400')
+                          : (isDarkMode ? 'bg-slate-700/80 hover:bg-slate-700 border border-slate-600 cursor-grab active:cursor-grabbing' : 'bg-white hover:bg-blue-50/80 border border-slate-200 cursor-grab active:cursor-grabbing')
+                      }`}
+                      title={selectedCurveId ? `「${iconLabels[icon.id] || icon.label || 'パーツ'}」をベジェ曲線に追加` : (iconLabels[icon.id] || icon.label || 'パーツ')}
+                    >
+                      {selectedCurveId && (
+                        <span className="absolute -top-1.5 right-0.5 bg-purple-600 text-white text-[8px] font-bold px-1 rounded-full shadow-2xs">
+                          +追加
+                        </span>
+                      )}
+                      <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
+                        <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain" />
+                      </div>
+                      <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 ${
+                        selectedCurveId
+                          ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
+                          : (isDarkMode ? 'text-slate-300 group-hover:text-blue-400' : 'text-slate-600 group-hover:text-blue-700')
+                      }`}>
+                        {iconLabels[icon.id] || icon.label || 'パーツ'}
                       </span>
-                    )}
-                    <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
-                      <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain" />
                     </div>
-                    <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 ${
-                      selectedCurveId
-                        ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
-                        : (isDarkMode ? 'text-slate-300 group-hover:text-blue-400' : 'text-slate-600 group-hover:text-blue-700')
-                    }`}>
-                      {iconLabels[icon.id] || icon.label || 'パーツ'}
-                    </span>
-                  </div>
-                ))
+                  );
+                })
               )}
-              <div className={`border-l pl-3 ml-2 shrink-0 h-12 flex items-center ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+              <div className={`border-l pl-2 ml-1 shrink-0 h-12 flex items-center gap-1.5 ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                {onOpenTemplateModal && (
+                  <button
+                    onClick={onOpenTemplateModal}
+                    className={`text-[11px] font-semibold px-2.5 py-2 rounded-lg border transition-colors whitespace-nowrap flex items-center gap-1 ${
+                      isDarkMode
+                        ? 'text-emerald-300 bg-emerald-950/50 hover:bg-emerald-900/70 border-emerald-700/70'
+                        : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-300'
+                    }`}
+                    title="標準テンプレートへの置き換え設定を開きます"
+                  >
+                    <span>💡</span> テンプレ置換
+                  </button>
+                )}
                 <button
                   onClick={() => setIsAdjusting(true)}
-                  className={`text-[11px] font-semibold px-3 py-2 rounded-lg border transition-colors whitespace-nowrap ${
+                  className={`text-[11px] font-semibold px-2.5 py-2 rounded-lg border transition-colors whitespace-nowrap flex items-center gap-1 ${
                     isDarkMode ? 'text-slate-300 bg-slate-700 hover:bg-slate-600 border-slate-600' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-300'
                   }`}
                 >
-                  ⚙️ 枠調整
+                  <span>⚙️</span> 枠調整
                 </button>
               </div>
             </>
@@ -2828,6 +2909,7 @@ const StageBuilder: React.FC<Props> = ({
           selectedCount={selectedIds.length + selectedCurveIds.length}
           extractedIcons={extractedIcons}
           iconLabels={iconLabels}
+          templateReplacements={templateReplacements}
           onAddTemplate={(tmplId, x, y) => {
             handleAddItem(tmplId, x, y);
           }}

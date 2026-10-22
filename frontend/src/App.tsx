@@ -96,6 +96,7 @@ function App() {
   const [currentPhase, setCurrentPhase] = useState<1 | 2 | 3 | 4>(1);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [iconLabels, setIconLabels] = useState<Record<string, string>>({});
+  const [templateReplacements, setTemplateReplacements] = useState<Record<string, string>>({});
   const [backupProjects, setBackupProjects] = useState<BackupProjectMeta[]>([]);
   const [storageUsage, setStorageUsage] = useState({ mb: '0.00', percent: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -276,6 +277,7 @@ function App() {
       extractedIcons,
     });
     setIconLabels(iconLabels);
+    setTemplateReplacements(sess?.templateReplacements || localBackup?.templateReplacements || {});
     setSelectedRegions(selectedRegions);
     setCurrentPhase(3);
   };
@@ -389,6 +391,7 @@ function App() {
           extractedIcons: extractedIcons,
         },
         iconLabels: data.iconLabels || {},
+        templateReplacements: data.templateReplacements || {},
         selectedRegions: data.backgroundCrop ? [{ type: 'background', crop: data.backgroundCrop }] : [],
         currentPhase: 3,
         updatedAt: Date.now(),
@@ -512,15 +515,39 @@ function App() {
 
   const handleTemplateModalConfirm = (decisions: MatchingDecision[]) => {
     // Apply icon labels from template decisions while preserving auto-detected labels
+    const newReplacements: Record<string, string> = { ...templateReplacements };
     const newLabels: Record<string, string> = { ...iconLabels };
     for (const d of decisions) {
       if (d.matchedTemplate && d.useTemplate) {
+        newReplacements[d.iconId] = d.matchedTemplate.id || `tmpl_${d.matchedTemplate.type}`;
         newLabels[d.iconId] = d.matchedTemplate.label;
+      } else {
+        delete newReplacements[d.iconId];
       }
     }
+    setTemplateReplacements(newReplacements);
     setIconLabels(newLabels);
     setShowTemplateModal(false);
     setCurrentPhase(3);
+
+    // Persist to IndexedDB
+    if (fileData?.file_id) {
+      (async () => {
+        try {
+          const sess = await loadSessionFromIndexedDB(fileData.file_id);
+          if (sess) {
+            await saveSessionToIndexedDB({
+              ...sess,
+              iconLabels: newLabels,
+              templateReplacements: newReplacements,
+              updatedAt: Date.now(),
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to persist templateReplacements to IndexedDB:', e);
+        }
+      })();
+    }
   };
 
   const handleTemplateModalSkip = () => {
@@ -534,6 +561,7 @@ function App() {
       setFileData(null);
       setExtractedData(null);
       setSelectedRegions([]);
+      setTemplateReplacements({});
       setCurrentPhase(1);
     }
   };
@@ -826,6 +854,7 @@ function App() {
                             extractedIcons: iconsWithDataUrls,
                           },
                           iconLabels: newLabels ? { ...sess.iconLabels, ...newLabels } : sess.iconLabels,
+                          templateReplacements,
                           updatedAt: Date.now(),
                         });
                       }
@@ -834,14 +863,17 @@ function App() {
                     }
                   }
                 }}
+                templateReplacements={templateReplacements}
+                onOpenTemplateModal={() => setShowTemplateModal(true)}
                 onBack={handleBackToHome}
                 onPhaseChange={(p) => setCurrentPhase(p)}
               />
-              {/* Template replacement modal (shown right after extraction) */}
+              {/* Template replacement modal (shown right after extraction or on request) */}
               {showTemplateModal && extractedData && (
                 <TemplateMatchModal
                   extractedIcons={extractedData.extractedIcons}
                   iconLabels={iconLabels}
+                  currentReplacements={templateReplacements}
                   onConfirm={handleTemplateModalConfirm}
                   onSkip={handleTemplateModalSkip}
                 />
