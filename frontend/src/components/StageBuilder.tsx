@@ -49,6 +49,7 @@ interface Props {
   onIconLabelsChange?: (labels: Record<string, string>) => void;
   onIconsUpdated: (icons: ExtractedIcon[], newLabels?: Record<string, string>) => void;
   onOpenTemplateModal?: () => void;
+  onOpenIconAdjustModal?: () => void;
   onBack: () => void;
   onPhaseChange?: (phase: 3 | 4) => void;
 }
@@ -67,6 +68,7 @@ const StageBuilder: React.FC<Props> = ({
   onIconLabelsChange,
   onIconsUpdated,
   onOpenTemplateModal,
+  onOpenIconAdjustModal,
   onBack,
   onPhaseChange,
 }) => {
@@ -2055,7 +2057,13 @@ const StageBuilder: React.FC<Props> = ({
                   </button>
                 )}
                 <button
-                  onClick={() => setIsAdjusting(true)}
+                  onClick={() => {
+                    if (onOpenIconAdjustModal) {
+                      onOpenIconAdjustModal();
+                    } else {
+                      setIsAdjusting(true);
+                    }
+                  }}
                   className={`text-[11px] font-semibold px-2.5 py-2 rounded-lg border transition-colors whitespace-nowrap flex items-center gap-1 ${
                     isDarkMode ? 'text-slate-300 bg-slate-700 hover:bg-slate-600 border-slate-600' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-300'
                   }`}

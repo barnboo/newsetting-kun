@@ -4,6 +4,7 @@ import { PdfUploader } from './components/PdfUploader';
 import { RegionSelector } from './components/RegionSelector';
 import StageBuilder from './components/StageBuilder';
 import TemplateMatchModal, { type MatchingDecision } from './components/TemplateMatchModal';
+import IconAdjustModal from './components/IconAdjustModal';
 import {
   loadSessionFromIndexedDB,
   saveSessionToIndexedDB,
@@ -94,6 +95,8 @@ function App() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [selectedRegions, setSelectedRegions] = useState<any[]>([]);
   const [currentPhase, setCurrentPhase] = useState<1 | 2 | 3 | 4>(1);
+  const [showIconAdjustModal, setShowIconAdjustModal] = useState(false);
+  const [showTemplateModalAfterAdjust, setShowTemplateModalAfterAdjust] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [iconLabels, setIconLabels] = useState<Record<string, string>>({});
   const [templateReplacements, setTemplateReplacements] = useState<Record<string, string>>({});
@@ -470,8 +473,9 @@ function App() {
       setIconLabels(detectedLabels);
       setTemplateReplacements({});
 
-      // Check if there are any matching templates — modal will auto-skip if none
-      setShowTemplateModal(true);
+      // 1. 初めに枠調整モーダルを表示し、その後にテンプレ置換モーダルを表示する
+      setShowIconAdjustModal(true);
+      setShowTemplateModalAfterAdjust(true);
       setCurrentPhase(3);
 
       // Asynchronously cache session in IndexedDB with standalone DataURLs
@@ -516,6 +520,54 @@ function App() {
       alert("PDFからのパーツ抽出に失敗しました。");
     } finally {
       setIsExtracting(false);
+    }
+  };
+
+  const handleIconsUpdated = async (icons: ExtractedIcon[], newLabels?: Record<string, string>) => {
+    // 新しいアイコン配列に対応するクリーンなラベルマップを構築（古いキーの残留を防止）
+    const cleanLabels: Record<string, string> = {};
+    icons.forEach((ic, idx) => {
+      cleanLabels[ic.id] = newLabels?.[ic.id] || ic.label || `パーツ ${idx + 1}`;
+    });
+    // 枠の追加・削除等でIDとラベルの対応が変わった場合、ズレた古いテンプレ置換設定を除去
+    const cleanReplacements: Record<string, string> = {};
+    icons.forEach((ic) => {
+      const prevLbl = iconLabels[ic.id];
+      const nextLbl = cleanLabels[ic.id];
+      if (templateReplacements[ic.id] && prevLbl && prevLbl === nextLbl) {
+        cleanReplacements[ic.id] = templateReplacements[ic.id];
+      }
+    });
+
+    setExtractedData(prev => prev ? { ...prev, extractedIcons: icons } : null);
+    setIconLabels(cleanLabels);
+    setTemplateReplacements(cleanReplacements);
+
+    if (fileData?.file_id) {
+      try {
+        const sess = await loadSessionFromIndexedDB(fileData.file_id);
+        if (sess) {
+          const iconsWithDataUrls = await Promise.all(
+            icons.map(async (ic) => ({
+              ...ic,
+              url: ic.url.startsWith('data:') ? ic.url : await urlToDataUrl(ic.url),
+            }))
+          );
+          await saveSessionToIndexedDB({
+            ...sess,
+            extractedData: {
+              backgroundUrl: sess.extractedData?.backgroundUrl || '',
+              iconsRegionUrl: sess.extractedData?.iconsRegionUrl || '',
+              extractedIcons: iconsWithDataUrls,
+            },
+            iconLabels: cleanLabels,
+            templateReplacements: cleanReplacements,
+            updatedAt: Date.now(),
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to update session in IndexedDB:', e);
+      }
     }
   };
 
@@ -573,6 +625,8 @@ function App() {
       setSelectedRegions([]);
       setIconLabels({});
       setTemplateReplacements({});
+      setShowIconAdjustModal(false);
+      setShowTemplateModalAfterAdjust(false);
       setShowTemplateModal(false);
       setCurrentPhase(1);
     }
@@ -584,6 +638,8 @@ function App() {
     setSelectedRegions([]);
     setIconLabels({});
     setTemplateReplacements({});
+    setShowIconAdjustModal(false);
+    setShowTemplateModalAfterAdjust(false);
     setShowTemplateModal(false);
     setCurrentPhase(1);
   };
@@ -849,59 +905,41 @@ function App() {
                 onIconLabelsChange={(nextLabels) => {
                   setIconLabels(nextLabels);
                 }}
-                onIconsUpdated={async (icons, newLabels) => {
-                  // 新しいアイコン配列に対応するクリーンなラベルマップを構築（古いキーの残留を防止）
-                  const cleanLabels: Record<string, string> = {};
-                  icons.forEach((ic, idx) => {
-                    cleanLabels[ic.id] = newLabels?.[ic.id] || ic.label || `パーツ ${idx + 1}`;
-                  });
-                  // 枠の追加・削除等でIDとラベルの対応が変わった場合、ズレた古いテンプレ置換設定を除去
-                  const cleanReplacements: Record<string, string> = {};
-                  icons.forEach((ic) => {
-                    const prevLbl = iconLabels[ic.id];
-                    const nextLbl = cleanLabels[ic.id];
-                    if (templateReplacements[ic.id] && prevLbl && prevLbl === nextLbl) {
-                      cleanReplacements[ic.id] = templateReplacements[ic.id];
-                    }
-                  });
-
-                  setExtractedData(prev => prev ? { ...prev, extractedIcons: icons } : null);
-                  setIconLabels(cleanLabels);
-                  setTemplateReplacements(cleanReplacements);
-
-                  if (fileData?.file_id) {
-                    try {
-                      const sess = await loadSessionFromIndexedDB(fileData.file_id);
-                      if (sess) {
-                        const iconsWithDataUrls = await Promise.all(
-                          icons.map(async (ic) => ({
-                            ...ic,
-                            url: ic.url.startsWith('data:') ? ic.url : await urlToDataUrl(ic.url),
-                          }))
-                        );
-                        await saveSessionToIndexedDB({
-                          ...sess,
-                          extractedData: {
-                            backgroundUrl: sess.extractedData?.backgroundUrl || '',
-                            iconsRegionUrl: sess.extractedData?.iconsRegionUrl || '',
-                            extractedIcons: iconsWithDataUrls,
-                          },
-                          iconLabels: cleanLabels,
-                          templateReplacements: cleanReplacements,
-                          updatedAt: Date.now(),
-                        });
-                      }
-                    } catch (e) {
-                      console.warn('Failed to update session in IndexedDB:', e);
-                    }
-                  }
-                }}
+                onIconsUpdated={handleIconsUpdated}
                 templateReplacements={templateReplacements}
                 onOpenTemplateModal={() => setShowTemplateModal(true)}
+                onOpenIconAdjustModal={() => {
+                  setShowTemplateModalAfterAdjust(false);
+                  setShowIconAdjustModal(true);
+                }}
                 onBack={handleBackToHome}
                 onPhaseChange={(p) => setCurrentPhase(p)}
               />
-              {/* Template replacement modal (shown right after extraction or on request) */}
+              {/* Icon adjustment modal (shown first after extraction or on request from palette) */}
+              {showIconAdjustModal && extractedData && fileData && (
+                <IconAdjustModal
+                  iconsRegionUrl={extractedData.iconsRegionUrl}
+                  extractedIcons={extractedData.extractedIcons}
+                  fileId={fileData.file_id}
+                  iconLabels={iconLabels}
+                  onClose={() => {
+                    setShowIconAdjustModal(false);
+                    if (showTemplateModalAfterAdjust) {
+                      setShowTemplateModalAfterAdjust(false);
+                      setShowTemplateModal(true);
+                    }
+                  }}
+                  onSave={async (newIcons, newLabels) => {
+                    await handleIconsUpdated(newIcons, newLabels);
+                    setShowIconAdjustModal(false);
+                    if (showTemplateModalAfterAdjust) {
+                      setShowTemplateModalAfterAdjust(false);
+                      setShowTemplateModal(true);
+                    }
+                  }}
+                />
+              )}
+              {/* Template replacement modal (shown after icon adjust or on request) */}
               {showTemplateModal && extractedData && (
                 <TemplateMatchModal
                   extractedIcons={extractedData.extractedIcons}
