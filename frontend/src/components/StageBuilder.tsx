@@ -1,17 +1,40 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import axios from 'axios';
+import { 
+  Home, 
+  Settings, 
+  Sliders, 
+  Sun, 
+  Moon, 
+  ChevronLeft, 
+  ChevronRight, 
+  FileText, 
+  Shapes, 
+  Sparkles, 
+  Copy, 
+  Trash2, 
+  X, 
+  Ruler, 
+  Layers, 
+  ArrowUp, 
+  ArrowDown,
+  ClipboardList,
+  Edit3
+} from 'lucide-react';
 import type { ExtractedIcon } from '../App';
 import IconAdjustModal from './IconAdjustModal';
 import StageCanvas, { type PlacedItem, type StageCanvasRef, type SnapSettings } from './StageCanvas';
 import TallyTable from './TallyTable';
 import { ItemInspector } from './ItemInspector';
-import { FullPageEditor, type SceneExportData } from './FullPageEditor';
-import { TEMPLATE_SHAPES, getTemplateDataUrl, getPercussionInfo } from '../utils/templateShapes';
+import { FullPageEditor, type SceneExportData, type PreviewSettings } from './FullPageEditor';
+import { TEMPLATE_SHAPES, getTemplateDataUrl, getPercussionInfo, inferTemplateReplacements } from '../utils/templateShapes';
 import { createDefaultCurveObject, type CurveObject, type CurveItem } from '../utils/bezierUtils';
 import { ContextMenu } from './ContextMenu';
 import { copyStageObjects, pasteStageObjects, duplicateStageObjects, hasStageObjectsInClipboard } from '../utils/clipboard';
 import { updateSessionTimestampInIndexedDB } from '../utils/indexedDb';
+import { FloatingObjectControlPanel } from './FloatingObjectControlPanel';
+import { PercussionLabelModal, type ItemLabelModalTarget, type ItemLabelSettings } from './PercussionLabelModal';
 
 export interface Scene {
   id: string;
@@ -23,6 +46,7 @@ export interface Scene {
 
 
 export interface StageSnapshot {
+  projectName?: string;
   placedItems: PlacedItem[];
   curveObjects: CurveObject[];
   scenes: Scene[];
@@ -35,6 +59,7 @@ export interface StageSnapshot {
   extractedIcons?: ExtractedIcon[];
   iconLabels?: Record<string, string>;
   templateReplacements?: Record<string, string>;
+  previewSettings?: PreviewSettings;
 }
 
 interface Props {
@@ -137,6 +162,65 @@ const StageBuilder: React.FC<Props> = ({
     if (!id) setSelectedCurveItemId(null);
   };
 
+  // Preview Settings State (Phase 4 editable text/shapes, Bezier line toggle)
+  const [previewSettings, setPreviewSettings] = useState<PreviewSettings | null>(() => {
+    if (initialBackup?.previewSettings) {
+      return initialBackup.previewSettings;
+    }
+    if (fileId) {
+      try {
+        const saved = localStorage.getItem(`stajet_preview_settings_${fileId}`);
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return null;
+  });
+  const previewSettingsRef = useRef<PreviewSettings | null>(previewSettings);
+  previewSettingsRef.current = previewSettings;
+
+  const handleUpdatePreviewSettings = useCallback((settings: PreviewSettings) => {
+    setPreviewSettings(settings);
+    previewSettingsRef.current = settings;
+    if (fileId) {
+      try {
+        localStorage.setItem(`stajet_preview_settings_${fileId}`, JSON.stringify(settings));
+      } catch (e) {
+        console.warn('Failed to save preview settings cache', e);
+      }
+    }
+    try {
+      const snap = buildSnapshot();
+      saveBackup(snap);
+    } catch (e) {
+      console.warn('Failed to save snapshot with previewSettings', e);
+    }
+  }, [fileId]);
+
+  // Project Name State
+  const [projectName, setProjectName] = useState<string>(() => {
+    if (initialBackup?.projectName) return initialBackup.projectName;
+    if ((initialBackup as any)?.name) return (initialBackup as any).name;
+    return fileId ? `セッティング図 (${fileId.substring(0, 6)})` : '新規セッティング図';
+  });
+  const projectNameRef = useRef(projectName);
+  projectNameRef.current = projectName;
+  const [isEditingProjectName, setIsEditingProjectName] = useState(false);
+  const projectNameInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCommitProjectName = useCallback((newName?: string) => {
+    const raw = (newName !== undefined ? newName : projectNameRef.current).trim();
+    const finalName = raw || `セッティング図 (${fileId ? fileId.substring(0, 6) : '無題'})`;
+    setProjectName(finalName);
+    projectNameRef.current = finalName;
+    setIsEditingProjectName(false);
+    try {
+      const snap = buildSnapshot();
+      saveBackup(snap);
+    } catch (e) {
+      console.warn('Failed to save snapshot after project name change', e);
+    }
+  }, [fileId]);
+
   useEffect(() => {
     if (!selectedCurveId) {
       setSelectedCurveItemId(null);
@@ -145,10 +229,32 @@ const StageBuilder: React.FC<Props> = ({
 
   const [paletteTab, setPaletteTab] = useState<PaletteTab>('pdf');
 
+  // Template replacements state: merge props, backup, and auto-inference from placed objects
+  const [effectiveTemplateReplacements, setEffectiveTemplateReplacements] = useState<Record<string, string>>(() => {
+    const fromProps = templateReplacements && Object.keys(templateReplacements).length > 0 ? templateReplacements : null;
+    const fromBackup = initialBackup?.templateReplacements && Object.keys(initialBackup.templateReplacements).length > 0 ? initialBackup.templateReplacements : null;
+    if (fromProps || fromBackup) {
+      return { ...(fromBackup || {}), ...(fromProps || {}) };
+    }
+    return inferTemplateReplacements(
+      extractedIcons || initialBackup?.extractedIcons || [],
+      initialPlacedItems,
+      initialScenes
+    );
+  });
+  const templateReplacementsRef = useRef(effectiveTemplateReplacements);
+  templateReplacementsRef.current = effectiveTemplateReplacements;
+
+  useEffect(() => {
+    if (templateReplacements && Object.keys(templateReplacements).length > 0) {
+      setEffectiveTemplateReplacements(prev => ({ ...prev, ...templateReplacements }));
+    }
+  }, [templateReplacements]);
+
   // テンプレ置換されたID一覧と、テンプレタブに表示する残りのテンプレ一覧
   const replacedTmplIdSet = React.useMemo(() => {
-    return new Set(Object.values(templateReplacements || {}));
-  }, [templateReplacements]);
+    return new Set(Object.values(effectiveTemplateReplacements || {}));
+  }, [effectiveTemplateReplacements]);
 
   const visibleTemplates = React.useMemo(() => {
     return TEMPLATE_SHAPES.filter(tmpl => {
@@ -234,7 +340,7 @@ const StageBuilder: React.FC<Props> = ({
   // Scenes management (Phase 3 scenes logic ported from prototype)
   const [scenes, setScenes] = useState<Scene[]>(initialScenes);
   const [currentSceneId, setCurrentSceneId] = useState<string>(initialCurrentSceneId);
-  const [drawerSubmenu, setDrawerSubmenu] = useState<'scenes' | 'settings' | 'objects' | null>(null);
+  const [drawerSubmenu, setDrawerSubmenu] = useState<'scenes' | 'settings' | null>(null);
 
   const [snapSettings, setSnapSettings] = useState<SnapSettings>(() => {
     const defaultSettings: SnapSettings = {
@@ -262,6 +368,42 @@ const StageBuilder: React.FC<Props> = ({
   const [isMeasuringScale, setIsMeasuringScale] = useState(false);
   const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
   const [measureMetersInput, setMeasureMetersInput] = useState<string>('1');
+
+  // 打楽器・記号名の表示位置・回転・サイズ・縦書き設定モーダル用 state
+  const [percLabelModalTarget, setPercLabelModalTarget] = useState<ItemLabelModalTarget | null>(null);
+
+  const handleSavePercussionLabel = (settings: ItemLabelSettings) => {
+    if (!percLabelModalTarget) return;
+    const updatePayload: Partial<PlacedItem> = {
+      labelOffsetX: settings.labelOffsetX,
+      labelOffsetY: settings.labelOffsetY,
+      labelRotation: settings.labelRotation,
+      labelFontSize: settings.labelFontSize,
+      labelLetterSpacing: settings.labelLetterSpacing,
+      isVerticalName: settings.isVerticalName,
+    };
+    if (percLabelModalTarget.targetType === 'symbol' && settings.text !== undefined) {
+      updatePayload.symbolText = settings.text;
+      if (settings.labelFontSize) {
+        updatePayload.symbolFontSize = settings.labelFontSize;
+      }
+    }
+
+    if (percLabelModalTarget.type === 'placedItem') {
+      handleUpdateItem(percLabelModalTarget.itemId, updatePayload);
+    } else if (percLabelModalTarget.type === 'curveItem' && percLabelModalTarget.curveId) {
+      const curve = curveObjects.find(c => c.id === percLabelModalTarget.curveId);
+      if (curve && Array.isArray(curve.items)) {
+        const nextItems = curve.items.map(it => {
+          if (it.id === percLabelModalTarget.itemId) {
+            return { ...it, ...updatePayload };
+          }
+          return it;
+        });
+        handleUpdateCurve(curve.id, { items: nextItems });
+      }
+    }
+  };
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -295,6 +437,42 @@ const StageBuilder: React.FC<Props> = ({
   }, [isDarkMode]);
 
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
+
+  // Floating Object Control Panel visibility state
+  const [showFloatingPanel, setShowFloatingPanel] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('settingkun_show_floating_panel');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('settingkun_show_floating_panel', String(showFloatingPanel));
+    } catch {}
+  }, [showFloatingPanel]);
+
+  // Curve control point snap state (turns green #10b981 on canvas and panel)
+  const [isCtrlPointSnapped, setIsCtrlPointSnapped] = useState(false);
+  const [isCurveMoving, setIsCurveMoving] = useState(false);
+
+  // Mobile right panel toggle & add toast for touch devices
+  const [showMobileRightPanel, setShowMobileRightPanel] = useState(false);
+  const [addToast, setAddToast] = useState<string | null>(null);
+  const addToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerAddToast = (label: string) => {
+    try {
+      if ('vibrate' in navigator) navigator.vibrate(20);
+    } catch (_) {}
+    setAddToast(`「${label}」を配置しました`);
+    if (addToastTimerRef.current) clearTimeout(addToastTimerRef.current);
+    addToastTimerRef.current = setTimeout(() => {
+      setAddToast(null);
+    }, 1400);
+  };
 
   // Zoom state
   const [zoomMultiplier, setZoomMultiplier] = useState(1.0);
@@ -362,6 +540,7 @@ const StageBuilder: React.FC<Props> = ({
 
   // Build a snapshot of the current working state (deep copy to prevent mutations)
   const buildSnapshot = (): StageSnapshot => JSON.parse(JSON.stringify({
+    projectName: projectNameRef.current,
     placedItems: placedItemsRef.current,
     curveObjects: curveObjectsRef.current,
     // Merge current working state into scenes list before saving
@@ -376,6 +555,8 @@ const StageBuilder: React.FC<Props> = ({
     iconsRegionUrl: iconsRegionUrl || initialBackup?.iconsRegionUrl,
     extractedIcons: extractedIcons || initialBackup?.extractedIcons,
     iconLabels: iconLabelsRef.current,
+    templateReplacements: templateReplacementsRef.current,
+    previewSettings: previewSettingsRef.current || undefined,
   }));
 
   const handleBack = () => {
@@ -390,12 +571,14 @@ const StageBuilder: React.FC<Props> = ({
 
       const d = new Date();
       const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-      const fileName = `stajet_${fileId ? fileId.substring(0, 8) : 'project'}_${dateStr}.json`;
+      const safeName = (projectNameRef.current || 'stajet').replace(/[\\/:*?"<>|]/g, '_').trim();
+      const fileName = `${safeName}_${dateStr}.json`;
 
       const exportPayload = {
         version: '2.0',
         projectId: fileId || 'default',
-        name: `stajet_${dateStr}`,
+        name: projectNameRef.current,
+        projectName: projectNameRef.current,
         exportedAt: Date.now(),
         ...snap,
       };
@@ -502,6 +685,294 @@ const StageBuilder: React.FC<Props> = ({
     }, 400);
   };
 
+  // ─── Floating Object Control Panel Actions ───
+  const remoteDragInitialPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  const handleRemoteDragStart = () => {
+    handleDragStartAction();
+    remoteDragInitialPosRef.current.clear();
+
+    const activeIds = selectedIds.length > 0 ? selectedIds : (selectedId ? [selectedId] : []);
+    const activeCurves = selectedCurveIds.length > 0 ? selectedCurveIds : (selectedCurveId ? [selectedCurveId] : []);
+
+    activeIds.forEach(id => {
+      const it = placedItems.find(item => item.id === id);
+      if (it && !it.isPinned) {
+        remoteDragInitialPosRef.current.set(`item_${id}`, { x: it.x, y: it.y });
+      }
+    });
+
+    activeCurves.forEach(id => {
+      const c = curveObjects.find(curve => curve.id === id);
+      if (c && !c.isPinned) {
+        remoteDragInitialPosRef.current.set(`curve_${id}`, { x: c.x, y: c.y });
+      }
+    });
+
+    if (activeCurves.length > 0) {
+      setIsCurveMoving(true);
+    }
+  };
+
+  const handleRemoteDragMove = (totalDx: number, totalDy: number, isCtrl = false, isShift = false) => {
+    if (remoteDragInitialPosRef.current.size === 0) return;
+
+    // Pick first entry as anchor object for calculating snapping
+    const firstEntry = remoteDragInitialPosRef.current.entries().next().value;
+    if (!firstEntry) return;
+
+    const [, primaryInitPos] = firstEntry;
+    const rawX = primaryInitPos.x + totalDx;
+    const rawY = primaryInitPos.y + totalDy;
+
+    let actualDx = totalDx;
+    let actualDy = totalDy;
+
+    if (stageCanvasRef.current?.calculateSnapping) {
+      const snap = stageCanvasRef.current.calculateSnapping(rawX, rawY, isCtrl, isShift);
+      actualDx = snap.x - primaryInitPos.x;
+      actualDy = snap.y - primaryInitPos.y;
+      stageCanvasRef.current.setSnapGuides(
+        snap.snappedX ? snap.x : null,
+        snap.snappedY ? snap.y : null
+      );
+    }
+
+    setPlacedItems(prev => prev.map(item => {
+      const init = remoteDragInitialPosRef.current.get(`item_${item.id}`);
+      if (!init) return item;
+      return {
+        ...item,
+        x: Math.round(init.x + actualDx),
+        y: Math.round(init.y + actualDy),
+      };
+    }));
+
+    setCurveObjects(prev => prev.map(curve => {
+      const init = remoteDragInitialPosRef.current.get(`curve_${curve.id}`);
+      if (!init) return curve;
+      return {
+        ...curve,
+        x: Math.round(init.x + actualDx),
+        y: Math.round(init.y + actualDy),
+      };
+    }));
+  };
+
+  const handleRemoteDragEnd = () => {
+    setIsCurveMoving(false);
+    remoteDragInitialPosRef.current.clear();
+    stageCanvasRef.current?.setSnapGuides(null, null);
+    handleDragEndAction();
+  };
+
+  // Remote control points drag handlers for floating panel
+  const curveInitialPointsRef = useRef<[number, number, number, number, number, number] | null>(null);
+  const targetCurveIdRef = useRef<string | null>(null);
+
+  const handleControlPointDragStart = () => {
+    handleDragStartAction();
+    setIsCurveMoving(true);
+    const targetId = selectedCurveId || selectedCurveIds[0] || null;
+    targetCurveIdRef.current = targetId;
+    const activeCurve = targetId ? curveObjects.find(c => c.id === targetId) : null;
+    if (activeCurve && !activeCurve.isPinned) {
+      curveInitialPointsRef.current = [...activeCurve.points];
+    } else {
+      curveInitialPointsRef.current = null;
+    }
+  };
+
+  const handleControlPointDragMove = (
+    type: 'red' | 'blue',
+    deltaX: number,
+    deltaY: number,
+    _isCtrl = false,
+    isShift = false
+  ) => {
+    if (!curveInitialPointsRef.current || !targetCurveIdRef.current) return;
+    const targetCurveId = targetCurveIdRef.current;
+    const targetCurve = curveObjects.find(c => c.id === targetCurveId);
+    if (!targetCurve || targetCurve.isPinned) return;
+
+    const initPts = curveInitialPointsRef.current;
+    let newPts: [number, number, number, number, number, number];
+
+    if (type === 'red') {
+      let mx = Math.round(initPts[2] + deltaX);
+      let my = Math.round(initPts[3] + deltaY);
+      let snapped = false;
+
+      if (!isShift) {
+        const x0 = initPts[0], y0 = initPts[1];
+        const x2 = initPts[4], y2 = initPts[5];
+        const snapThreshold = 15;
+        let snappedToLine = false;
+
+        // 1. 直線へのスナップ (両端点を結ぶ直線へのスナップ)
+        const L2 = (x2 - x0) ** 2 + (y2 - y0) ** 2;
+        if (L2 > 0) {
+          const dot = (mx - x0) * (x2 - x0) + (my - y0) * (y2 - y0);
+          const t = Math.max(0, Math.min(1, dot / L2));
+          const px = Math.round(x0 + t * (x2 - x0));
+          const py = Math.round(y0 + t * (y2 - y0));
+          if (Math.hypot(mx - px, my - py) < snapThreshold) {
+            mx = px;
+            my = py;
+            snappedToLine = true;
+            snapped = true;
+          }
+        }
+
+        // 2. 中点へのスナップ（両端点の中点、および中心軸 X=0）
+        const midX = Math.round((x0 + x2) / 2);
+        const midY = Math.round((y0 + y2) / 2);
+
+        if (Math.hypot(mx - midX, my - midY) < snapThreshold * 1.3) {
+          mx = midX;
+          my = midY;
+          snapped = true;
+        } else if (Math.abs(mx - midX) < snapThreshold) {
+          mx = midX;
+          if (snappedToLine) my = midY;
+          snapped = true;
+        } else if (Math.abs(mx) < snapThreshold) {
+          mx = 0;
+          snapped = true;
+        }
+      }
+
+      setIsCtrlPointSnapped(snapped);
+      newPts = [initPts[0], initPts[1], mx, my, initPts[4], initPts[5]];
+    } else {
+      // Blue handle controls ends spread / height [pts[0], pts[1]] & [pts[4], pts[5]] (mirrored)
+      const initHalfW = Math.abs(initPts[0]);
+      let halfW = Math.max(10, Math.round(initHalfW + deltaX));
+      let y = Math.round(initPts[1] + deltaY);
+
+      if (!isShift) {
+        const snapThreshold = 12;
+        // 水平スナップ（y=0）
+        if (Math.abs(y) < snapThreshold) {
+          y = 0;
+        }
+      }
+
+      setIsCtrlPointSnapped(false);
+      newPts = [-halfW, y, initPts[2], initPts[3], halfW, y];
+    }
+
+    setCurveObjects(prev => prev.map(c => {
+      if (c.id !== targetCurveId || c.isPinned) return c;
+      return { ...c, points: newPts };
+    }));
+  };
+
+  const handleControlPointDragEnd = () => {
+    setIsCurveMoving(false);
+    curveInitialPointsRef.current = null;
+    targetCurveIdRef.current = null;
+    setIsCtrlPointSnapped(false);
+    handleDragEndAction();
+  };
+
+  const handleNudgeDirection = (dx: number, dy: number) => {
+    const activeIds = selectedIds.length > 0 ? selectedIds : (selectedId ? [selectedId] : []);
+    const activeCurves = selectedCurveIds.length > 0 ? selectedCurveIds : (selectedCurveId ? [selectedCurveId] : []);
+
+    if (activeIds.length > 0) {
+      const updates = activeIds.map(id => {
+        const it = placedItems.find(item => item.id === id);
+        if (!it || it.isPinned) return null;
+        return { id, attrs: { x: it.x + dx, y: it.y + dy } };
+      }).filter(Boolean) as { id: string; attrs: Partial<PlacedItem> }[];
+      if (updates.length > 0) {
+        handleNudgeItems(updates);
+      }
+    }
+
+    if (activeCurves.length > 0) {
+      const updates = activeCurves.map(id => {
+        const c = curveObjects.find(curve => curve.id === id);
+        if (!c || c.isPinned) return null;
+        return { id, attrs: { x: c.x + dx, y: c.y + dy } };
+      }).filter(Boolean) as { id: string; attrs: Partial<CurveObject> }[];
+      if (updates.length > 0) {
+        handleNudgeCurves(updates);
+      }
+    }
+  };
+
+  const handleRotateSelected = (deltaDeg: number) => {
+    const activeIds = selectedIds.length > 0 ? selectedIds : (selectedId ? [selectedId] : []);
+    const activeCurves = selectedCurveIds.length > 0 ? selectedCurveIds : (selectedCurveId ? [selectedCurveId] : []);
+    if (activeIds.length === 0 && activeCurves.length === 0) return;
+
+    pushHistory();
+
+    if (activeIds.length > 0) {
+      setPlacedItems(prev => prev.map(item => {
+        if (!activeIds.includes(item.id) || item.isPinned) return item;
+        let nextRot = Math.round(((item.rotation || 0) + deltaDeg) % 360);
+        if (nextRot < 0) nextRot += 360;
+        return { ...item, rotation: nextRot };
+      }));
+    }
+
+    if (activeCurves.length > 0) {
+      const rad = (deltaDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      setCurveObjects(prev => prev.map(c => {
+        if (!activeCurves.includes(c.id) || c.isPinned) return c;
+        const [x0, y0, cx, cy, x1, y1] = c.points;
+        const midX = (x0 + x1) / 2;
+        const midY = (y0 + y1) / 2;
+        const rotPoint = (px: number, py: number) => {
+          const dx = px - midX;
+          const dy = py - midY;
+          return [midX + dx * cos - dy * sin, midY + dx * sin + dy * cos] as [number, number];
+        };
+        const [rx0, ry0] = rotPoint(x0, y0);
+        const [rcx, rcy] = rotPoint(cx, cy);
+        const [rx1, ry1] = rotPoint(x1, y1);
+        return { ...c, points: [rx0, ry0, rcx, rcy, rx1, ry1] };
+      }));
+    }
+  };
+
+  const handleResizeSelected = (factor: number) => {
+    const activeIds = selectedIds.length > 0 ? selectedIds : (selectedId ? [selectedId] : []);
+    const activeCurves = selectedCurveIds.length > 0 ? selectedCurveIds : (selectedCurveId ? [selectedCurveId] : []);
+    if (activeIds.length === 0 && activeCurves.length === 0) return;
+
+    pushHistory();
+
+    if (activeIds.length > 0) {
+      setPlacedItems(prev => prev.map(item => {
+        if (!activeIds.includes(item.id) || item.isPinned) return item;
+        const curW = item.width || 40;
+        const curH = item.height || 40;
+        const newW = Math.max(10, Math.round(curW * factor));
+        const newH = Math.max(10, Math.round(curH * factor));
+        return {
+          ...item,
+          width: newW,
+          height: newH,
+        };
+      }));
+    }
+
+    if (activeCurves.length > 0) {
+      setCurveObjects(prev => prev.map(c => {
+        if (!activeCurves.includes(c.id) || c.isPinned) return c;
+        const curSize = c.itemSize || 30;
+        const newSize = Math.max(10, Math.round(curSize * factor));
+        return { ...c, itemSize: newSize };
+      }));
+    }
+  };
+
   // Restore a snapshot to the React state
   const restoreSnapshot = (snap: StageSnapshot) => {
     isRestoringRef.current = true;
@@ -570,6 +1041,25 @@ const StageBuilder: React.FC<Props> = ({
         return;
       }
 
+      // Reorder Curve Item: '[' or Alt+ArrowLeft for left, ']' or Alt+ArrowRight for right
+      if (selectedCurveId && selectedCurveItemId) {
+        if (e.key === '[' || (e.altKey && e.key === 'ArrowLeft')) {
+          e.preventDefault();
+          handleMoveCurveItemOrder(selectedCurveId, selectedCurveItemId, 'left');
+          return;
+        }
+        if (e.key === ']' || (e.altKey && e.key === 'ArrowRight')) {
+          e.preventDefault();
+          handleMoveCurveItemOrder(selectedCurveId, selectedCurveItemId, 'right');
+          return;
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          handleDeleteCurveItem(selectedCurveId, selectedCurveItemId);
+          return;
+        }
+      }
+
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
       if (!isCmdOrCtrl) return;
 
@@ -601,7 +1091,7 @@ const StageBuilder: React.FC<Props> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExportModalOpen, isAdjusting, isMeasuringScale, canUndo, canRedo, placedItems, curveObjects, scenes, currentSceneId, snapSettings, selectedIds, selectedCurveIds]);
+  }, [isExportModalOpen, isAdjusting, isMeasuringScale, canUndo, canRedo, placedItems, curveObjects, scenes, currentSceneId, snapSettings, selectedIds, selectedCurveIds, selectedCurveId, selectedCurveItemId]);
 
   const scrollPalette = (direction: 'left' | 'right') => {
     if (paletteScrollRef.current) {
@@ -659,8 +1149,11 @@ const StageBuilder: React.FC<Props> = ({
     };
     pushHistory();
     setPlacedItems(prev => [...prev, newItem]);
-    setSelectedId(newItem.id);
-    setSelectedCurveId(null);
+    setSelectedIds([newItem.id]);
+    setSelectedCurveIds([]);
+    setSelectedCurveItemId(null);
+    const itemLabel = isTemplate ? (tmpl?.label || 'テンプレ') : (iconLabels[iconId] || iconDef?.label || 'パーツ');
+    triggerAddToast(itemLabel);
   };
 
   const handleUpdateItem = (id: string, newAttrs: Partial<PlacedItem>) => {
@@ -684,7 +1177,30 @@ const StageBuilder: React.FC<Props> = ({
     setSelectedIds(prev => prev.filter(i => i !== id));
   };
 
+  const handleDeleteCurveItem = (curveId: string, itemId: string) => {
+    const curve = curveObjects.find(c => c.id === curveId);
+    if (!curve || !Array.isArray(curve.items)) return;
+
+    pushHistory();
+    const nextItems = curve.items.filter(it => it.id !== itemId);
+    setCurveObjects(prev => prev.map(c => {
+      if (c.id !== curveId) return c;
+      return {
+        ...c,
+        items: nextItems,
+        itemCount: nextItems.length,
+      };
+    }));
+    setSelectedCurveItemId(null);
+  };
+
   const handleDeleteSelected = () => {
+    // ベジェ曲線上の特定オブジェクトが選択されている場合は、そのオブジェクトのみを削除
+    if (selectedCurveId && selectedCurveItemId) {
+      handleDeleteCurveItem(selectedCurveId, selectedCurveItemId);
+      return;
+    }
+
     if (selectedIds.length > 0 || selectedCurveIds.length > 0) {
       pushHistory();
     }
@@ -829,16 +1345,6 @@ const StageBuilder: React.FC<Props> = ({
       const curveIds = new Set(curves.map(c => c.id));
       setCurveObjects(prev => prev.map(cv => curveIds.has(cv.id) ? { ...cv, isPinned: nextPinned } : cv));
     }
-  };
-
-  const handleTogglePinItem = (id: string) => {
-    pushHistory();
-    setPlacedItems(prev => prev.map(it => it.id === id ? { ...it, isPinned: !it.isPinned } : it));
-  };
-
-  const handleTogglePinCurve = (id: string) => {
-    pushHistory();
-    setCurveObjects(prev => prev.map(c => c.id === id ? { ...c, isPinned: !c.isPinned } : c));
   };
 
   const handleMoveOrder = (direction: 'front' | 'back' | 'forward' | 'backward') => {
@@ -1092,8 +1598,9 @@ const StageBuilder: React.FC<Props> = ({
     const curve = createDefaultCurveObject(spawnX, spawnY);
     pushHistory();
     setCurveObjects(prev => [...prev, curve]);
-    setSelectedCurveId(curve.id);
-    setSelectedId(null);
+    setSelectedIds([]);
+    setSelectedCurveIds([curve.id]);
+    setSelectedCurveItemId(null);
   };
 
   const handleMoveCenterTo = (canvasX: number, canvasY: number) => {
@@ -1103,7 +1610,6 @@ const StageBuilder: React.FC<Props> = ({
     pushHistory();
     setSnapSettings(prev => ({
       ...prev,
-      showCenterMarker: false,
       centerOffset: {
         x: Math.round(canvasX - bgCenterX),
         y: Math.round(canvasY - bgCenterY),
@@ -1113,7 +1619,49 @@ const StageBuilder: React.FC<Props> = ({
 
   const handleUpdateCenterOffset = (offset: { x: number; y: number }) => {
     pushHistory();
-    setSnapSettings(prev => ({ ...prev, centerOffset: offset, showCenterMarker: false }));
+    setSnapSettings(prev => ({ ...prev, centerOffset: offset }));
+  };
+
+  const handleMoveCurveItemOrder = (
+    curveId: string,
+    itemId: string,
+    direction: 'left' | 'right'
+  ) => {
+    const curve = curveObjects.find(c => c.id === curveId);
+    if (!curve || !Array.isArray(curve.items) || curve.items.length <= 1) return;
+
+    const idx = curve.items.findIndex(it => it.id === itemId);
+    if (idx === -1) return;
+
+    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= curve.items.length) return;
+
+    pushHistory();
+
+    const nextItems = [...curve.items];
+    const gapIdx = nextItems[idx].gap;
+    const gapTarget = nextItems[targetIdx].gap;
+
+    const itemA = { ...nextItems[idx] };
+    const itemB = { ...nextItems[targetIdx] };
+
+    if (gapTarget !== undefined) {
+      itemA.gap = gapTarget;
+    } else {
+      delete itemA.gap;
+    }
+
+    if (gapIdx !== undefined) {
+      itemB.gap = gapIdx;
+    } else {
+      delete itemB.gap;
+    }
+
+    nextItems[idx] = itemB;
+    nextItems[targetIdx] = itemA;
+
+    setCurveObjects(prev => prev.map(c => c.id === curveId ? { ...c, items: nextItems } : c));
+    setSelectedCurveItemId(itemId);
   };
 
   const addItemToSelectedCurve = (iconId: string) => {
@@ -1150,6 +1698,9 @@ const StageBuilder: React.FC<Props> = ({
         itemCount: nextItems.length,
       };
     }));
+    setSelectedIds([]);
+    setSelectedCurveItemId(newItem.id);
+    triggerAddToast(newItem.label || 'アイテム');
   };
 
   const handlePaletteItemClick = (iconId: string) => {
@@ -1197,7 +1748,7 @@ const StageBuilder: React.FC<Props> = ({
     setSelectedCurveIds(prev => prev.filter(i => i !== id));
   };
 
-  const handleUpdateAllOfType = (type: 'stand' | 'pianoChair', style: 'default' | 'xMark' | 'doubleCircle') => {
+  const handleUpdateAllOfType = (type: 'stand' | 'pianoChair', style: 'default' | 'xMark' | 'doubleCircle' | 'circlePi') => {
     pushHistory();
     if (type === 'stand') {
       setPlacedItems(prev =>
@@ -1263,7 +1814,7 @@ const StageBuilder: React.FC<Props> = ({
     // Count normal placed items
     for (const item of items) {
       if (item.templateType === 'ensembleChairAndStand') {
-        const isPiano = item.chairType === 'pianoChair' || item.chairType === 'pianoChairSvg';
+        const isPiano = item.chairType === 'pianoChair' || item.chairType === 'pianoChairSvg' || item.chairType === 'pianoChairPi';
         const chairKey = isPiano ? 'tmpl_pianoChair' : 'tmpl_chorusChair';
         counts[chairKey] = (counts[chairKey] || 0) + 1;
         counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + 1;
@@ -1280,7 +1831,7 @@ const StageBuilder: React.FC<Props> = ({
             counts[it.iconId] = (counts[it.iconId] || 0) + 1;
           } else if (it.type === 'ensembleChairAndStand') {
             const effectiveChairType = it.chairType || curve.chairType;
-            const isPiano = effectiveChairType === 'pianoChair' || effectiveChairType === 'pianoChairSvg';
+            const isPiano = effectiveChairType === 'pianoChair' || effectiveChairType === 'pianoChairSvg' || effectiveChairType === 'pianoChairPi';
             const chairKey = isPiano ? 'tmpl_pianoChair' : 'tmpl_chorusChair';
             counts[chairKey] = (counts[chairKey] || 0) + 1;
             counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + 1;
@@ -1292,7 +1843,7 @@ const StageBuilder: React.FC<Props> = ({
       } else {
         const tmplType = curve.itemType;
         if (tmplType === 'ensembleChairAndStand') {
-          const isPiano = curve.chairType === 'pianoChair' || curve.chairType === 'pianoChairSvg';
+          const isPiano = curve.chairType === 'pianoChair' || curve.chairType === 'pianoChairSvg' || curve.chairType === 'pianoChairPi';
           const chairKey = isPiano ? 'tmpl_pianoChair' : 'tmpl_chorusChair';
           counts[chairKey] = (counts[chairKey] || 0) + curve.itemCount;
           counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + curve.itemCount;
@@ -1306,7 +1857,7 @@ const StageBuilder: React.FC<Props> = ({
     // Build tallies from extracted icons (including linked template counts so TallyTable and Export match 100%)
     const replacedTmplIdSet = new Set<string>();
     const iconTallies = extractedIcons.map((icon) => {
-      const tmplId = templateReplacements?.[icon.id];
+      const tmplId = effectiveTemplateReplacements?.[icon.id];
       const matchedTmpl = tmplId
         ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
         : null;
@@ -1515,7 +2066,13 @@ const StageBuilder: React.FC<Props> = ({
 
       const resp = await axios.post('/api/export-pdf/', payload);
       if (resp.data.download_url) {
-        window.open(resp.data.download_url, '_blank');
+        const safeName = (projectNameRef.current || 'stage_layout').replace(/[\\/:*?"<>|]/g, '_').trim();
+        const a = document.createElement('a');
+        a.href = resp.data.download_url;
+        a.download = `${safeName}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
       }
     } catch (err) {
       console.error(err);
@@ -1530,6 +2087,13 @@ const StageBuilder: React.FC<Props> = ({
     setIsPreparingExport(true);
 
     try {
+      // プレビューに進む前に全ての選択状態（アイテム選択、複数選択、曲線選択、曲線アイテム選択）を確実に解除
+      flushSync(() => {
+        setSelectedIds([]);
+        setSelectedCurveIds([]);
+        setSelectedCurveItemId(null);
+      });
+
       // 1. Sync current working state into scenes list
       const allScenes = scenes.map(sc =>
         sc.id === currentSceneId
@@ -1548,6 +2112,9 @@ const StageBuilder: React.FC<Props> = ({
           setCurrentSceneId(sc.id);
           setPlacedItems(sc.placedItems || []);
           setCurveObjects(sc.curveObjects || []);
+          setSelectedIds([]);
+          setSelectedCurveIds([]);
+          setSelectedCurveItemId(null);
           if (sc.snapSettings) {
             setSnapSettings(sc.snapSettings);
           }
@@ -1586,15 +2153,19 @@ const StageBuilder: React.FC<Props> = ({
           stageImageUrlWithoutCurves: urlWithoutCurves,
           tallies: scTallies,
           initialNodes: scAutoNodes,
+          savedNodes: previewSettingsRef.current?.sceneNodesMap?.[sc.id],
         });
       }
 
-      // Restore active scene
+      // Restore active scene with clean selection state
       const origScene = allScenes.find(s => s.id === currentSceneId) || allScenes[0];
       flushSync(() => {
         setCurrentSceneId(origScene.id);
         setPlacedItems(origScene.placedItems || []);
         setCurveObjects(origScene.curveObjects || []);
+        setSelectedIds([]);
+        setSelectedCurveIds([]);
+        setSelectedCurveItemId(null);
         if (origScene.snapSettings) {
           setSnapSettings(origScene.snapSettings);
         }
@@ -1627,8 +2198,15 @@ const StageBuilder: React.FC<Props> = ({
         backgroundCrop={effectiveCrop}
         tallies={tallies}
         sceneExports={sceneExports}
+        initialPreviewSettings={previewSettings || undefined}
+        onUpdatePreviewSettings={handleUpdatePreviewSettings}
+        projectName={projectName}
+        onUpdateProjectName={handleCommitProjectName}
         onBack={() => {
           setIsExportModalOpen(false);
+          setSelectedIds([]);
+          setSelectedCurveIds([]);
+          setSelectedCurveItemId(null);
           onPhaseChange?.(3);
         }}
         onExport={handleExportFinalPdf}
@@ -1640,25 +2218,25 @@ const StageBuilder: React.FC<Props> = ({
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className={`flex flex-col w-full h-full overflow-hidden font-sans relative transition-colors ${
-      isDarkMode ? 'dark bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'
+    <div className={`flex flex-col w-full h-full overflow-hidden font-sans relative transition-colors liquid-bg ${
+      isDarkMode ? 'dark text-slate-100' : 'text-slate-800'
     }`}>
       {/* Backup Size Warning Banner */}
       {backupWarning && (
-        <div className="bg-amber-50 border-b border-amber-300 text-amber-800 text-xs px-4 py-1.5 flex items-center justify-between gap-2 shrink-0">
-          <span>⚠️ {backupWarning}</span>
+        <div className="bg-amber-500/15 backdrop-blur-md border-b border-amber-400/40 text-amber-800 dark:text-amber-200 text-xs px-4 py-1.5 flex items-center justify-between gap-2 shrink-0">
+          <span className="font-bold">! {backupWarning}</span>
           <button
             type="button"
             onClick={() => setBackupWarning(null)}
-            className="text-amber-500 hover:text-amber-700 font-bold ml-2 shrink-0"
+            className="text-amber-500 hover:text-amber-700 font-bold ml-2 shrink-0 cursor-pointer"
             title="閉じる"
-          >✕</button>
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
-      {/* Digital Agency Design System (DADS) Global Service Header */}
-      <header className={`h-15 border-b flex items-center justify-between px-4 shrink-0 z-20 select-none transition-colors ${
-        isDarkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-300 text-slate-900 shadow-2xs'
-      }`}>
+      {/* Apple Liquid Glass Global Service Header */}
+      <header className="h-15 liquid-glass border-b flex items-center justify-between px-5 shrink-0 z-20 select-none transition-colors">
         {/* Brand / Service Title */}
         <div className="flex items-center gap-3">
           <div
@@ -1666,74 +2244,102 @@ const StageBuilder: React.FC<Props> = ({
             onClick={handleBack}
             title="ホーム画面（PDF読込・バックアップ一覧）に戻る"
           >
-            <div className="w-8 h-8 rounded-md bg-[#0055c0] text-white flex items-center justify-center font-bold text-sm shadow-2xs select-none">
-              🎼
+            <div className="w-8.5 h-8.5 rounded-xl bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-[0_4px_12px_rgba(0,122,255,0.35),inset_0_1px_1px_rgba(255,255,255,0.6)] select-none shrink-0">
+              ♪
             </div>
-            <div className="flex flex-col">
-              <span className={`font-bold text-sm leading-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+            <div className="flex flex-col hidden sm:flex shrink-0">
+              <span className={`font-bold text-sm tracking-tight leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                 ステージレイアウトプランナー
               </span>
-              <span className={`text-[11px] font-bold leading-tight mt-0.5 ${isDarkMode ? 'text-blue-400' : 'text-[#0055c0]'}`}>
+              <span className="text-[11px] font-extrabold leading-tight mt-0.5 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-sky-400 dark:to-indigo-400 bg-clip-text text-transparent">
                 StaJet
               </span>
             </div>
           </div>
 
-          <div className={`h-6 w-px mx-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
+          <div className={`h-5 w-px mx-1 hidden sm:block ${isDarkMode ? 'bg-white/15' : 'bg-slate-300/70'}`} />
 
-          {/* DADS Operational Tools: Undo / Redo & Zoom */}
-          <div className="flex items-center gap-1">
+          {/* Project Name Editable Header Field */}
+          <div className="flex items-center">
+            {isEditingProjectName ? (
+              <input
+                ref={projectNameInputRef}
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                onBlur={() => handleCommitProjectName()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCommitProjectName();
+                  if (e.key === 'Escape') setIsEditingProjectName(false);
+                }}
+                className="text-xs sm:text-sm font-bold bg-white dark:bg-slate-800 border-2 border-[#007AFF] rounded-xl px-2.5 py-1 outline-hidden shadow-xs text-slate-900 dark:text-slate-100 min-w-[140px] max-w-[240px]"
+                autoFocus
+                placeholder="プロジェクト名を入力"
+              />
+            ) : (
+              <div
+                onClick={() => {
+                  setIsEditingProjectName(true);
+                  setTimeout(() => projectNameInputRef.current?.select(), 50);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 transition-colors group cursor-pointer border border-transparent hover:border-slate-300/70 dark:hover:border-white/20"
+                title="クリックしてプロジェクト名を変更"
+              >
+                <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 max-w-[150px] sm:max-w-[220px] md:max-w-[300px] truncate">
+                  {projectName}
+                </span>
+                <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#007AFF] transition-colors shrink-0" />
+              </div>
+            )}
+          </div>
+
+          <div className={`h-5 w-px mx-1.5 ${isDarkMode ? 'bg-white/15' : 'bg-slate-300/70'}`} />
+
+          {/* Operational Tools: Undo / Redo & Zoom (Capsule Glass Controls) */}
+          <div className="flex items-center gap-1.5">
             <button
               onClick={handleUndo}
               disabled={!canUndo}
-              className={`px-2 py-1 rounded-md text-xs font-medium border flex items-center gap-1 transition-colors ${
+              className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 transition-all ${
                 canUndo
-                  ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 cursor-pointer' : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300 cursor-pointer')
-                  : (isDarkMode ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed' : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed')
+                  ? 'liquid-btn text-slate-800 dark:text-slate-100 cursor-pointer'
+                  : 'bg-slate-200/40 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600 border border-white/30 dark:border-white/5 cursor-not-allowed'
               }`}
               title={`1手元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
             >
-              <span>↩</span>
+              <span>↺</span>
               <span className="hidden xl:inline">元に戻す</span>
             </button>
             <button
               onClick={handleRedo}
               disabled={!canRedo}
-              className={`px-2 py-1 rounded-md text-xs font-medium border flex items-center gap-1 transition-colors ${
+              className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 transition-all ${
                 canRedo
-                  ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 cursor-pointer' : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300 cursor-pointer')
-                  : (isDarkMode ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed' : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed')
+                  ? 'liquid-btn text-slate-800 dark:text-slate-100 cursor-pointer'
+                  : 'bg-slate-200/40 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600 border border-white/30 dark:border-white/5 cursor-not-allowed'
               }`}
               title="やり直す (Ctrl+Y / Ctrl+Shift+Z)"
             >
-              <span>↪</span>
+              <span>↻</span>
               <span className="hidden xl:inline">やり直し</span>
             </button>
 
-            <div className={`h-4 w-px mx-1.5 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
+            <div className={`h-4 w-px mx-1 ${isDarkMode ? 'bg-white/15' : 'bg-slate-300/70'}`} />
 
-            <div className={`flex items-center border rounded-md overflow-hidden ${
-              isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-300'
-            }`}>
+            <div className="flex items-center liquid-btn rounded-full overflow-hidden p-0.5">
               <button
                 onClick={handleZoomOut}
-                className={`px-2 py-1 text-xs font-bold transition-colors ${
-                  isDarkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
-                }`}
+                className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center transition-colors hover:bg-slate-200/60 dark:hover:bg-slate-700/60 text-slate-700 dark:text-slate-200 cursor-pointer"
                 title="縮小"
               >
                 −
               </button>
-              <span className={`text-[11px] font-bold font-mono px-2 py-1 min-w-[3.2rem] text-center border-x ${
-                isDarkMode ? 'border-slate-700 text-slate-200 bg-slate-850' : 'border-slate-200 text-slate-800 bg-slate-50'
-              }`}>
+              <span className="text-[11px] font-bold font-mono px-2 min-w-[3.2rem] text-center text-slate-800 dark:text-slate-100">
                 {Math.round(zoomMultiplier * 100)}%
               </span>
               <button
                 onClick={handleZoomIn}
-                className={`px-2 py-1 text-xs font-bold transition-colors ${
-                  isDarkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
-                }`}
+                className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center transition-colors hover:bg-slate-200/60 dark:hover:bg-slate-700/60 text-slate-700 dark:text-slate-200 cursor-pointer"
                 title="拡大"
               >
                 ＋
@@ -1742,57 +2348,53 @@ const StageBuilder: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Center: DADS Standard Stepper (ステップナビゲーション) */}
+        {/* Center: Liquid Glass Pill Stepper (Numbered circles matching design) */}
         <div className="hidden lg:flex items-center gap-1.5">
-          <div className="flex items-center gap-1 px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-md border border-slate-300 dark:border-slate-700 text-xs">
+          <div className="flex items-center gap-1 px-2 py-1 liquid-segment-track rounded-full text-xs">
             {/* Step 1 */}
-            <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
-              <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">✓</span>
-              <span>1. PDF読込</span>
+            <div className="flex items-center gap-1.5 px-2 py-0.5 text-slate-600 dark:text-slate-300 font-medium">
+              <span className="w-4 h-4 rounded-full bg-slate-300/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">1</span>
+              <span>PDF読込</span>
             </div>
-            <span className="text-slate-300 dark:text-slate-600 mx-1">›</span>
+            <span className="text-slate-300 dark:text-slate-600 mx-0.5">›</span>
             {/* Step 2 */}
-            <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
-              <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">✓</span>
-              <span>2. 領域設定</span>
+            <div className="flex items-center gap-1.5 px-2 py-0.5 text-slate-600 dark:text-slate-300 font-medium">
+              <span className="w-4 h-4 rounded-full bg-slate-300/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">2</span>
+              <span>領域設定</span>
             </div>
-            <span className="text-slate-300 dark:text-slate-600 mx-1">›</span>
+            <span className="text-slate-300 dark:text-slate-600 mx-0.5">›</span>
             {/* Step 3 (Active) */}
-            <div className="flex items-center gap-1 font-bold text-[#0055c0] dark:text-blue-300 bg-white dark:bg-slate-700 px-2 py-0.5 rounded shadow-2xs border border-blue-300 dark:border-blue-600">
-              <span className="w-4 h-4 rounded-full bg-[#0055c0] text-white text-[10px] font-bold flex items-center justify-center">3</span>
-              <span>ステージ配置 (現在地)</span>
+            <div className="flex items-center gap-1.5 font-bold text-[#007AFF] dark:text-sky-300 bg-white/95 dark:bg-slate-800/95 px-3 py-1 rounded-full shadow-[0_2px_8px_rgba(15,23,42,0.08),inset_0_1px_0.5px_rgba(255,255,255,0.9)]">
+              <span className="w-4 h-4 rounded-full bg-gradient-to-b from-sky-400 to-[#007AFF] text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">3</span>
+              <span>ステージ配置</span>
             </div>
-            <span className="text-slate-300 dark:text-slate-600 mx-1">›</span>
+            <span className="text-slate-300 dark:text-slate-600 mx-0.5">›</span>
             {/* Step 4 */}
-            <div className="flex items-center gap-1 text-slate-400 dark:text-slate-500">
-              <span className="w-4 h-4 rounded-full bg-slate-300 dark:bg-slate-600 text-slate-700 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">4</span>
-              <span>PDF出力</span>
+            <div className="flex items-center gap-1.5 px-2 py-0.5 text-slate-400 dark:text-slate-500 font-medium">
+              <span className="w-4 h-4 rounded-full bg-slate-300/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">4</span>
+              <span>プレビュー・出力</span>
             </div>
           </div>
         </div>
 
-        {/* Right Actions: DADS Secondary + Primary Buttons */}
+        {/* Right Actions: Liquid Glass Capsule Buttons */}
         <div className="flex items-center gap-2.5">
           <button
             type="button"
             onClick={handleExportJson}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs hover:shadow-xs focus:ring-2 focus:ring-amber-300 ${
-              isDarkMode
-                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
-                : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300'
-            }`}
+            className="px-3.5 py-1.5 rounded-full text-xs font-bold liquid-btn text-slate-800 dark:text-slate-100 flex items-center gap-1.5 cursor-pointer"
             title="現在の全場面・配置データをJSONファイルとしてダウンロード保存します"
           >
-            <span>💾</span>
+            <span>↓</span>
             <span>JSON保存</span>
           </button>
           <button
             onClick={handleGoToExport}
             disabled={isPreparingExport}
-            className={`text-white text-xs sm:text-sm font-bold px-4 py-2 rounded-md shadow-2xs hover:shadow-xs transition-all flex items-center gap-2 cursor-pointer focus:ring-4 focus:ring-amber-300 ${
+            className={`text-white text-xs sm:text-sm font-bold px-5 py-2 rounded-full transition-all flex items-center gap-2 cursor-pointer ${
               isPreparingExport
-                ? 'bg-blue-400 cursor-not-allowed'
-                : 'bg-[#0055c0] hover:bg-[#004098] active:bg-[#002966]'
+                ? 'bg-blue-400/70 cursor-not-allowed'
+                : 'liquid-btn-primary'
             }`}
           >
             {isPreparingExport ? (
@@ -1812,20 +2414,20 @@ const StageBuilder: React.FC<Props> = ({
 
       {/* Loading Overlay when generating multi-scene export */}
       {isPreparingExport && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex flex-col items-center justify-center gap-3">
-          <div className="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
-          <p className="text-white text-sm font-bold shadow-xs">全場面の出力プレビューを一括生成しています...</p>
+        <div className="fixed inset-0 bg-slate-950/45 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-3">
+          <div className="liquid-glass-heavy p-8 rounded-3xl flex flex-col items-center gap-3">
+            <div className="w-12 h-12 border-3 border-[#007AFF]/20 border-t-[#007AFF] rounded-full animate-spin" />
+            <p className="text-slate-800 dark:text-white text-sm font-bold">全場面の出力プレビューを一括生成しています...</p>
+          </div>
         </div>
       )}
 
-      {/* Horizontal Palette */}
-      <div className={`h-[102px] border-b flex items-center shrink-0 shadow-xs z-10 px-2 relative select-none transition-colors ${
-        isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
-      }`}>
-        {/* Active Bezier Floating Tag (アイテム欄の下にピロっと飛び出るタグ) */}
+      {/* Horizontal Palette (Liquid Glass) */}
+      <div className="h-[104px] liquid-glass border-b flex items-center shrink-0 z-10 px-3 relative select-none transition-colors">
+        {/* Active Bezier Floating Tag */}
         {selectedCurveId && (
           <div
-            className="absolute left-36 top-full z-30 flex items-center gap-1.5 px-3 py-0.5 bg-purple-600 text-white rounded-b-lg shadow-md text-[10px] font-bold border border-t-0 border-purple-500 select-none animate-in fade-in slide-in-from-top-1"
+            className="absolute left-36 top-full z-30 flex items-center gap-2 px-3.5 py-1 bg-gradient-to-r from-indigo-500/90 via-purple-500/90 to-fuchsia-500/90 backdrop-blur-xl text-white rounded-b-2xl shadow-[0_8px_20px_rgba(168,85,247,0.35),inset_0_1px_0.5px_rgba(255,255,255,0.4)] text-[10px] font-bold border border-t-0 border-white/30 select-none animate-in fade-in slide-in-from-top-1"
             title="選択中のベジェ曲線にアイテムを追加するモードです"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
@@ -1836,38 +2438,36 @@ const StageBuilder: React.FC<Props> = ({
                 e.stopPropagation();
                 setSelectedCurveId(null);
               }}
-              className="ml-1 bg-white/20 hover:bg-white/35 active:bg-white/40 text-white px-1.5 py-0.2 rounded text-[9px] font-semibold transition-colors flex items-center gap-0.5"
+              className="ml-1 bg-white/20 hover:bg-white/35 active:bg-white/40 text-white px-2 py-0.5 rounded-full text-[9px] font-semibold transition-colors flex items-center gap-0.5 cursor-pointer"
               title="通常配置モードに戻る"
             >
               <span>解除</span>
-              <span>✕</span>
+              <X className="w-3 h-3" />
             </button>
           </div>
         )}
 
-        {/* Tab Switcher */}
-        <div className={`flex flex-col h-full border-r w-24 shrink-0 py-1.5 pr-1.5 ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+        {/* Tab Switcher (Segmented Glass Track) */}
+        <div className={`flex flex-col h-[82px] w-25 shrink-0 p-1 rounded-2xl liquid-segment-track gap-1 mr-2`}>
           <button
             onClick={() => setPaletteTab('pdf')}
-            className={`flex-1 text-xs font-bold rounded flex items-center justify-center gap-1 transition-colors ${
+            className={`flex-1 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer ${
               paletteTab === 'pdf'
-                ? (isDarkMode ? 'text-blue-300 bg-blue-900/50' : 'text-blue-700 bg-blue-50/80')
-                : (isDarkMode ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-50')
+                ? 'bg-white/95 dark:bg-slate-800/95 text-[#007AFF] dark:text-sky-400 shadow-[0_2px_8px_rgba(15,23,42,0.08),inset_0_1px_0.5px_rgba(255,255,255,0.9)]'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <span>🖼</span> PDF抽出
+            <FileText className="w-3.5 h-3.5 inline mr-0.5" /> PDF抽出
           </button>
           <button
             onClick={() => setPaletteTab('template')}
-            className={`flex-1 text-xs font-bold rounded flex items-center justify-center gap-1 border-t transition-colors ${
-              isDarkMode ? 'border-slate-700' : 'border-slate-100'
-            } ${
+            className={`flex-1 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer ${
               paletteTab === 'template'
-                ? (isDarkMode ? 'text-blue-300 bg-blue-900/50' : 'text-blue-700 bg-blue-50/80')
-                : (isDarkMode ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-50')
+                ? 'bg-white/95 dark:bg-slate-800/95 text-[#007AFF] dark:text-sky-400 shadow-[0_2px_8px_rgba(15,23,42,0.08),inset_0_1px_0.5px_rgba(255,255,255,0.9)]'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <span>📐</span> テンプレ
+            <Shapes className="w-3.5 h-3.5 inline mr-0.5" /> テンプレ
           </button>
         </div>
 
@@ -1875,12 +2475,10 @@ const StageBuilder: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => scrollPalette('left')}
-          className={`h-16 px-1.5 rounded flex items-center justify-center transition-colors shrink-0 ml-1 ${
-            isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
-          }`}
+          className="h-14 w-7 rounded-full liquid-btn flex items-center justify-center transition-all shrink-0 text-slate-500 dark:text-slate-300 hover:text-[#007AFF] cursor-pointer"
           title="左へスクロール"
         >
-          ◀
+          <ChevronLeft className="w-4 h-4" />
         </button>
 
         {/* Scrollable Container */}
@@ -1891,25 +2489,25 @@ const StageBuilder: React.FC<Props> = ({
               e.currentTarget.scrollLeft += e.deltaY;
             }
           }}
-          className={`flex-1 h-full overflow-x-auto overflow-y-hidden flex items-center gap-1.5 px-2 py-1.5 scroll-smooth transition-all rounded-lg ${
+          className={`flex-1 h-full overflow-x-auto overflow-y-hidden flex items-center gap-2 px-2.5 py-1.5 scroll-smooth transition-all rounded-2xl mx-1 ${
             selectedCurveId
-              ? (isDarkMode ? 'bg-purple-950/40 ring-1 ring-inset ring-purple-600' : 'bg-purple-50/70 ring-1 ring-inset ring-purple-300')
+              ? (isDarkMode ? 'bg-purple-950/35 ring-1 ring-inset ring-purple-500/60' : 'bg-purple-500/10 ring-1 ring-inset ring-purple-300/80')
               : ''
           }`}
         >
           {/* Bezier Curve Creator Button */}
-          <div className={`flex items-center gap-1 border-r pr-2 mr-1 shrink-0 h-14 ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+          <div className={`flex items-center gap-1 border-r pr-2.5 mr-1 shrink-0 h-15 ${isDarkMode ? 'border-white/12' : 'border-slate-300/60'}`}>
             <button
               type="button"
               onClick={() => handleAddEmptyCurve()}
-              className={`w-14 h-[68px] py-1 px-1 rounded-lg border transition-all flex flex-col items-center justify-between shrink-0 group ${
+              className={`w-15 h-[72px] py-1.5 px-1 rounded-2xl transition-all duration-200 flex flex-col items-center justify-between shrink-0 group cursor-pointer ${
                 selectedCurveId
-                  ? (isDarkMode ? 'bg-purple-900/80 border-purple-500 text-purple-200 shadow-xs' : 'bg-purple-100 border-purple-400 text-purple-800 shadow-xs')
-                  : (isDarkMode ? 'bg-slate-700/80 hover:bg-purple-950/60 border-slate-600 text-slate-200 hover:border-purple-400' : 'bg-white hover:bg-purple-50/60 border-slate-200 text-slate-700 hover:border-purple-300 shadow-2xs')
+                  ? (isDarkMode ? 'bg-purple-900/70 border border-purple-400 text-purple-200 shadow-md' : 'bg-purple-100/90 border border-purple-400 text-purple-900 shadow-md')
+                  : 'liquid-card hover:bg-white/90 dark:hover:bg-slate-700/80 hover:border-purple-400/60 hover:-translate-y-0.5 text-slate-700 dark:text-slate-200'
               }`}
               title="新しいベジェ曲線（何も置かれていない空の曲線）を追加します"
             >
-              <div className="w-8 h-8 flex items-center justify-center text-purple-600 group-hover:scale-110 transition-transform">
+              <div className="w-8 h-8 flex items-center justify-center text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform">
                 <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 18 C 7 6, 17 6, 20 18" />
                   <circle cx="4" cy="18" r="2.2" fill="#a855f7" />
@@ -1934,25 +2532,25 @@ const StageBuilder: React.FC<Props> = ({
                     e.dataTransfer.effectAllowed = 'copy';
                   }}
                   onClick={() => handlePaletteItemClick(tmpl.id || `tmpl_${tmpl.type}`)}
-                  className={`flex flex-col items-center justify-between w-16 h-[72px] py-1 px-0.5 rounded-lg shrink-0 transition-all group relative cursor-pointer ${
+                  className={`flex flex-col items-center justify-between w-16 h-[74px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 ${
                     selectedCurveId
-                      ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500' : 'bg-purple-50/50 hover:bg-purple-100/80 border border-purple-200 hover:border-purple-400')
-                      : (isDarkMode ? 'hover:bg-slate-700/80 border border-transparent hover:border-slate-600 cursor-grab active:cursor-grabbing' : 'hover:bg-blue-50/80 border border-transparent hover:border-blue-200 cursor-grab active:cursor-grabbing')
+                      ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/70' : 'bg-purple-50/70 hover:bg-purple-100/90 border border-purple-300/80 hover:border-purple-400')
+                      : 'liquid-card hover:bg-white/90 dark:hover:bg-slate-700/80 hover:border-blue-400/60 hover:-translate-y-0.5 cursor-grab active:cursor-grabbing'
                   }`}
                   title={selectedCurveId ? `「${tmpl.label}」をベジェ曲線に追加` : tmpl.label}
                 >
                   {selectedCurveId && (
-                    <span className="absolute -top-1.5 right-0.5 bg-purple-600 text-white text-[8px] font-bold px-1 rounded-full shadow-2xs">
+                    <span className="absolute -top-1.5 right-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[8px] font-bold px-1.5 rounded-full shadow-xs">
                       +追加
                     </span>
                   )}
                   <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
                     <img src={getTemplateDataUrl(tmpl)} alt={tmpl.label} className="max-w-full max-h-full object-contain" />
                   </div>
-                  <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 ${
+                  <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
                     selectedCurveId
                       ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
-                      : (isDarkMode ? 'text-slate-300 group-hover:text-blue-400' : 'text-slate-600 group-hover:text-blue-700')
+                      : (isDarkMode ? 'text-slate-200 group-hover:text-sky-400' : 'text-slate-700 group-hover:text-[#007AFF]')
                   }`}>
                     {tmpl.label}
                   </span>
@@ -1965,7 +2563,7 @@ const StageBuilder: React.FC<Props> = ({
                 <p className="text-xs text-slate-400 w-full text-center">PDFから切り出されたアイコンがありません</p>
               ) : (
                 extractedIcons.map((icon) => {
-                  const tmplId = templateReplacements?.[icon.id];
+                  const tmplId = effectiveTemplateReplacements?.[icon.id];
                   const matchedTmpl = tmplId
                     ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
                     : null;
@@ -1983,19 +2581,26 @@ const StageBuilder: React.FC<Props> = ({
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => handlePaletteItemClick(effectiveTmplId)}
-                        className={`flex flex-col items-center justify-between w-16 h-[72px] py-1 px-0.5 rounded-lg shrink-0 transition-all group shadow-2xs relative cursor-pointer border ${
+                        className={`flex flex-col items-center justify-between w-16 h-[74px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 ${
                           selectedCurveId
-                            ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500' : 'bg-purple-50/60 hover:bg-purple-100/90 border border-purple-300 hover:border-purple-400')
-                            : (isDarkMode ? 'bg-emerald-950/40 hover:bg-emerald-900/60 border-emerald-600/70 cursor-grab active:cursor-grabbing' : 'bg-emerald-50/80 hover:bg-emerald-100 border-emerald-300 cursor-grab active:cursor-grabbing')
+                            ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 ring-1 ring-purple-500/50' : 'bg-purple-50/70 hover:bg-purple-100/90 ring-1 ring-purple-300/60')
+                            : 'liquid-glass-card-accent cursor-grab active:cursor-grabbing'
                         }`}
                         title={selectedCurveId ? `「${label}」をベジェ曲線に追加` : `[テンプレ置換済] ${label}`}
                       >
-                        <span className="absolute -top-1.5 -left-1 bg-emerald-600 text-white text-[7px] font-bold px-1 rounded-full shadow-2xs">
-                          テンプレ
-                        </span>
-                        {selectedCurveId && (
-                          <span className="absolute -top-1.5 right-0.5 bg-purple-600 text-white text-[8px] font-bold px-1 rounded-full shadow-2xs">
-                            +追加
+                        {/* Top Badges: Merged Capsule when both Template & +Add exist, or Single Pill */}
+                        {selectedCurveId ? (
+                          <div className="absolute -top-2 left-1/2 -translate-x-1/2 flex items-center shadow-xs rounded-full overflow-hidden whitespace-nowrap z-10">
+                            <span className="bg-gradient-to-r from-lime-500 to-lime-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 leading-none">
+                              テンプレ
+                            </span>
+                            <span className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 border-l border-white/40 leading-none">
+                              +追加
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="absolute -top-1.5 -left-1 bg-gradient-to-r from-lime-500 to-lime-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 rounded-full shadow-xs z-10 leading-none">
+                            テンプレ
                           </span>
                         )}
                         <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
@@ -2008,7 +2613,7 @@ const StageBuilder: React.FC<Props> = ({
                         <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
                           selectedCurveId
                             ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
-                            : (isDarkMode ? 'text-emerald-300 group-hover:text-emerald-200' : 'text-emerald-800 group-hover:text-emerald-950')
+                            : (isDarkMode ? 'text-lime-300 group-hover:text-lime-200' : 'text-lime-900 group-hover:text-lime-950')
                         }`}>
                           {label}
                         </span>
@@ -2022,25 +2627,25 @@ const StageBuilder: React.FC<Props> = ({
                       draggable={!selectedCurveId}
                       onDragStart={e => { e.dataTransfer.setData('iconId', icon.id); e.dataTransfer.effectAllowed = 'copy'; }}
                       onClick={() => handlePaletteItemClick(icon.id)}
-                      className={`flex flex-col items-center justify-between w-16 h-[72px] py-1 px-0.5 rounded-lg shrink-0 transition-all group shadow-2xs relative cursor-pointer ${
+                      className={`flex flex-col items-center justify-between w-16 h-[74px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 ${
                         selectedCurveId
-                          ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500' : 'bg-purple-50/60 hover:bg-purple-100/90 border border-purple-300 hover:border-purple-400')
-                          : (isDarkMode ? 'bg-slate-700/80 hover:bg-slate-700 border border-slate-600 cursor-grab active:cursor-grabbing' : 'bg-white hover:bg-blue-50/80 border border-slate-200 cursor-grab active:cursor-grabbing')
+                          ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/70' : 'bg-purple-50/70 hover:bg-purple-100/90 border border-purple-300/80 hover:border-purple-400')
+                          : 'liquid-card hover:bg-white/95 dark:hover:bg-slate-700/85 hover:border-blue-400/60 hover:-translate-y-0.5 cursor-grab active:cursor-grabbing'
                       }`}
                       title={selectedCurveId ? `「${iconLabels[icon.id] || icon.label || 'パーツ'}」をベジェ曲線に追加` : (iconLabels[icon.id] || icon.label || 'パーツ')}
                     >
                       {selectedCurveId && (
-                        <span className="absolute -top-1.5 right-0.5 bg-purple-600 text-white text-[8px] font-bold px-1 rounded-full shadow-2xs">
+                        <span className="absolute -top-1.5 right-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[8px] font-bold px-1.5 rounded-full shadow-xs">
                           +追加
                         </span>
                       )}
                       <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
                         <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain" />
                       </div>
-                      <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 ${
+                      <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
                         selectedCurveId
                           ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
-                          : (isDarkMode ? 'text-slate-300 group-hover:text-blue-400' : 'text-slate-600 group-hover:text-blue-700')
+                          : (isDarkMode ? 'text-slate-200 group-hover:text-sky-400' : 'text-slate-700 group-hover:text-[#007AFF]')
                       }`}>
                         {iconLabels[icon.id] || icon.label || 'パーツ'}
                       </span>
@@ -2048,18 +2653,14 @@ const StageBuilder: React.FC<Props> = ({
                   );
                 })
               )}
-              <div className={`border-l pl-2 ml-1 shrink-0 h-12 flex items-center gap-1.5 ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+              <div className={`border-l pl-2.5 ml-1 shrink-0 h-12 flex items-center gap-2 ${isDarkMode ? 'border-white/12' : 'border-slate-300/60'}`}>
                 {onOpenTemplateModal && (
                   <button
                     onClick={onOpenTemplateModal}
-                    className={`text-[11px] font-semibold px-2.5 py-2 rounded-lg border transition-colors whitespace-nowrap flex items-center gap-1 ${
-                      isDarkMode
-                        ? 'text-emerald-300 bg-emerald-950/50 hover:bg-emerald-900/70 border-emerald-700/70'
-                        : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-300'
-                    }`}
+                    className="liquid-btn text-[11px] font-bold px-3 py-2 rounded-full transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer text-emerald-700 dark:text-emerald-300"
                     title="標準テンプレートへの置き換え設定を開きます"
                   >
-                    <span>💡</span> テンプレ置換
+                    <Sparkles className="w-3.5 h-3.5" /> テンプレ置換
                   </button>
                 )}
                 <button
@@ -2070,11 +2671,9 @@ const StageBuilder: React.FC<Props> = ({
                       setIsAdjusting(true);
                     }
                   }}
-                  className={`text-[11px] font-semibold px-2.5 py-2 rounded-lg border transition-colors whitespace-nowrap flex items-center gap-1 ${
-                    isDarkMode ? 'text-slate-300 bg-slate-700 hover:bg-slate-600 border-slate-600' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-300'
-                  }`}
+                  className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-slate-700 dark:text-slate-200 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
                 >
-                  <span>⚙️</span> 枠調整
+                  <Settings className="w-3.5 h-3.5" /> 枠調整
                 </button>
               </div>
             </>
@@ -2085,12 +2684,10 @@ const StageBuilder: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => scrollPalette('right')}
-          className={`h-16 px-1.5 rounded flex items-center justify-center transition-colors shrink-0 mr-1 ${
-            isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
-          }`}
+          className="h-14 w-7 rounded-full liquid-btn flex items-center justify-center transition-all shrink-0 text-slate-500 dark:text-slate-300 hover:text-[#007AFF] cursor-pointer"
           title="右へスクロール"
         >
-          ▶
+          <ChevronRight className="w-4 h-4" />
         </button>
       </div>
 
@@ -2100,6 +2697,7 @@ const StageBuilder: React.FC<Props> = ({
           extractedIcons={extractedIcons}
           fileId={fileId!}
           iconLabels={iconLabels}
+          onBack={() => setIsAdjusting(false)}
           onClose={() => setIsAdjusting(false)}
           onSave={(newIcons, newLabels) => {
             const cleanLabels: Record<string, string> = {};
@@ -2120,90 +2718,89 @@ const StageBuilder: React.FC<Props> = ({
         {/* Dimmed Overlay when a drawer submenu is open */}
         <div 
           onClick={() => setDrawerSubmenu(null)}
-          className={`absolute inset-0 bg-slate-950/40 backdrop-blur-[1px] z-20 transition-opacity duration-300 ${
+          className={`absolute inset-0 bg-slate-950/25 backdrop-blur-[2px] z-20 transition-opacity duration-300 ${
             drawerSubmenu !== null ? 'opacity-100 pointer-events-auto cursor-pointer' : 'opacity-0 pointer-events-none'
           }`}
         />
 
-        {/* Left Navigation Container */}
+        {/* Left Navigation Container (Liquid Glass Spatial Dock) */}
         <aside className="relative z-30 flex h-full shrink-0">
-          {/* Fixed-width Icon Bar (w-14, does NOT expand) */}
-          <div className="w-14 h-full bg-slate-800 text-slate-300 flex flex-col items-center shrink-0 shadow-xl border-r border-slate-700 select-none py-2">
+          {/* Fixed-width Liquid Glass Icon Dock (w-14) */}
+          <div className="w-14 h-full liquid-glass border-r flex flex-col items-center shrink-0 select-none py-3 gap-1.5">
             {/* House Icon: Scenes Management Item */}
             <button
               type="button"
               onClick={() => setDrawerSubmenu(prev => (prev === 'scenes' ? null : 'scenes'))}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg transition-all my-1 ${
+              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-200 cursor-pointer ${
                 drawerSubmenu === 'scenes'
-                  ? 'bg-[#0055c0] text-white ring-2 ring-blue-300 shadow-md scale-105'
-                  : 'hover:bg-slate-700/70 hover:text-white text-slate-300'
+                  ? 'liquid-btn-primary scale-105'
+                  : 'liquid-btn hover:scale-105'
               }`}
               title="場面一覧 (シーン切替)"
             >
-              🏠
-            </button>
-
-            {/* Box Icon: Object Operations Item */}
-            <button
-              type="button"
-              onClick={() => setDrawerSubmenu(prev => (prev === 'objects' ? null : 'objects'))}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg transition-all my-1 ${
-                drawerSubmenu === 'objects'
-                  ? 'bg-[#0055c0] text-white ring-2 ring-blue-300 shadow-md scale-105'
-                  : 'hover:bg-slate-700/70 hover:text-white text-slate-300'
-              }`}
-              title="オブジェクト操作パネル (重なり順・整列・固定)"
-            >
-              📦
+              <Home className="w-5 h-5" />
             </button>
 
             {/* Display & Snap Settings Item */}
             <button
               type="button"
               onClick={() => setDrawerSubmenu(prev => (prev === 'settings' ? null : 'settings'))}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg transition-all my-1 ${
+              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-200 cursor-pointer ${
                 drawerSubmenu === 'settings'
-                  ? 'bg-[#0055c0] text-white ring-2 ring-blue-300 shadow-md scale-105'
-                  : 'hover:bg-slate-700/70 hover:text-white text-slate-300'
+                  ? 'liquid-btn-primary scale-105'
+                  : 'liquid-btn hover:scale-105'
               }`}
               title="表示・スナップ設定"
             >
-              ⚙️
+              <Settings className="w-5 h-5" />
+            </button>
+
+            {/* Floating Object Control Panel Toggle (Above Dark Mode) */}
+            <button
+              id="panel-toggle-btn"
+              type="button"
+              onClick={() => setShowFloatingPanel(prev => !prev)}
+              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-200 mt-auto cursor-pointer ${
+                showFloatingPanel
+                  ? 'bg-gradient-to-br from-sky-400/25 to-blue-600/25 text-[#007AFF] dark:text-sky-300 border border-blue-400/50 shadow-[0_4px_12px_rgba(0,122,255,0.2),inset_0_1px_1px_rgba(255,255,255,0.7)] scale-105'
+                  : 'liquid-btn opacity-65 hover:opacity-100 hover:scale-105'
+              } active:scale-90`}
+              title={showFloatingPanel ? '操作パネルを非表示' : '操作パネルを表示'}
+            >
+              <Sliders className="w-5 h-5" />
             </button>
 
             {/* Dark Mode Item (Bottom) */}
             <button
               type="button"
               onClick={toggleDarkMode}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg transition-colors mt-auto my-1 ${
+              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-200 cursor-pointer ${
                 isDarkMode
-                  ? 'bg-amber-500/25 text-amber-300 hover:bg-amber-500/35 ring-1 ring-amber-400/40 shadow-inner'
-                  : 'hover:bg-slate-700/70 hover:text-white text-slate-300'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 shadow-[0_4px_12px_rgba(245,158,11,0.2)] hover:scale-105'
+                  : 'liquid-btn hover:scale-105'
               }`}
               title={isDarkMode ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}
             >
-              {isDarkMode ? '☀️' : '🌙'}
+              {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
           </div>
 
-          {/* 1. Scenes List Sub-Panel: Opens from House Icon 🏠 */}
+          {/* 1. Scenes List Sub-Panel: Opens from House Icon (Liquid Glass Flyout) */}
           {drawerSubmenu === 'scenes' && (
-            <div className={`w-80 h-full backdrop-blur-md border-r shadow-2xl flex flex-col p-4 animate-in fade-in slide-in-from-left-2 duration-200 shrink-0 ${
-              isDarkMode ? 'bg-slate-800/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-200 text-slate-800'
+            <div className={`w-80 h-full border-r flex flex-col p-4 animate-in fade-in slide-in-from-left-2 duration-200 shrink-0 ${
+              isDarkMode ? 'liquid-glass-heavy-dark text-slate-100' : 'liquid-glass-heavy text-slate-800'
             }`}>
-              <div className={`flex items-center justify-between pb-3 border-b mb-3 ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+              <div className={`flex items-center justify-between pb-3 border-b mb-3 ${isDarkMode ? 'border-white/12' : 'border-slate-300/60'}`}>
                 <h3 className={`font-bold text-sm flex items-center gap-1.5 ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                  <span>📑</span> 場面一覧 (シーン切替)
+                  <Layers className="w-4 h-4 text-[#007AFF]" /> 場面一覧 (シーン切替)
                 </h3>
                 <button
                   type="button"
                   onClick={() => setDrawerSubmenu(null)}
-                  className={`rounded-md p-1 transition-colors text-xs font-bold ${
-                    isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
-                  }`}
+                  className="rounded-full w-6 h-6 flex items-center justify-center liquid-btn text-xs font-bold text-slate-500 dark:text-slate-300 cursor-pointer"
                   title="閉じる"
                 >
-                  ✕
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 
@@ -2224,15 +2821,15 @@ const StageBuilder: React.FC<Props> = ({
                     <div
                       key={scene.id}
                       onClick={() => handleSwitchScene(scene.id)}
-                      className={`group relative p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      className={`group relative p-3 rounded-2xl border transition-all cursor-pointer ${
                         isActive
-                          ? (isDarkMode ? 'bg-blue-950/80 border-blue-500 shadow-xs ring-1 ring-blue-400' : 'bg-blue-50/90 border-blue-400 shadow-xs ring-1 ring-blue-300')
-                          : (isDarkMode ? 'bg-slate-700/60 hover:bg-slate-700 border-slate-600 hover:border-slate-500 shadow-2xs' : 'bg-white hover:bg-slate-50 border-slate-200 hover:border-slate-300 shadow-2xs')
+                          ? (isDarkMode ? 'bg-[#007AFF]/20 border-[#007AFF] shadow-sm ring-1 ring-[#007AFF]/50' : 'bg-[#007AFF]/10 border-[#007AFF]/50 shadow-sm ring-1 ring-[#007AFF]/30')
+                          : 'liquid-card'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-1.5">
                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                          <span className={`text-xs shrink-0 ${isActive ? 'text-blue-500 font-bold' : (isDarkMode ? 'text-slate-500' : 'text-slate-400')}`}>
+                          <span className={`text-xs shrink-0 ${isActive ? 'text-[#007AFF] font-bold' : (isDarkMode ? 'text-slate-500' : 'text-slate-400')}`}>
                             {isActive ? '●' : '○'}
                           </span>
                           <input
@@ -2240,17 +2837,17 @@ const StageBuilder: React.FC<Props> = ({
                             value={scene.name}
                             onChange={(e) => handleRenameScene(scene.id, e.target.value)}
                             onClick={(e) => e.stopPropagation()}
-                            className={`flex-1 text-xs font-bold px-1.5 py-0.5 rounded border focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors ${
+                            className={`flex-1 text-xs font-bold px-2 py-0.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-colors ${
                               isActive
-                                ? (isDarkMode ? 'bg-slate-800 border-blue-400 text-blue-200 font-bold' : 'bg-white border-blue-200 text-blue-950 font-bold')
+                                ? (isDarkMode ? 'bg-slate-800/80 border-[#007AFF]/50 text-blue-200 font-bold' : 'bg-white/90 border-[#007AFF]/30 text-[#007AFF] font-bold')
                                 : (isDarkMode ? 'bg-transparent border-transparent hover:border-slate-600 text-slate-200' : 'bg-transparent border-transparent hover:border-slate-200 text-slate-800')
                             }`}
                             placeholder="場面名を入力..."
                           />
                         </div>
 
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${
-                          isDarkMode ? 'text-slate-300 bg-slate-800' : 'text-slate-400 bg-slate-100'
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                          isDarkMode ? 'text-slate-300 bg-slate-800/80' : 'text-slate-500 bg-white/80 border border-white/60'
                         }`}>
                           {totalCount}個
                         </span>
@@ -2258,7 +2855,7 @@ const StageBuilder: React.FC<Props> = ({
 
                       {/* Action buttons bar */}
                       <div className={`flex items-center justify-end gap-1 mt-2 pt-1.5 border-t text-[11px] ${
-                        isDarkMode ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-500'
+                        isDarkMode ? 'border-white/10 text-slate-400' : 'border-slate-200/60 text-slate-500'
                       }`}>
                         {/* Move Up */}
                         <button
@@ -2268,12 +2865,12 @@ const StageBuilder: React.FC<Props> = ({
                             e.stopPropagation();
                             handleMoveScene(scene.id, 'up');
                           }}
-                          className={`px-1.5 py-0.5 rounded disabled:opacity-30 disabled:hover:bg-transparent ${
-                            isDarkMode ? 'hover:bg-slate-600' : 'hover:bg-slate-100'
+                          className={`p-1 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent ${
+                            isDarkMode ? 'hover:bg-white/10' : 'hover:bg-white/80'
                           }`}
                           title="上に移動"
                         >
-                          ↑
+                          <ArrowUp className="w-3.5 h-3.5" />
                         </button>
 
                         {/* Move Down */}
@@ -2284,12 +2881,12 @@ const StageBuilder: React.FC<Props> = ({
                             e.stopPropagation();
                             handleMoveScene(scene.id, 'down');
                           }}
-                          className={`px-1.5 py-0.5 rounded disabled:opacity-30 disabled:hover:bg-transparent ${
-                            isDarkMode ? 'hover:bg-slate-600' : 'hover:bg-slate-100'
+                          className={`p-1 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent ${
+                            isDarkMode ? 'hover:bg-white/10' : 'hover:bg-white/80'
                           }`}
                           title="下に移動"
                         >
-                          ↓
+                          <ArrowDown className="w-3.5 h-3.5" />
                         </button>
 
                         {/* Duplicate */}
@@ -2299,12 +2896,12 @@ const StageBuilder: React.FC<Props> = ({
                             e.stopPropagation();
                             handleDuplicateScene(scene.id);
                           }}
-                          className={`px-1.5 py-0.5 rounded ${
-                            isDarkMode ? 'hover:bg-slate-600 hover:text-slate-200' : 'hover:bg-slate-100 hover:text-slate-700'
+                          className={`px-2 py-0.5 rounded-lg flex items-center gap-1 ${
+                            isDarkMode ? 'hover:bg-white/10 hover:text-slate-200' : 'hover:bg-white/80 hover:text-slate-700'
                           }`}
                           title="この場面を複製"
                         >
-                          📋 複製
+                          <Copy className="w-3 h-3" /> 複製
                         </button>
 
                         {/* Delete */}
@@ -2315,12 +2912,12 @@ const StageBuilder: React.FC<Props> = ({
                             e.stopPropagation();
                             handleDeleteScene(scene.id);
                           }}
-                          className={`px-1.5 py-0.5 rounded disabled:opacity-30 disabled:hover:bg-transparent ${
-                            isDarkMode ? 'hover:bg-red-950/50 hover:text-red-400 text-red-400' : 'hover:bg-red-50 hover:text-red-600 text-red-500'
+                          className={`px-2 py-0.5 rounded-lg flex items-center gap-1 disabled:opacity-30 disabled:hover:bg-transparent ${
+                            isDarkMode ? 'hover:bg-rose-950/50 hover:text-rose-400 text-rose-400' : 'hover:bg-rose-50 hover:text-rose-600 text-rose-500'
                           }`}
                           title={scenes.length <= 1 ? '最後のシートは削除できません' : 'この場面を削除'}
                         >
-                          🗑 削除
+                          <Trash2 className="w-3 h-3" /> 削除
                         </button>
                       </div>
                     </div>
@@ -2329,11 +2926,11 @@ const StageBuilder: React.FC<Props> = ({
               </div>
 
               {/* Add New Scene Button */}
-              <div className={`pt-3 mt-auto border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+              <div className={`pt-3 mt-auto border-t ${isDarkMode ? 'border-white/10' : 'border-slate-200/60'}`}>
                 <button
                   type="button"
                   onClick={handleAddScene}
-                  className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs hover:shadow-sm transition-all flex items-center justify-center gap-1.5"
+                  className="liquid-btn-primary w-full py-2.5 px-3 rounded-full text-white font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <span>＋</span>
                   <span>新しい場面を追加</span>
@@ -2342,414 +2939,26 @@ const StageBuilder: React.FC<Props> = ({
             </div>
           )}
 
-          {/* 2. Object Operations Sub-Panel: Opens from Box Icon 📦 */}
-          {drawerSubmenu === 'objects' && (
-            <div className={`w-80 h-full backdrop-blur-md border-r shadow-2xl flex flex-col p-4 animate-in fade-in slide-in-from-left-2 duration-200 shrink-0 ${
-              isDarkMode ? 'bg-slate-900/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-300 text-slate-900'
-            }`}>
-              <div className={`flex items-center justify-between pb-3 border-b mb-3 ${isDarkMode ? 'border-slate-700' : 'border-slate-300'}`}>
-                <h3 className={`font-bold text-sm flex items-center gap-1.5 ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                  <span>📦</span> オブジェクト操作パネル
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setDrawerSubmenu(null)}
-                  className={`rounded-md p-1 transition-colors text-xs font-bold ${
-                    isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                  }`}
-                  title="閉じる"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <p className={`text-[11px] mb-3 leading-snug ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                配置したパーツの固定、重なり順、整列、およびシーン内の全オブジェクトを管理します。
-              </p>
-
-              <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-                {/* 1. 一括選択 & 固定操作 */}
-                <div className="space-y-2">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    選択 & 固定
-                  </span>
-                  <div className="grid grid-cols-2 gap-1.5 text-xs">
-                    <button
-                      type="button"
-                      onClick={handleSelectAll}
-                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
-                        isDarkMode
-                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
-                          : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300'
-                      }`}
-                      title="キャンバス上の全オブジェクトを選択 (Ctrl+A)"
-                    >
-                      全選択 (Ctrl+A)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDeselectAll}
-                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
-                        isDarkMode
-                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
-                          : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300'
-                      }`}
-                      title="選択をすべて解除"
-                    >
-                      選択解除
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleTogglePinSelected}
-                    disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                    className={`w-full py-1.5 px-2.5 rounded-md text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 shadow-2xs ${
-                      (selectedIds.length + selectedCurveIds.length) > 0
-                        ? (isDarkMode
-                            ? 'bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border-blue-600'
-                            : 'bg-blue-50 hover:bg-blue-100 text-[#0055c0] border-blue-300')
-                        : (isDarkMode ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border-slate-700' : 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200')
-                    }`}
-                    title="ドラッグによる誤操作を防ぐため固定します (Ctrl+F)"
-                  >
-                    <span>📌</span>
-                    <span>選択物を固定/解除 (Ctrl+F)</span>
-                  </button>
-
-                  <div className="grid grid-cols-2 gap-1.5 text-xs">
-                    <button
-                      type="button"
-                      onClick={handleDuplicateSelected}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
-                        (selectedIds.length + selectedCurveIds.length) > 0
-                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
-                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
-                      }`}
-                    >
-                      📑 選択物を複製
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDeleteSelected}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
-                        (selectedIds.length + selectedCurveIds.length) > 0
-                          ? (isDarkMode ? 'bg-red-950/50 hover:bg-red-900/60 text-red-300 border-red-800' : 'bg-red-50 hover:bg-red-100 text-red-700 border-red-200')
-                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
-                      }`}
-                    >
-                      🗑 選択物を削除
-                    </button>
-                  </div>
-                </div>
-
-                {/* 2. 重なり順 (Z-Index) */}
-                <div className={`space-y-2 pt-3 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    重なり順 (Z-Index)
-                  </span>
-                  <div className="grid grid-cols-2 gap-1.5 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => handleMoveOrder('front')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
-                        (selectedIds.length + selectedCurveIds.length) > 0
-                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
-                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
-                      }`}
-                      title="最前面へ移動"
-                    >
-                      ↑ 最前面へ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleMoveOrder('forward')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
-                        (selectedIds.length + selectedCurveIds.length) > 0
-                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
-                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
-                      }`}
-                      title="1段階前面へ"
-                    >
-                      ▲ 前面へ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleMoveOrder('backward')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
-                        (selectedIds.length + selectedCurveIds.length) > 0
-                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
-                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
-                      }`}
-                      title="1段階背面へ"
-                    >
-                      ▼ 背面へ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleMoveOrder('back')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1.5 px-2 rounded-md font-medium border text-center transition-colors shadow-2xs ${
-                        (selectedIds.length + selectedCurveIds.length) > 0
-                          ? (isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300')
-                          : (isDarkMode ? 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500' : 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400')
-                      }`}
-                      title="最背面へ移動"
-                    >
-                      ↓ 最背面へ
-                    </button>
-                  </div>
-                </div>
-
-                {/* 3. 整列 & 均等配置 */}
-                <div className={`space-y-2 pt-3 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    整列 & 均等配置
-                  </span>
-                  <div className="grid grid-cols-3 gap-1 text-[11px]">
-                    <button
-                      type="button"
-                      onClick={() => handleAlign('left')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1 px-1 rounded border font-medium text-center ${
-                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
-                      }`}
-                      title="左揃え"
-                    >
-                      ⬅ 左揃え
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAlign('centerH')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1 px-1 rounded border font-medium text-center ${
-                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
-                      }`}
-                      title="水平中央揃え"
-                    >
-                      ⬌ 水平中央
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAlign('right')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1 px-1 rounded border font-medium text-center ${
-                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
-                      }`}
-                      title="右揃え"
-                    >
-                      ➡ 右揃え
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAlign('top')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1 px-1 rounded border font-medium text-center ${
-                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
-                      }`}
-                      title="上揃え"
-                    >
-                      ⬆ 上揃え
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAlign('centerV')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1 px-1 rounded border font-medium text-center ${
-                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
-                      }`}
-                      title="垂直中央揃え"
-                    >
-                      ⬍ 垂直中央
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAlign('bottom')}
-                      disabled={selectedIds.length === 0 && selectedCurveIds.length === 0}
-                      className={`py-1 px-1 rounded border font-medium text-center ${
-                        isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
-                      }`}
-                      title="下揃え"
-                    >
-                      ⬇ 下揃え
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1 text-[11px] pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleAlign('distributeH')}
-                      disabled={(selectedIds.length + selectedCurveIds.length) < 3}
-                      className={`py-1 px-1.5 rounded border font-medium text-center ${
-                        (selectedIds.length + selectedCurveIds.length) >= 3
-                          ? (isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800')
-                          : 'opacity-40 cursor-not-allowed border-slate-300 dark:border-slate-700 text-slate-400'
-                      }`}
-                      title="3つ以上のオブジェクトを水平等間隔に配置"
-                    >
-                      || 左右等間隔
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAlign('distributeV')}
-                      disabled={(selectedIds.length + selectedCurveIds.length) < 3}
-                      className={`py-1 px-1.5 rounded border font-medium text-center ${
-                        (selectedIds.length + selectedCurveIds.length) >= 3
-                          ? (isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-300 text-slate-800')
-                          : 'opacity-40 cursor-not-allowed border-slate-300 dark:border-slate-700 text-slate-400'
-                      }`}
-                      title="3つ以上のオブジェクトを垂直等間隔に配置"
-                    >
-                      = 上下等間隔
-                    </button>
-                  </div>
-                </div>
-
-                {/* 4. 配置済みオブジェクト一覧 (レイヤー管理) */}
-                <div className={`space-y-2 pt-3 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                    <span className="uppercase tracking-wider">
-                      配置済み一覧 ({placedItems.length + curveObjects.length}件)
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-normal">
-                      上ほど前面
-                    </span>
-                  </div>
-
-                  {placedItems.length === 0 && curveObjects.length === 0 ? (
-                    <div className="text-center py-4 text-xs text-slate-400 dark:text-slate-500 border border-dashed rounded-lg">
-                      オブジェクトは配置されていません
-                    </div>
-                  ) : (
-                    <div className="max-h-56 overflow-y-auto space-y-1 pr-1 border rounded-md p-1 bg-slate-50/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700">
-                      {/* We reverse to show front-most items first */}
-                      {[...placedItems].reverse().map((item, idx) => {
-                        const isSelected = selectedIds.includes(item.id);
-                        const tmpl = TEMPLATE_SHAPES.find(t => t.type === item.templateType);
-                        const label = item.templateType ? (tmpl?.label || item.templateType) : (iconLabels[item.iconId] || 'パーツ');
-                        return (
-                          <div
-                            key={item.id}
-                            onClick={() => {
-                              setSelectedIds([item.id]);
-                              setSelectedCurveIds([]);
-                              setSelectedCurveItemId(null);
-                            }}
-                            className={`flex items-center justify-between p-1.5 rounded text-xs cursor-pointer transition-colors border ${
-                              isSelected
-                                ? 'bg-blue-50 dark:bg-blue-900/50 border-blue-400 dark:border-blue-500 text-blue-900 dark:text-blue-100 font-semibold shadow-2xs'
-                                : 'bg-white dark:bg-slate-750 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="text-[10px] text-slate-400 font-mono w-4 shrink-0">
-                                {placedItems.length - idx}.
-                              </span>
-                              <span className="truncate">{label}</span>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={() => handleTogglePinItem(item.id)}
-                                className={`p-1 rounded text-xs transition-colors ${
-                                  item.isPinned
-                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-950/60 font-bold'
-                                    : 'text-slate-400 hover:text-slate-600'
-                                }`}
-                                title={item.isPinned ? '固定解除' : '固定する'}
-                              >
-                                📌
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteItem(item.id)}
-                                className="p-1 rounded text-xs text-slate-400 hover:text-red-600 transition-colors"
-                                title="削除"
-                              >
-                                🗑
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {/* Curve objects */}
-                      {curveObjects.map((curve) => {
-                        const isSelected = selectedCurveIds.includes(curve.id);
-                        return (
-                          <div
-                            key={curve.id}
-                            onClick={() => {
-                              setSelectedCurveIds([curve.id]);
-                              setSelectedIds([]);
-                              setSelectedCurveItemId(null);
-                            }}
-                            className={`flex items-center justify-between p-1.5 rounded text-xs cursor-pointer transition-colors border ${
-                              isSelected
-                                ? 'bg-purple-50 dark:bg-purple-900/50 border-purple-400 dark:border-purple-500 text-purple-900 dark:text-purple-100 font-semibold shadow-2xs'
-                                : 'bg-white dark:bg-slate-750 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="text-purple-600 dark:text-purple-400 text-xs shrink-0">〰</span>
-                              <span className="truncate">ベジェ曲線 ({curve.items?.length || curve.itemCount || 0}個)</span>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={() => handleTogglePinCurve(curve.id)}
-                                className={`p-1 rounded text-xs transition-colors ${
-                                  curve.isPinned
-                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-950/60 font-bold'
-                                    : 'text-slate-400 hover:text-slate-600'
-                                }`}
-                                title={curve.isPinned ? '固定解除' : '固定する'}
-                              >
-                                📌
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteCurve(curve.id)}
-                                className="p-1 rounded text-xs text-slate-400 hover:text-red-600 transition-colors"
-                                title="削除"
-                              >
-                                🗑
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* 2. Snap & Display Settings Sub-Panel: Extends seamlessly from the left drawer menu */}
           {drawerSubmenu === 'settings' && (
             <div
-              className={`w-80 h-full backdrop-blur-md border-r shadow-2xl flex flex-col p-4 animate-in fade-in slide-in-from-left-2 duration-200 shrink-0 ${
-                isDarkMode ? 'bg-slate-800/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-200 text-slate-800'
+              className={`w-80 h-full border-r flex flex-col p-4 animate-in fade-in slide-in-from-left-2 duration-200 shrink-0 ${
+                isDarkMode ? 'liquid-glass-heavy-dark text-slate-100' : 'liquid-glass-heavy text-slate-800'
               }`}
             >
-              <div className={`flex items-center justify-between pb-3 border-b mb-4 ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                <h3 className={`font-bold text-sm flex items-center gap-1.5 ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                  <span>⚙️</span> 表示・スナップ設定
+              <div className={`flex items-center justify-between pb-3 border-b mb-4 ${isDarkMode ? 'border-white/10' : 'border-slate-200/60'}`}>
+                <h3 className={`font-bold text-sm flex items-center gap-1.5 tracking-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                  <Settings className="w-4 h-4 text-[#007AFF]" /> 表示・スナップ設定
                 </h3>
                 <button
                   type="button"
                   onClick={() => setDrawerSubmenu(null)}
-                  className={`rounded-md p-1 transition-colors text-xs font-bold ${
-                    isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                  className={`rounded-full w-6 h-6 flex items-center justify-center transition-colors text-xs font-bold cursor-pointer ${
+                    isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-white/10' : 'text-slate-400 hover:text-slate-600 hover:bg-black/5'
                   }`}
                   title="閉じる"
                 >
-                  ✕
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 
@@ -2757,25 +2966,21 @@ const StageBuilder: React.FC<Props> = ({
                 {/* Grid Settings */}
                 <div className="space-y-2">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">グリッド表示</span>
-                  <label className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition-colors ${
-                    isDarkMode ? 'hover:bg-slate-700/60 border-slate-600 bg-slate-800' : 'hover:bg-slate-50 border-slate-200 bg-white'
-                  }`}>
+                  <label className="liquid-card flex items-center justify-between p-2.5 rounded-2xl cursor-pointer transition-colors">
                     <span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>グリッド (方眼) 表示</span>
                     <input
                       type="checkbox"
                       checked={snapSettings.showGrid}
                       onChange={(e) => setSnapSettings(prev => ({ ...prev, showGrid: e.target.checked }))}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                      className="w-4 h-4 text-[#007AFF] rounded focus:ring-[#007AFF] cursor-pointer"
                     />
                   </label>
 
-                  <div className={`p-2.5 rounded-lg border space-y-2.5 ${
-                    isDarkMode ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'
-                  }`}>
+                  <div className="liquid-card p-3 rounded-2xl space-y-2.5">
                     <div className="flex items-center justify-between text-xs">
                       <span className={`font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>1マスサイズ (1m定義)</span>
-                      <span className={`font-bold px-2 py-0.5 rounded border ${
-                        isDarkMode ? 'text-slate-100 bg-slate-800 border-slate-600' : 'text-slate-800 bg-white border-slate-200'
+                      <span className={`font-bold px-2.5 py-0.5 rounded-full border ${
+                        isDarkMode ? 'text-slate-100 bg-slate-800/80 border-white/10' : 'text-slate-800 bg-white/80 border-slate-200/80'
                       }`}>{snapSettings.gridSize} px</span>
                     </div>
                     <input
@@ -2785,7 +2990,7 @@ const StageBuilder: React.FC<Props> = ({
                       step="5"
                       value={snapSettings.gridSize}
                       onChange={(e) => setSnapSettings(prev => ({ ...prev, gridSize: parseInt(e.target.value, 10) }))}
-                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-[#007AFF]"
                     />
 
                     {/* Measure Scale Button (2 points distance defining meters) */}
@@ -2795,44 +3000,40 @@ const StageBuilder: React.FC<Props> = ({
                         setIsMeasuringScale(true);
                         setDrawerSubmenu(null);
                       }}
-                      className={`w-full py-1.5 px-2.5 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer ${
+                      className={`w-full py-2 px-3 rounded-full border text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer ${
                         isDarkMode
                           ? 'bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 border-indigo-500/50'
-                          : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                          : 'bg-indigo-50/80 hover:bg-indigo-100/90 text-indigo-700 border-indigo-200/80'
                       }`}
                       title="キャンバス上の2点をクリックして、その長さを何メートルにするか定義します"
                     >
-                      <span>📏</span>
+                      <Ruler className="w-3.5 h-3.5" />
                       <span>2点間クリックで1mを定義</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Center Marker Settings */}
-                <div className={`space-y-2 pt-2 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+                <div className={`space-y-2 pt-2 border-t ${isDarkMode ? 'border-white/10' : 'border-slate-200/50'}`}>
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">基準点 (ピンク)</span>
-                  <label className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition-colors ${
-                    isDarkMode ? 'hover:bg-slate-700/60 border-slate-600 bg-slate-800' : 'hover:bg-slate-50 border-slate-200 bg-white'
-                  }`}>
+                  <label className="liquid-card flex items-center justify-between p-2.5 rounded-2xl cursor-pointer transition-colors">
                     <span className={`text-xs font-semibold flex items-center gap-1.5 ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#ff00ff]" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#ff2d55] shadow-xs" />
                       基準点マーカー表示
                     </span>
                     <input
                       type="checkbox"
                       checked={snapSettings.showCenterMarker}
                       onChange={(e) => setSnapSettings(prev => ({ ...prev, showCenterMarker: e.target.checked }))}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                      className="w-4 h-4 text-[#007AFF] rounded focus:ring-[#007AFF] cursor-pointer"
                     />
                   </label>
 
-                  <div className={`p-2.5 rounded-lg border space-y-2.5 ${
-                    isDarkMode ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'
-                  }`}>
+                  <div className="liquid-card p-3 rounded-2xl space-y-2.5">
                     <div className="flex items-center justify-between text-xs">
                       <span className={`font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>基準点マーカー位置</span>
-                      <span className={`font-mono font-bold px-2 py-0.5 rounded border ${
-                        isDarkMode ? 'text-slate-200 bg-slate-800 border-slate-600' : 'text-slate-700 bg-white border-slate-200'
+                      <span className={`font-mono font-bold px-2.5 py-0.5 rounded-full border ${
+                        isDarkMode ? 'text-slate-200 bg-slate-800/80 border-white/10' : 'text-slate-700 bg-white/80 border-slate-200/80'
                       }`}>
                         X: {snapSettings.centerOffset.x}, Y: {snapSettings.centerOffset.y}
                       </span>
@@ -2850,10 +3051,10 @@ const StageBuilder: React.FC<Props> = ({
                           return next;
                         });
                       }}
-                      className={`w-full text-xs font-semibold py-2 px-3 rounded-lg border transition-all flex items-center justify-center gap-2 ${
+                      className={`w-full text-xs font-semibold py-2 px-3 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer ${
                         isMovingCenter
-                          ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-md ring-2 ring-blue-300'
-                          : (isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 shadow-2xs')
+                          ? 'liquid-btn-primary text-white ring-2 ring-[#007AFF]/30'
+                          : 'liquid-btn text-slate-700 dark:text-slate-200'
                       }`}
                     >
                       {isMovingCenter ? (
@@ -2863,7 +3064,7 @@ const StageBuilder: React.FC<Props> = ({
                         </>
                       ) : (
                         <>
-                          <span>📍</span>
+                          <span>◎</span>
                           基準点を移動
                         </>
                       )}
@@ -2880,40 +3081,34 @@ const StageBuilder: React.FC<Props> = ({
                       onClick={() => {
                         setSnapSettings(prev => ({ ...prev, centerOffset: { x: 0, y: 0 } }));
                       }}
-                      className={`w-full text-xs font-semibold py-1.5 rounded transition-colors border shadow-2xs ${
-                        isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
-                      }`}
+                      className="liquid-btn w-full text-xs font-semibold py-1.5 rounded-full transition-colors text-slate-700 dark:text-slate-200 cursor-pointer"
                     >
-                      🎯 基準点を画像中央 (0, 0) に戻す
+                      ⊙ 基準点を画像中央 (0, 0) に戻す
                     </button>
                   </div>
                 </div>
 
                 {/* Snapping Options */}
-                <div className={`space-y-2 pt-2 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+                <div className={`space-y-2 pt-2 border-t ${isDarkMode ? 'border-white/10' : 'border-slate-200/50'}`}>
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">スナップ (吸着) 設定</span>
                   
-                  <label className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition-colors ${
-                    isDarkMode ? 'hover:bg-slate-700/60 border-slate-600 bg-slate-800' : 'hover:bg-slate-50 border-slate-200 bg-white'
-                  }`}>
+                  <label className="liquid-card flex items-center justify-between p-2.5 rounded-2xl cursor-pointer transition-colors">
                     <div className="flex flex-col">
                       <span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>基準点・中心軸スナップ</span>
-                      <span className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-400'}`}>中央揃えのガイド線が吸着表示</span>
+                      <span className="text-[10px] text-slate-400">中央揃えのガイド線が吸着表示</span>
                     </div>
                     <input
                       type="checkbox"
                       checked={snapSettings.snapToCenter}
                       onChange={(e) => setSnapSettings(prev => ({ ...prev, snapToCenter: e.target.checked }))}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                      className="w-4 h-4 text-[#007AFF] rounded focus:ring-[#007AFF] cursor-pointer"
                     />
                   </label>
 
-                  <label className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition-colors ${
-                    isDarkMode ? 'hover:bg-slate-700/60 border-slate-600 bg-slate-800' : 'hover:bg-slate-50 border-slate-200 bg-white'
-                  }`}>
+                  <label className="liquid-card flex items-center justify-between p-2.5 rounded-2xl cursor-pointer transition-colors">
                     <div className="flex flex-col pr-2">
                       <span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>グリッドスナップ</span>
-                      <span className={`text-[10px] leading-tight ${isDarkMode ? 'text-slate-400' : 'text-slate-400'}`}>
+                      <span className="text-[10px] leading-tight text-slate-400">
                         方眼の目盛りに合わせて吸着（CtrlまたはCommandキーを押しながらドラッグでも有効）
                       </span>
                     </div>
@@ -2921,22 +3116,20 @@ const StageBuilder: React.FC<Props> = ({
                       type="checkbox"
                       checked={snapSettings.snapToGrid}
                       onChange={(e) => setSnapSettings(prev => ({ ...prev, snapToGrid: e.target.checked }))}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer shrink-0"
+                      className="w-4 h-4 text-[#007AFF] rounded focus:ring-[#007AFF] cursor-pointer shrink-0"
                     />
                   </label>
 
-                  <label className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition-colors ${
-                    isDarkMode ? 'hover:bg-slate-700/60 border-slate-600 bg-slate-800' : 'hover:bg-slate-50 border-slate-200 bg-white'
-                  }`}>
+                  <label className="liquid-card flex items-center justify-between p-2.5 rounded-2xl cursor-pointer transition-colors">
                     <div className="flex flex-col">
                       <span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>回転角度スナップ</span>
-                      <span className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-400'}`}>45°/90°刻みで自動スナップ</span>
+                      <span className="text-[10px] text-slate-400">45°/90°刻みで自動スナップ</span>
                     </div>
                     <input
                       type="checkbox"
                       checked={snapSettings.snapAngle}
                       onChange={(e) => setSnapSettings(prev => ({ ...prev, snapAngle: e.target.checked }))}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                      className="w-4 h-4 text-[#007AFF] rounded focus:ring-[#007AFF] cursor-pointer"
                     />
                   </label>
                 </div>
@@ -2945,101 +3138,162 @@ const StageBuilder: React.FC<Props> = ({
           )}
         </aside>
 
-        {/* Center Stage Canvas */}
-        <StageCanvas
-          ref={stageCanvasRef}
-          backgroundUrl={backgroundUrl}
-          extractedIcons={extractedIcons}
-          placedItems={placedItems}
-          curveObjects={curveObjects}
-          selectedId={selectedId}
-          selectedCurveId={selectedCurveId}
-          selectedIds={selectedIds}
-          selectedCurveIds={selectedCurveIds}
-          selectedCurveItemId={selectedCurveItemId}
-          onSelectCurveItem={(curveId, itemId) => {
-            setSelectedCurveId(curveId);
-            setSelectedId(null);
-            setSelectedCurveItemId(itemId);
-          }}
-          snapSettings={snapSettings}
-          zoomMultiplier={zoomMultiplier}
-          onZoomChange={setZoomMultiplier}
-          onSelectItem={id => { setSelectedId(id); if (id) { setSelectedCurveId(null); setSelectedCurveItemId(null); } }}
-          onSelectCurve={id => { setSelectedCurveId(id); if (id) setSelectedId(null); if (!id) setSelectedCurveItemId(null); }}
-          onSelectItems={setSelectedIds}
-          onSelectCurves={setSelectedCurveIds}
-          onUpdateItem={handleUpdateItem}
-          onUpdateItems={handleUpdateItems}
-          onUpdateCurve={handleUpdateCurve}
-          onDragStartAction={handleDragStartAction}
-          onDragEndAction={handleDragEndAction}
-          onNudgeItems={handleNudgeItems}
-          onNudgeCurves={handleNudgeCurves}
-          onAddItem={handleAddItem}
-          onDeleteItem={handleDeleteItem}
-          onDeleteSelected={handleDeleteSelected}
-          onDuplicateItem={handleDuplicateItem}
-          onDuplicateSelected={handleDuplicateSelected}
-          onCopySelected={handleCopySelected}
-          onPaste={handlePaste}
-          onUpdateCenterOffset={handleUpdateCenterOffset}
-          isMovingCenter={isMovingCenter}
-          onOpenContextMenu={setContextMenu}
-          isMeasuringScale={isMeasuringScale}
-          onMeasureComplete={(dist) => {
-            setIsMeasuringScale(false);
-            setMeasuredDistance(dist);
-            setMeasureMetersInput('1');
-          }}
-          onCancelMeasure={() => {
-            setIsMeasuringScale(false);
-          }}
-        />
-        
-        {/* Right Panel: Tally / Inspector */}
-        {(selectedIds.length + selectedCurveIds.length) > 0 ? (
-          <ItemInspector
-            key={(selectedIds.length + selectedCurveIds.length) > 1
-              ? `multi-inspect-${selectedIds.length + selectedCurveIds.length}`
-              : (selectedId ? `item-${selectedId}` : (selectedCurveId ? `curve-${selectedCurveId}` : 'single'))}
-            selectedItem={placedItems.find(i => i.id === selectedId) || null}
-            selectedCurve={curveObjects.find(c => c.id === selectedCurveId) || null}
+        {/* Center Stage Canvas & Floating Object Control Panel */}
+        <div className="flex-1 relative flex overflow-hidden">
+          <StageCanvas
+            ref={stageCanvasRef}
+            backgroundUrl={backgroundUrl}
+            extractedIcons={extractedIcons}
+            templateReplacements={effectiveTemplateReplacements}
+            placedItems={placedItems}
+            curveObjects={curveObjects}
+            selectedId={selectedId}
+            selectedCurveId={selectedCurveId}
+            selectedIds={selectedIds}
+            selectedCurveIds={selectedCurveIds}
             selectedCurveItemId={selectedCurveItemId}
-            onSelectCurveItem={setSelectedCurveItemId}
-            selectedCount={selectedIds.length + selectedCurveIds.length}
-            centerPos={stageCanvasRef.current?.getStageCenter()}
+            onSelectCurveItem={(curveId, itemId) => {
+              setSelectedCurveId(curveId);
+              setSelectedId(null);
+              setSelectedCurveItemId(itemId);
+            }}
+            snapSettings={snapSettings}
+            zoomMultiplier={zoomMultiplier}
+            onZoomChange={setZoomMultiplier}
+            onSelectItem={id => { setSelectedId(id); if (id) { setSelectedCurveId(null); setSelectedCurveItemId(null); } }}
+            onSelectCurve={id => { setSelectedCurveId(id); if (id) setSelectedId(null); if (!id) setSelectedCurveItemId(null); }}
+            onSelectItems={setSelectedIds}
+            onSelectCurves={setSelectedCurveIds}
             onUpdateItem={handleUpdateItem}
+            onUpdateItems={handleUpdateItems}
             onUpdateCurve={handleUpdateCurve}
-            onDuplicateItem={handleDuplicateItem}
-            onDuplicateCurve={handleDuplicateCurve}
-            onDuplicateSelected={handleDuplicateSelected}
+            onDragStartAction={handleDragStartAction}
+            onDragEndAction={handleDragEndAction}
+            onNudgeItems={handleNudgeItems}
+            onNudgeCurves={handleNudgeCurves}
+            onAddItem={handleAddItem}
             onDeleteItem={handleDeleteItem}
-            onDeleteCurve={handleDeleteCurve}
+            onDeleteCurveItem={handleDeleteCurveItem}
             onDeleteSelected={handleDeleteSelected}
-            onUpdateAllOfType={handleUpdateAllOfType}
-            onTogglePin={handleTogglePinSelected}
-            onMoveOrder={handleMoveOrder}
-            onAlign={handleAlign}
+            onDuplicateItem={handleDuplicateItem}
+            onDuplicateSelected={handleDuplicateSelected}
+            onCopySelected={handleCopySelected}
+            onPaste={handlePaste}
+            onUpdateCenterOffset={handleUpdateCenterOffset}
+            onMoveCurveItemOrder={handleMoveCurveItemOrder}
+            isMovingCenter={isMovingCenter}
+            onExitMoveCenter={() => {
+              setIsMovingCenter(false);
+              setSnapSettings(s => ({ ...s, showCenterMarker: false }));
+            }}
+            onOpenContextMenu={setContextMenu}
+            isMeasuringScale={isMeasuringScale}
+            onMeasureComplete={(dist) => {
+              setIsMeasuringScale(false);
+              setMeasuredDistance(dist);
+              setMeasureMetersInput('1');
+            }}
+            onCancelMeasure={() => {
+              setIsMeasuringScale(false);
+            }}
+            isCtrlPointSnapped={isCtrlPointSnapped}
+            isCurveMoving={isCurveMoving}
+            onOpenPercussionLabelModal={setPercLabelModalTarget}
           />
-        ) : (
+
+        </div>
+
+        {/* Mobile Dimmed Backdrop for Right Panel */}
+        {showMobileRightPanel && (
           <div
-            key="tally-table-panel"
-            className={`w-64 shrink-0 h-full border-l overflow-hidden flex flex-col transition-colors ${
-              isDarkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
-            }`}
-          >
-            <TallyTable
-              extractedIcons={extractedIcons}
-              placedItems={placedItems}
-              curveObjects={curveObjects}
-              iconLabels={iconLabels}
-              templateReplacements={templateReplacements}
-              onUpdateLabel={handleUpdateLabel}
-              onAddIcon={handleAddItem}
-            />
-          </div>
+            onClick={() => setShowMobileRightPanel(false)}
+            className="md:hidden fixed inset-0 bg-slate-950/40 backdrop-blur-[2px] z-40 animate-in fade-in duration-200"
+          />
         )}
+        
+        {/* Right Panel: Tally / Inspector (Responsive Slide Drawer on Mobile, Fixed on Desktop) */}
+        <aside
+          className={`h-full shrink-0 z-40 transition-transform duration-200 ease-out md:translate-x-0 ${
+            showMobileRightPanel
+              ? 'fixed right-0 top-0 bottom-0 shadow-2xl translate-x-0 flex'
+              : 'hidden md:flex'
+          }`}
+        >
+          {(selectedIds.length + selectedCurveIds.length) > 0 ? (
+            <ItemInspector
+              key={(selectedIds.length + selectedCurveIds.length) > 1
+                ? `multi-inspect-${selectedIds.length + selectedCurveIds.length}`
+                : (selectedId ? `item-${selectedId}` : (selectedCurveId ? `curve-${selectedCurveId}` : 'single'))}
+              selectedItem={placedItems.find(i => i.id === selectedId) || null}
+              selectedCurve={curveObjects.find(c => c.id === selectedCurveId) || null}
+              selectedCurveItemId={selectedCurveItemId}
+              onSelectCurveItem={setSelectedCurveItemId}
+              onMoveCurveItemOrder={handleMoveCurveItemOrder}
+              onDeleteCurveItem={handleDeleteCurveItem}
+              selectedCount={selectedIds.length + selectedCurveIds.length}
+              centerPos={stageCanvasRef.current?.getEffectiveCenter()}
+              onUpdateItem={handleUpdateItem}
+              onUpdateCurve={handleUpdateCurve}
+              onDuplicateItem={handleDuplicateItem}
+              onDuplicateCurve={handleDuplicateCurve}
+              onDuplicateSelected={handleDuplicateSelected}
+              onDeleteItem={handleDeleteItem}
+              onDeleteCurve={handleDeleteCurve}
+              onDeleteSelected={handleDeleteSelected}
+              onUpdateAllOfType={handleUpdateAllOfType}
+              onTogglePin={handleTogglePinSelected}
+              onMoveOrder={handleMoveOrder}
+              onAlign={handleAlign}
+              onOpenPercussionLabelModal={setPercLabelModalTarget}
+              templateReplacements={effectiveTemplateReplacements}
+            />
+          ) : (
+            <div
+              key="tally-table-panel"
+              className="w-64 shrink-0 h-full liquid-glass border-l overflow-hidden flex flex-col transition-colors"
+            >
+              <TallyTable
+                extractedIcons={extractedIcons}
+                placedItems={placedItems}
+                curveObjects={curveObjects}
+                iconLabels={iconLabels}
+                templateReplacements={effectiveTemplateReplacements}
+                onUpdateLabel={handleUpdateLabel}
+                onAddIcon={handleAddItem}
+              />
+            </div>
+          )}
+        </aside>
+
+        {/* Mobile Floating Toggle Button for Right Panel */}
+        <button
+          type="button"
+          onClick={() => setShowMobileRightPanel(prev => !prev)}
+          className="md:hidden fixed bottom-5 right-5 z-30 w-12 h-12 rounded-full liquid-btn-primary text-white shadow-xl flex items-center justify-center cursor-pointer active:scale-90 transition-transform"
+          title="集計・詳細パネルを開閉"
+        >
+          {showMobileRightPanel ? <X className="w-5 h-5" /> : <ClipboardList className="w-5 h-5" />}
+        </button>
+
+        {/* Floating Object Control Panel - Topmost Layer floating over canvas & right inspector */}
+        <FloatingObjectControlPanel
+          isVisible={showFloatingPanel}
+          hasSelection={(selectedIds.length + selectedCurveIds.length) > 0 || !!selectedId || !!selectedCurveId}
+          hasCurveSelection={selectedCurveIds.length > 0 || !!selectedCurveId}
+          selectedCount={(selectedIds.length + selectedCurveIds.length) || (selectedId || selectedCurveId ? 1 : 0)}
+          onNudge={handleNudgeDirection}
+          onRotate={handleRotateSelected}
+          onResize={handleResizeSelected}
+          onRemoteDragStart={handleRemoteDragStart}
+          onRemoteDragMove={handleRemoteDragMove}
+          onRemoteDragEnd={handleRemoteDragEnd}
+          onControlPointDragStart={handleControlPointDragStart}
+          onControlPointDragMove={handleControlPointDragMove}
+          onControlPointDragEnd={handleControlPointDragEnd}
+          isControlPointSnapped={isCtrlPointSnapped}
+          zoomMultiplier={zoomMultiplier}
+          isDarkMode={isDarkMode}
+        />
       </div>
 
       {/* Context Menu */}
@@ -3051,7 +3305,7 @@ const StageBuilder: React.FC<Props> = ({
           selectedCount={selectedIds.length + selectedCurveIds.length}
           extractedIcons={extractedIcons}
           iconLabels={iconLabels}
-          templateReplacements={templateReplacements}
+          templateReplacements={effectiveTemplateReplacements}
           onAddTemplate={(tmplId, x, y) => {
             handleAddItem(tmplId, x, y);
           }}
@@ -3091,24 +3345,24 @@ const StageBuilder: React.FC<Props> = ({
 
       {/* 2-Points Distance Scale Definition Modal (ported from prototype) */}
       {measuredDistance !== null && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 max-w-sm w-full space-y-4 animate-in fade-in zoom-in-95 duration-150 text-slate-800">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">📏</span>
-              <h3 className="font-bold text-base text-slate-800">1マス (1m) の長さを定義</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="liquid-glass-heavy rounded-3xl p-6 max-w-sm w-full space-y-4 animate-in fade-in zoom-in-95 duration-150 text-slate-800 dark:text-slate-100">
+            <div className="flex items-center gap-2.5">
+              <Ruler className="w-5 h-5 text-[#007AFF]" />
+              <h3 className="font-bold text-base tracking-tight">1マス (1m) の長さを定義</h3>
             </div>
             
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1.5">
-              <div className="flex justify-between text-slate-600">
+            <div className="liquid-card rounded-2xl p-3 text-xs space-y-1.5">
+              <div className="flex justify-between text-slate-600 dark:text-slate-300 items-center">
                 <span>計測されたピクセル距離:</span>
-                <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                <span className="font-mono font-bold text-slate-900 dark:text-white bg-white/80 dark:bg-slate-800 px-2.5 py-0.5 rounded-full border border-slate-200/80 dark:border-slate-700">
                   {measuredDistance.toFixed(1)} px
                 </span>
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                 この距離が何メートル (m) にあたるか入力してください:
               </label>
               <div className="flex items-center gap-2">
@@ -3119,27 +3373,27 @@ const StageBuilder: React.FC<Props> = ({
                   max="100"
                   value={measureMetersInput}
                   onChange={e => setMeasureMetersInput(e.target.value)}
-                  className="flex-1 px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="flex-1 px-3 py-2 bg-white/80 dark:bg-slate-800 border border-slate-300/80 dark:border-slate-600 rounded-xl text-sm font-bold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-[#007AFF] focus:outline-none"
                   placeholder="1"
                   autoFocus
                 />
-                <span className="font-bold text-xs text-slate-600 shrink-0">メートル (m)</span>
+                <span className="font-bold text-xs text-slate-600 dark:text-slate-300 shrink-0">メートル (m)</span>
               </div>
               {parseFloat(measureMetersInput) > 0 && (
-                <div className="mt-2 p-2 bg-blue-50 border border-blue-100 rounded-lg text-[11px] text-blue-800 flex items-center justify-between font-medium">
-                  <span>➡️ 1マス (1m定義):</span>
-                  <span className="font-bold text-blue-900 text-xs">
+                <div className="mt-2 p-2.5 bg-[#007AFF]/10 border border-[#007AFF]/20 rounded-xl text-[11px] text-[#007AFF] dark:text-blue-300 flex items-center justify-between font-medium">
+                  <span>→ 1マス (1m定義):</span>
+                  <span className="font-bold text-xs">
                     {Math.max(10, Math.round(measuredDistance / parseFloat(measureMetersInput)))} px
                   </span>
                 </div>
               )}
             </div>
 
-            <div className="flex gap-2 pt-2 border-t border-slate-100">
+            <div className="flex gap-2.5 pt-2 border-t border-slate-200/50 dark:border-white/10">
               <button
                 type="button"
                 onClick={() => setMeasuredDistance(null)}
-                className="flex-1 py-2 px-3 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                className="liquid-btn flex-1 py-2.5 px-3 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
               >
                 キャンセル
               </button>
@@ -3158,13 +3412,45 @@ const StageBuilder: React.FC<Props> = ({
                   }
                 }}
                 disabled={!(parseFloat(measureMetersInput) > 0)}
-                className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                className="liquid-btn-primary flex-1 py-2.5 px-3 disabled:opacity-50 text-white rounded-full text-xs font-bold transition-colors cursor-pointer"
               >
                 確定して適用
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Tap-add Feedback Toast for Mobile & Touch */}
+      {addToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 liquid-glass-heavy text-slate-800 dark:white px-4 py-2 rounded-full text-xs font-bold shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-none">
+          <span className="w-2 h-2 rounded-full bg-[#007AFF] animate-ping" />
+          <span>{addToast}</span>
+        </div>
+      )}
+
+      {/* Percussion & Symbol Label Position, Rotation, Size & Vertical Mode Modal */}
+      {percLabelModalTarget && (
+        <PercussionLabelModal
+          isOpen={Boolean(percLabelModalTarget)}
+          onClose={() => setPercLabelModalTarget(null)}
+          targetType={percLabelModalTarget.targetType || 'percussion'}
+          itemTitle={percLabelModalTarget.canvasName}
+          percussionType={percLabelModalTarget.percussionType}
+          symbolShape={percLabelModalTarget.symbolShape}
+          symbolFilled={percLabelModalTarget.symbolFilled}
+          color={percLabelModalTarget.color}
+          width={percLabelModalTarget.width}
+          height={percLabelModalTarget.height}
+          initialText={percLabelModalTarget.initialText}
+          initialOffsetX={percLabelModalTarget.currentOffsetX}
+          initialOffsetY={percLabelModalTarget.currentOffsetY}
+          initialRotation={percLabelModalTarget.currentRotation}
+          initialFontSize={percLabelModalTarget.currentFontSize}
+          initialLetterSpacing={percLabelModalTarget.currentLetterSpacing}
+          initialIsVertical={percLabelModalTarget.isVertical}
+          onSave={handleSavePercussionLabel}
+        />
       )}
     </div>
   );

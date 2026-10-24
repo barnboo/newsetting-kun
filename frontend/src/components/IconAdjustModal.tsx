@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import type { ExtractedIcon } from '../App';
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Circle, Line, Label, Tag, Text } from 'react-konva';
 import useImage from 'use-image';
@@ -11,10 +12,11 @@ interface Props {
   fileId: string;
   iconLabels?: Record<string, string>;
   onClose: () => void;
+  onBack?: () => void;
   onSave: (newIcons: ExtractedIcon[], newLabels?: Record<string, string>) => void;
 }
 
-const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, fileId, iconLabels, onClose, onSave }) => {
+const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, fileId, iconLabels, onClose, onBack, onSave }) => {
   const [image] = useImage(iconsRegionUrl);
   const [rects, setRects] = useState<ExtractedIcon[]>([]);
   const [labels, setLabels] = useState<Record<string, string>>({});
@@ -28,7 +30,16 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   const [zoomMultiplier, setZoomMultiplier] = useState(1.0);
   const handleZoomIn = () => setZoomMultiplier(prev => Math.min(Number((prev + 0.15).toFixed(2)), 3.0));
   const handleZoomOut = () => setZoomMultiplier(prev => Math.max(Number((prev - 0.15).toFixed(2)), 0.4));
-  const handleZoomReset = () => setZoomMultiplier(1.0);
+  const handleZoomReset = () => {
+    setZoomMultiplier(1.0);
+    if (canvasContainerRef.current) {
+      const container = canvasContainerRef.current;
+      setTimeout(() => {
+        container.scrollLeft = 0;
+        container.scrollTop = 0;
+      }, 0);
+    }
+  };
 
   // Undo / Redo history state
   const historyRef = useRef<ExtractedIcon[][]>([]);
@@ -38,9 +49,17 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   const [canRedo, setCanRedo] = useState(false);
 
   const stageRef = useRef<Konva.Stage>(null);
+  const stageWrapperRef = useRef<HTMLDivElement>(null);
   const trRef = useRef<Konva.Transformer>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const prevDimensionsRef = useRef({ width: 0, height: 0, scale: 1 });
+  const zoomAnchorRef = useRef<{
+    rx: number;
+    ry: number;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
 
   useEffect(() => {
     // Deep copy to avoid mutating props directly
@@ -72,21 +91,90 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     }
   }, [selectedId]);
 
-  // Determine stage dimensions based on window size and image aspect ratio
-  // Deduct 288px for the right-hand parts list panel
-  let baseStageWidth = Math.max(400, window.innerWidth * 0.85 - 288);
-  let baseStageHeight = window.innerHeight * 0.72;
-  let baseScale = 1;
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
-  if (image) {
-    const scaleX = baseStageWidth / image.width;
-    const scaleY = baseStageHeight / image.height;
-    baseScale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
+  useLayoutEffect(() => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) {
+        setContainerSize({
+          width: el.clientWidth,
+          height: el.clientHeight,
+        });
+      }
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(el);
+    window.addEventListener('resize', updateSize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
+
+  // Determine stage dimensions based on container size and image aspect ratio
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const availW = Math.max(200, (containerSize.width > 0 ? containerSize.width : (isMobile ? window.innerWidth - 32 : window.innerWidth * 0.85 - 288)) - 48);
+  const availH = Math.max(200, (containerSize.height > 0 ? containerSize.height : (window.innerHeight * 0.70)) - 48);
+
+  let baseScale = 1;
+  if (image && image.width > 0 && image.height > 0) {
+    const scaleX = availW / image.width;
+    const scaleY = availH / image.height;
+    // 初回表示時（zoomMultiplier: 1.0）は、画像全体（上下左右）が枠内にスクロール不要でぴったり収まる（contain）
+    baseScale = Math.min(scaleX, scaleY);
   }
 
   const effectiveScale = baseScale * zoomMultiplier;
-  const stageWidth = image ? image.width * effectiveScale : baseStageWidth;
-  const stageHeight = image ? image.height * effectiveScale : baseStageHeight;
+  const stageWidth = image ? Math.round(image.width * effectiveScale) : availW;
+  const stageHeight = image ? Math.round(image.height * effectiveScale) : availH;
+
+  // Keep zoom anchor stable so zoomed position stays under finger
+  useLayoutEffect(() => {
+    const prev = prevDimensionsRef.current;
+    prevDimensionsRef.current = { width: stageWidth, height: stageHeight, scale: effectiveScale };
+
+    if (!canvasContainerRef.current || !stageWrapperRef.current) return;
+
+    const container = canvasContainerRef.current;
+    const stageWrapper = stageWrapperRef.current;
+
+    // 新サイズ適用時に同期解除
+    stageWrapper.style.transform = '';
+    stageWrapper.style.transformOrigin = '';
+    stageWrapper.style.willChange = '';
+
+    if (prev.scale === effectiveScale || prev.scale === 0) return;
+
+    const anchor = zoomAnchorRef.current;
+
+    if (anchor) {
+      const targetContentX = stageWrapper.offsetLeft + anchor.rx * stageWidth;
+      const targetContentY = stageWrapper.offsetTop + anchor.ry * stageHeight;
+
+      container.scrollLeft = targetContentX - anchor.clientX;
+      container.scrollTop = targetContentY - anchor.clientY;
+
+      zoomAnchorRef.current = null;
+    } else {
+      const box = container.getBoundingClientRect();
+      const centerX = box.width / 2;
+      const centerY = box.height / 2;
+
+      const prevContentX = container.scrollLeft + centerX;
+      const prevContentY = container.scrollTop + centerY;
+      const rx = (prevContentX - stageWrapper.offsetLeft) / (prev.width || 1);
+      const ry = (prevContentY - stageWrapper.offsetTop) / (prev.height || 1);
+
+      const targetContentX = stageWrapper.offsetLeft + rx * stageWidth;
+      const targetContentY = stageWrapper.offsetTop + ry * stageHeight;
+
+      container.scrollLeft = targetContentX - centerX;
+      container.scrollTop = targetContentY - centerY;
+    }
+  }, [stageWidth, stageHeight, effectiveScale]);
 
   // History push helper
   const pushHistory = (newRects: ExtractedIcon[]) => {
@@ -234,6 +322,137 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     };
   }, []);
 
+  // High-performance Gesture-driven Pinch-to-zoom & 2-finger Pan via GPU CSS Transform
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+
+    let isPinching = false;
+    let startDist = 0;
+    let initialZoom = zoomMultiplier;
+    let startMidX = 0;
+    let startMidY = 0;
+    let currentMidX = 0;
+    let currentMidY = 0;
+    let currentScale = 1.0;
+    let currentDx = 0;
+    let currentDy = 0;
+    let rx = 0.5;
+    let ry = 0.5;
+
+    // Prevent Safari default full-page zoom
+    const preventSafariGestures = (e: Event) => e.preventDefault();
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        setIsDrawing(false);
+        setNewRect(null);
+        isPinching = true;
+
+        const stageWrapper = stageWrapperRef.current;
+        if (!stageWrapper) return;
+
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        startDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        initialZoom = zoomMultiplier;
+        startMidX = (t1.clientX + t2.clientX) / 2;
+        startMidY = (t1.clientY + t2.clientY) / 2;
+        currentMidX = startMidX;
+        currentMidY = startMidY;
+        currentScale = 1.0;
+        currentDx = 0;
+        currentDy = 0;
+
+        const stageRect = stageWrapper.getBoundingClientRect();
+        const originX = startMidX - stageRect.left;
+        const originY = startMidY - stageRect.top;
+        rx = stageRect.width > 0 ? originX / stageRect.width : 0.5;
+        ry = stageRect.height > 0 ? originY / stageRect.height : 0.5;
+
+        stageWrapper.style.transformOrigin = `${originX}px ${originY}px`;
+        stageWrapper.style.willChange = 'transform';
+        stageWrapper.style.transition = 'none';
+
+        e.preventDefault();
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2 && isPinching) {
+        setIsDrawing(false);
+        setNewRect(null);
+
+        const stageWrapper = stageWrapperRef.current;
+        if (!stageWrapper) return;
+
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const curDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        currentMidX = (t1.clientX + t2.clientX) / 2;
+        currentMidY = (t1.clientY + t2.clientY) / 2;
+
+        const rawScale = startDist > 10 ? curDist / startDist : 1.0;
+        const minScale = 0.4 / (initialZoom || 1);
+        const maxScale = 3.0 / (initialZoom || 1);
+        currentScale = Math.min(maxScale, Math.max(minScale, rawScale));
+        currentDx = currentMidX - startMidX;
+        currentDy = currentMidY - startMidY;
+
+        // GPU コンポジタによる直接レンダリング (超高速・完全滑らか)
+        stageWrapper.style.transform = `translate3d(${currentDx}px, ${currentDy}px, 0) scale(${currentScale})`;
+
+        e.preventDefault();
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2 && isPinching) {
+        isPinching = false;
+
+        const stageWrapper = stageWrapperRef.current;
+        if (!stageWrapper) return;
+
+        const finalZoom = Math.min(3.0, Math.max(0.4, Number((initialZoom * currentScale).toFixed(2))));
+
+        if (Math.abs(finalZoom - initialZoom) < 0.02) {
+          stageWrapper.style.transform = '';
+          stageWrapper.style.transformOrigin = '';
+          stageWrapper.style.willChange = '';
+          container.scrollLeft -= currentDx;
+          container.scrollTop -= currentDy;
+        } else {
+          const box = container.getBoundingClientRect();
+          zoomAnchorRef.current = {
+            rx,
+            ry,
+            clientX: currentMidX - box.left,
+            clientY: currentMidY - box.top,
+          };
+          setZoomMultiplier(finalZoom);
+        }
+      }
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchEnd);
+    container.addEventListener('gesturestart', preventSafariGestures);
+    container.addEventListener('gesturechange', preventSafariGestures);
+    container.addEventListener('gestureend', preventSafariGestures);
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchEnd);
+      container.removeEventListener('gesturestart', preventSafariGestures);
+      container.removeEventListener('gesturechange', preventSafariGestures);
+      container.removeEventListener('gestureend', preventSafariGestures);
+    };
+  }, [zoomMultiplier]);
+
   // Mouse wheel zoom (Ctrl/Cmd + wheel)
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -241,6 +460,24 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
+
+        const container = canvasContainerRef.current;
+        const stageWrapper = stageWrapperRef.current;
+        if (!container || !stageWrapper) return;
+
+        const box = container.getBoundingClientRect();
+        const stageRect = stageWrapper.getBoundingClientRect();
+
+        const rx = (e.clientX - stageRect.left) / stageRect.width;
+        const ry = (e.clientY - stageRect.top) / stageRect.height;
+
+        zoomAnchorRef.current = {
+          rx,
+          ry,
+          clientX: e.clientX - box.left,
+          clientY: e.clientY - box.top,
+        };
+
         setZoomMultiplier(prev => {
           const newZoom = e.deltaY < 0 ? prev + 0.15 : prev - 0.15;
           return Math.min(Math.max(Number(newZoom.toFixed(2)), 0.4), 3.0);
@@ -309,6 +546,13 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   }, [selectedId, rects, canUndo, canRedo]);
 
   const handleMouseDown = (e: any) => {
+    // 2本指以上のタッチ操作中は新規枠の描画を行わずピンチズーム/パンを優先し、進行中の描画を即時破棄
+    if (e.evt?.touches && e.evt.touches.length > 1) {
+      setIsDrawing(false);
+      setNewRect(null);
+      return;
+    }
+
     // Middle click is handled by container panning
     if (e.evt && (e.evt.button === 1 || e.evt.buttons === 4)) return;
 
@@ -332,6 +576,11 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   };
 
   const handleMouseMove = (e: any) => {
+    if (e.evt?.touches && e.evt.touches.length > 1) {
+      setIsDrawing(false);
+      setNewRect(null);
+      return;
+    }
     if (!isDrawing || !newRect) return;
     const stage = e.target.getStage();
     const pos = stage?.getPointerPosition();
@@ -347,6 +596,11 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   };
 
   const handleMouseUp = (e?: any) => {
+    if (e?.evt?.touches && e.evt.touches.length > 1) {
+      setIsDrawing(false);
+      setNewRect(null);
+      return;
+    }
     if (e?.evt && (e.evt.button === 1 || e.evt.buttons === 4)) return;
     if (isDrawing && newRect) {
       const x = Math.round(Math.min(newRect.startX, newRect.curX));
@@ -499,15 +753,27 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
   return (
     <div
       onWheel={(e) => e.stopPropagation()}
-      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 bg-slate-900/45 backdrop-blur-md z-50 flex items-center justify-center p-4"
     >
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-7xl flex flex-col h-[88vh]">
+      <div className="liquid-glass-heavy rounded-3xl w-full max-w-7xl flex flex-col h-[88vh] overflow-hidden">
         
-        <div className="p-3.5 px-5 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 shrink-0 bg-white">
+        <div className="p-3.5 px-5 border-b border-slate-200/60 flex flex-wrap justify-between items-center gap-3 shrink-0 bg-white/50">
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onBack || onClose}
+              className="liquid-btn px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 rounded-full transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs hover:scale-102 active:scale-98"
+              title="一つ前の画面に戻る"
+            >
+              <ArrowLeft className="w-4 h-4 text-[#007AFF]" />
+              <span>一つ前の画面に戻る</span>
+            </button>
+
+            <div className="h-5 w-px bg-slate-300/60 mx-0.5" />
+
             <div>
-              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                <span>⚙️</span>
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2 tracking-tight">
+                <span>⚙</span>
                 <span>アイコンの抽出範囲を手動調整</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -516,46 +782,46 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
             </div>
 
             {/* Undo / Redo & Zoom Controls */}
-            <div className="flex items-center gap-1.5 ml-4 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs">
+            <div className="flex items-center gap-1 ml-4 liquid-segment-track p-1 rounded-full text-xs">
               <button
                 type="button"
                 onClick={handleUndo}
                 disabled={!canUndo}
-                className={`p-1.5 rounded transition-colors ${
+                className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
                   canUndo
-                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 cursor-pointer'
+                    ? 'text-slate-700 hover:bg-white/90 hover:text-slate-900 cursor-pointer'
                     : 'text-slate-300 cursor-not-allowed'
                 }`}
                 title={`元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
               >
-                ↩️
+                ↺
               </button>
               <button
                 type="button"
                 onClick={handleRedo}
                 disabled={!canRedo}
-                className={`p-1.5 rounded transition-colors ${
+                className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
                   canRedo
-                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 cursor-pointer'
+                    ? 'text-slate-700 hover:bg-white/90 hover:text-slate-900 cursor-pointer'
                     : 'text-slate-300 cursor-not-allowed'
                 }`}
                 title="やり直し (Ctrl+Y / Ctrl+Shift+Z)"
               >
-                ↪️
+                ↻
               </button>
-              <div className="h-4 w-px bg-slate-300 mx-0.5" />
+              <div className="h-4 w-px bg-slate-300/60 mx-0.5" />
               <button
                 type="button"
                 onClick={handleZoomOut}
-                className="w-7 h-7 flex items-center justify-center hover:bg-white rounded text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
+                className="w-7 h-7 flex items-center justify-center hover:bg-white/90 rounded-full text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
                 title="ズームアウト (Ctrl + -)"
               >
-                ➖
+                −
               </button>
               <button
                 type="button"
                 onClick={handleZoomReset}
-                className="px-2 py-0.5 text-xs font-mono font-bold text-slate-800 hover:bg-white rounded transition-colors cursor-pointer select-none min-w-[3.5rem] text-center"
+                className="px-2 py-0.5 text-xs font-mono font-bold text-slate-800 hover:bg-white/90 rounded-full transition-colors cursor-pointer select-none min-w-[3.5rem] text-center"
                 title="拡大率を100%にリセット"
               >
                 {Math.round(zoomMultiplier * 100)}%
@@ -563,33 +829,34 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
               <button
                 type="button"
                 onClick={handleZoomIn}
-                className="w-7 h-7 flex items-center justify-center hover:bg-white rounded text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
+                className="w-7 h-7 flex items-center justify-center hover:bg-white/90 rounded-full text-slate-700 text-sm font-bold transition-colors cursor-pointer select-none"
                 title="ズームイン (Ctrl + +)"
               >
-                ➕
+                +
               </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button 
               type="button"
-              onClick={onClose}
+              onClick={onBack || onClose}
               translate="no"
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer border border-slate-200 flex items-center gap-1.5 notranslate"
+              className="liquid-btn px-4 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 rounded-full transition-colors cursor-pointer flex items-center gap-1.5 notranslate"
               disabled={isSaving}
+              title="変更を保存せずに前の画面に戻る"
             >
-              <span>✕</span>
-              <span>キャンセル</span>
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>前の画面に戻る</span>
             </button>
             <button 
               onClick={saveAdjustments}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+              className="liquid-btn-primary px-5 py-2 text-white text-xs font-bold rounded-full transition-all cursor-pointer flex items-center gap-1.5"
               disabled={isSaving}
             >
               {isSaving ? (
                 <>
-                  <span className="animate-spin text-xs">⏳</span>
+                  <span className="animate-spin inline-block text-xs font-bold">↻</span>
                   <span>保存中...</span>
                 </>
               ) : (
@@ -601,17 +868,23 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
           {/* Main Canvas Area */}
           <div 
             ref={canvasContainerRef}
-            className="flex-1 overflow-auto bg-slate-100 p-6 flex relative select-none"
+            className="flex-1 overflow-auto bg-slate-100/50 p-3 sm:p-6 flex relative select-none"
+            style={{ touchAction: 'pan-x pan-y' }}
           >
             {!image ? (
               <div className="m-auto text-slate-500 font-medium">画像を読み込み中...</div>
             ) : (
-              <div className="relative shadow-lg border border-gray-300 bg-white m-auto shrink-0" style={{ width: stageWidth, height: stageHeight }}>
-                <Stage 
+              <div className="min-w-full min-h-full w-max h-max flex items-center justify-center p-4 shrink-0 m-auto">
+                <div 
+                  ref={stageWrapperRef}
+                  className="relative shadow-lg border border-gray-300 bg-white shrink-0" 
+                  style={{ width: stageWidth, height: stageHeight }}
+                >
+                  <Stage 
                   ref={stageRef}
                   width={stageWidth} 
                   height={stageHeight}
@@ -620,6 +893,9 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
+                  onTouchStart={handleMouseDown}
+                  onTouchMove={handleMouseMove}
+                  onTouchEnd={handleMouseUp}
                 >
                   <Layer>
                     <KonvaImage 
@@ -646,6 +922,14 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                           draggable
                           onDragEnd={handleDragEnd}
                           onTransformEnd={handleTransformEnd}
+                          onClick={(e) => {
+                            e.cancelBubble = true;
+                            setSelectedId(r.id);
+                          }}
+                          onTap={(e) => {
+                            e.cancelBubble = true;
+                            setSelectedId(r.id);
+                          }}
                           onMouseEnter={() => setHoveredId(r.id)}
                           onMouseLeave={() => setHoveredId(null)}
                         >
@@ -653,9 +937,9 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                           <Rect
                             width={r.rect.width}
                             height={r.rect.height}
-                            stroke={isSelected ? "#3b82f6" : "#22c55e"}
+                            stroke={isSelected ? "#007AFF" : "#10b981"}
                             strokeWidth={2 / effectiveScale}
-                            fill={isSelected ? "rgba(59, 130, 246, 0.2)" : "rgba(34, 197, 94, 0.1)"}
+                            fill={isSelected ? "rgba(0, 122, 255, 0.2)" : "rgba(16, 185, 129, 0.1)"}
                           />
 
                           {/* Part Name Label Badge (Visual identification) */}
@@ -673,7 +957,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                             }}
                           >
                             <Tag
-                              fill={isSelected ? "#2563eb" : isHovered ? "#334155" : "#1e293b"}
+                              fill={isSelected ? "#007AFF" : isHovered ? "#334155" : "#1e293b"}
                               cornerRadius={3 / effectiveScale}
                               opacity={0.92}
                               shadowColor="black"
@@ -745,9 +1029,9 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                         y={Math.min(newRect.startY, newRect.curY)}
                         width={Math.abs(newRect.curX - newRect.startX)}
                         height={Math.abs(newRect.curY - newRect.startY)}
-                        stroke="#3b82f6"
+                        stroke="#007AFF"
                         strokeWidth={2 / effectiveScale}
-                        fill="rgba(59, 130, 246, 0.2)"
+                        fill="rgba(0, 122, 255, 0.2)"
                       />
                     )}
                     
@@ -757,16 +1041,24 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                         if (newBox.width < 10 || newBox.height < 10) return oldBox;
                         return newBox;
                       }}
+                      rotateEnabled={false}
+                      borderStroke="#007AFF"
+                      borderStrokeWidth={typeof window !== 'undefined' && ('ontouchstart' in window || window.innerWidth < 1024) ? 2 : 1.5}
+                      anchorStroke="#007AFF"
+                      anchorFill="#ffffff"
+                      anchorSize={typeof window !== 'undefined' && ('ontouchstart' in window || window.innerWidth < 1024) ? 16 : 8}
+                      anchorCornerRadius={typeof window !== 'undefined' && ('ontouchstart' in window || window.innerWidth < 1024) ? 5 : 2}
                     />
                   </Layer>
                 </Stage>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Right Sidebar: Parts List */}
-          <div className="w-72 border-l border-slate-200 bg-white flex flex-col shrink-0">
-            <div className="p-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+          {/* Right/Bottom Sidebar: Parts List */}
+          <div className="w-full md:w-72 h-48 md:h-auto border-t md:border-t-0 md:border-l border-slate-200/60 bg-white/60 flex flex-col shrink-0">
+            <div className="p-3.5 border-b border-slate-200/60 bg-white/40 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700">パーツ一覧 ({rects.length})</span>
               <span className="text-[10px] text-slate-400">クリックで選択</span>
             </div>
@@ -777,13 +1069,13 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
               if (!selectedItem) return null;
               const currentName = labels[selectedId] || selectedItem.label || '';
               return (
-                <div className="p-3 bg-blue-50/90 border-b border-blue-200 space-y-1.5 shrink-0">
+                <div className="p-3.5 bg-[#007AFF]/8 border-b border-[#007AFF]/20 space-y-1.5 shrink-0">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-blue-900 flex items-center gap-1">
-                      <span>✏️</span>
+                    <span className="text-[11px] font-bold text-[#007AFF] flex items-center gap-1">
+                      <span>✎</span>
                       <span>パーツ名の編集</span>
                     </span>
-                    <span className="text-[10px] text-blue-600 font-mono">
+                    <span className="text-[10px] text-[#007AFF] font-mono">
                       {Math.round(selectedItem.rect.width)} × {Math.round(selectedItem.rect.height)} px
                     </span>
                   </div>
@@ -799,9 +1091,9 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                     value={currentName}
                     onChange={(e) => handleRename(selectedId, e.target.value)}
                     placeholder="パーツ名を入力 (例: 指揮台, ホルン)"
-                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-blue-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-bold text-slate-800 shadow-2xs"
+                    className="w-full px-2.5 py-1.5 text-xs bg-white/90 border border-[#007AFF]/30 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#007AFF]/40 font-bold text-slate-800 shadow-2xs"
                   />
-                  <p className="text-[10px] text-blue-700 leading-tight">
+                  <p className="text-[10px] text-[#007AFF]/80 leading-tight">
                     ※ ここで変更した名称が配置画面や集計表に反映されます
                   </p>
                 </div>
@@ -809,7 +1101,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
             })()}
 
             {/* Parts List */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
               {rects.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-6">
                   枠がありません。<br />キャンバスをドラッグして追加できます。
@@ -822,15 +1114,15 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                     <div
                       key={r.id}
                       onClick={() => setSelectedId(r.id)}
-                      className={`flex items-center justify-between p-2 rounded-lg text-xs cursor-pointer transition-colors ${
+                      className={`flex items-center justify-between p-2.5 rounded-xl text-xs cursor-pointer transition-all ${
                         isSelected
-                          ? 'bg-blue-50 border border-blue-300 text-blue-900 font-bold shadow-2xs'
-                          : 'hover:bg-slate-50 border border-transparent text-slate-700'
+                          ? 'bg-[#007AFF]/12 border border-[#007AFF]/40 text-[#007AFF] font-bold shadow-2xs'
+                          : 'liquid-card text-slate-700'
                       }`}
                     >
                       <div className="flex items-center gap-2 truncate">
-                        <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-bold shrink-0 ${
-                          isSelected ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold shrink-0 ${
+                          isSelected ? 'bg-[#007AFF] text-white' : 'bg-slate-200/80 text-slate-600'
                         }`}>
                           {idx + 1}
                         </span>
@@ -847,7 +1139,7 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                           e.stopPropagation();
                           handleDelete(r.id);
                         }}
-                        className="text-slate-400 hover:text-red-500 hover:bg-red-50 rounded p-1 transition-colors ml-1 shrink-0"
+                        className="text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-full p-1 transition-colors ml-1 shrink-0"
                         title="この枠を削除"
                       >
                         ✕

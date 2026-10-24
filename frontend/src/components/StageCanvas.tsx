@@ -1,11 +1,13 @@
 import React, { useRef, useEffect, useLayoutEffect, useState, forwardRef, useImperativeHandle } from 'react';
-import { Stage, Layer, Image as KonvaImage, Transformer, Path, Circle, Line, Group, Text, Rect } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Transformer, Path, Circle, Ellipse, Line, Group, Text, Rect } from 'react-konva';
 import useImage from 'use-image';
+import { Ruler, X, Check, Copy, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
 import type { ExtractedIcon } from '../App';
 import type Konva from 'konva';
 import { distributeAlongCurve, distributeItemsAlongCurve, getBezierPathData, type CurveObject, type CurveItem } from '../utils/bezierUtils';
-import { TEMPLATE_SHAPES, getTemplateDataUrl, getPercussionDataUrl, getPercussionInfo } from '../utils/templateShapes';
+import { TEMPLATE_SHAPES, getTemplateDataUrl, getPercussionDataUrl, getPercussionInfo, getSymbolDataUrl } from '../utils/templateShapes';
 import { hasStageObjectsInClipboard } from '../utils/clipboard';
+import type { ItemLabelModalTarget } from './PercussionLabelModal';
 
 export interface PlacedItem {
   id: string;
@@ -20,10 +22,16 @@ export interface PlacedItem {
   height: number;
   percussionType?: string;
   showPercussionName?: boolean;
+  labelOffsetX?: number;
+  labelOffsetY?: number;
+  labelRotation?: number;
+  labelFontSize?: number;
+  labelLetterSpacing?: number;
+  isVerticalName?: boolean;
   pianoLidState?: string;
   color?: string;
-  customIconStyle?: 'default' | 'xMark' | 'doubleCircle';
-  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg';
+  customIconStyle?: 'default' | 'xMark' | 'doubleCircle' | 'circlePi';
+  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg' | 'pianoChairPi';
   symbolShape?: 'circle' | 'cross' | 'rect' | 'triangle';
   symbolFilled?: boolean;
   symbolText?: string;
@@ -45,6 +53,8 @@ export interface StageCanvasRef {
   exportStageImage: (options?: { hideCurveLines?: boolean }) => string;
   getStageCenter: () => { x: number; y: number }; // Absolute origin (0, 0) at image center
   getEffectiveCenter: () => { x: number; y: number }; // Center marker position
+  calculateSnapping: (x: number, y: number, isCtrl?: boolean, isShift?: boolean) => { x: number; y: number; snappedX: boolean; snappedY: boolean };
+  setSnapGuides: (guideX: number | null, guideY: number | null) => void;
 }
 
 interface StageCanvasProps {
@@ -58,6 +68,9 @@ interface StageCanvasProps {
   selectedCurveIds?: string[];
   selectedCurveItemId?: string | null;
   onSelectCurveItem?: (curveId: string, itemId: string) => void;
+  onMoveCurveItemOrder?: (curveId: string, itemId: string, direction: 'left' | 'right') => void;
+  isCtrlPointSnapped?: boolean;
+  isCurveMoving?: boolean;
   snapSettings?: SnapSettings;
   zoomMultiplier?: number;
   onZoomChange?: (multiplier: number) => void;
@@ -74,6 +87,7 @@ interface StageCanvasProps {
   onNudgeCurves?: (updates: { id: string; attrs: Partial<CurveObject> }[]) => void;
   onAddItem: (iconId: string, x: number, y: number) => void;
   onDeleteItem: (id: string) => void;
+  onDeleteCurveItem?: (curveId: string, itemId: string) => void;
   onDeleteSelected?: () => void;
   onDuplicateItem: (id: string) => void;
   onDuplicateSelected?: () => void;
@@ -81,6 +95,7 @@ interface StageCanvasProps {
   onPaste?: () => void;
   onUpdateCenterOffset?: (offset: { x: number; y: number }) => void;
   isMovingCenter?: boolean;
+  onExitMoveCenter?: () => void;
   onOpenContextMenu?: (info: {
     x: number;
     y: number;
@@ -91,6 +106,8 @@ interface StageCanvasProps {
   isMeasuringScale?: boolean;
   onMeasureComplete?: (dist: number) => void;
   onCancelMeasure?: () => void;
+  onOpenPercussionLabelModal?: (target: ItemLabelModalTarget) => void;
+  templateReplacements?: Record<string, string>;
 }
 
 // Helper function to calculate snapping for both items and curves
@@ -99,7 +116,7 @@ function calculateSnapping({
   y,
   snapSettings,
   effectiveCenter,
-  bgCenter,
+  bgCenter: _bgCenter,
   isCtrl,
   isShift,
 }: {
@@ -107,7 +124,7 @@ function calculateSnapping({
   y: number;
   snapSettings?: SnapSettings;
   effectiveCenter: { x: number; y: number };
-  bgCenter: { x: number; y: number };
+  bgCenter?: { x: number; y: number };
   isCtrl: boolean;
   isShift: boolean;
 }): { x: number; y: number; snappedX: boolean; snappedY: boolean } {
@@ -149,16 +166,13 @@ function calculateSnapping({
       }
     }
 
-    // 2. Snap to Center Marker / Image Center (when not forced grid snap and not holding Shift)
+    // 2. Snap to Center Marker / Effective Center (when not forced grid snap and not holding Shift)
     if (snapToCenter && !isCtrl && !isShift) {
       const threshold = 15;
-      // Snap to Center Marker
+      // Snap to Center Marker (effectiveCenter)
       if (!snappedX) {
         if (Math.abs(newX - originX) < threshold) {
           newX = originX;
-          snappedX = true;
-        } else if (Math.abs(newX - bgCenter.x) < threshold) {
-          newX = bgCenter.x;
           snappedX = true;
         }
       }
@@ -166,9 +180,6 @@ function calculateSnapping({
       if (!snappedY) {
         if (Math.abs(newY - originY) < threshold) {
           newY = originY;
-          snappedY = true;
-        } else if (Math.abs(newY - bgCenter.y) < threshold) {
-          newY = bgCenter.y;
           snappedY = true;
         }
       }
@@ -190,19 +201,19 @@ function renderSymbolShape(
   const strokeWidth = 2.5;
 
   const pad = 3;
-  const w = width - pad * 2;
-  const h = height - pad * 2;
+  const w = Math.max(10, width - pad * 2);
+  const h = Math.max(10, height - pad * 2);
   const cx = width / 2;
   const cy = height / 2;
-  const r = Math.min(w, h) / 2;
 
   switch (shape) {
     case 'circle':
       return (
-        <Circle
+        <Ellipse
           x={cx}
           y={cy}
-          radius={r}
+          radiusX={w / 2}
+          radiusY={h / 2}
           fill={fillColor}
           stroke={strokeColor}
           strokeWidth={strokeWidth}
@@ -236,19 +247,43 @@ function renderSymbolShape(
         />
       );
     case 'cross': {
-      const d = r * 0.35;
+      if (!filled) {
+        const spanX = (w / 2) * 0.85;
+        const spanY = (h / 2) * 0.85;
+        return (
+          <Group listening={false}>
+            <Line
+              points={[cx - spanX, cy - spanY, cx + spanX, cy + spanY]}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth + 0.8}
+              lineCap="round"
+              listening={false}
+            />
+            <Line
+              points={[cx + spanX, cy - spanY, cx - spanX, cy + spanY]}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth + 0.8}
+              lineCap="round"
+              listening={false}
+            />
+          </Group>
+        );
+      }
+      const rx = w / 2;
+      const ry = h / 2;
+      const d = 0.35;
       const rawPoints = [
-        -d, -r,
-        d, -r,
+        -d, -1,
+        d, -1,
         d, -d,
-        r, -d,
-        r, d,
+        1, -d,
+        1, d,
         d, d,
-        d, r,
-        -d, r,
+        d, 1,
+        -d, 1,
         -d, d,
-        -r, d,
-        -r, -d,
+        -1, d,
+        -1, -d,
         -d, -d,
       ];
       const cos45 = Math.SQRT1_2;
@@ -257,9 +292,9 @@ function renderSymbolShape(
       for (let i = 0; i < rawPoints.length; i += 2) {
         const px = rawPoints[i];
         const py = rawPoints[i + 1];
-        const rx = cx + (px * cos45 - py * sin45);
-        const ry = cy + (px * sin45 + py * cos45);
-        rotatedPoints.push(rx, ry);
+        const nx = px * cos45 - py * sin45;
+        const ny = px * sin45 + py * cos45;
+        rotatedPoints.push(cx + nx * rx, cy + ny * ry);
       }
       return (
         <Line
@@ -278,50 +313,128 @@ function renderSymbolShape(
   }
 }
 
-function renderSymbolText(
-  text: string | undefined,
-  shape: 'circle' | 'cross' | 'rect' | 'triangle' = 'circle',
-  filled: boolean = false,
-  fontSize: number = 16,
-  color: string = '#000000',
-  width: number,
-  height: number
-) {
+function renderItemLabel(options: {
+  text: string | undefined;
+  width: number;
+  height: number;
+  color: string;
+  offsetX?: number;
+  offsetY?: number;
+  rotation?: number;
+  fontSize?: number;
+  letterSpacing?: number;
+  isVertical?: boolean;
+  shape?: 'circle' | 'cross' | 'rect' | 'triangle';
+  filled?: boolean;
+  isSymbol?: boolean;
+  parentScaleX?: number;
+  parentScaleY?: number;
+}) {
+  const {
+    text,
+    width,
+    height,
+    color,
+    offsetX = 0,
+    offsetY = 0,
+    rotation = 0,
+    fontSize: customFontSize,
+    letterSpacing = 0,
+    isVertical = false,
+    shape,
+    filled = false,
+    isSymbol = false,
+    parentScaleX = 1,
+    parentScaleY = 1,
+  } = options;
+
   if (!text) return null;
 
-  const textColor = filled ? '#ffffff' : color;
-  const cx = width / 2;
-  const cy = shape === 'triangle' ? height * 0.58 : height / 2;
+  const textColor = isSymbol && filled ? '#ffffff' : color;
+  const displayText = isVertical
+    ? text.split('').map(c => (c === 'ー' || c === '―' ? '丨' : c)).join('\n')
+    : text;
 
-  let availableWidth = width * 0.72;
-  if (shape === 'rect') availableWidth = width * 0.85;
-  if (shape === 'triangle') availableWidth = width * 0.62;
-  if (shape === 'cross') availableWidth = width * 0.68;
-
-  let approxTextWidth = 0;
-  for (let i = 0; i < text.length; i++) {
-    approxTextWidth += text.charCodeAt(i) > 255 ? fontSize : fontSize * 0.55;
+  let effectiveFontSize: number;
+  if (customFontSize && customFontSize > 0) {
+    effectiveFontSize = customFontSize;
+  } else if (isSymbol) {
+    // 縦横比が変更されても、短辺を基準にして図形内に美しく収まるフォントサイズを算出
+    const minDim = Math.min(width, height);
+    let factor = 0.72;
+    if (shape === 'rect') factor = 0.85;
+    if (shape === 'triangle') factor = 0.60;
+    if (shape === 'cross') factor = 0.68;
+    const availableDim = minDim * factor;
+    effectiveFontSize = Math.max(8, Math.min(26, availableDim / Math.max(text.length * 0.65, 1)));
+  } else {
+    const maxFontByW = isVertical
+      ? width * 0.42
+      : (width * 0.95) / Math.max(text.length * 0.62, 1);
+    const maxFontByH = isVertical
+      ? (height * 0.95) / Math.max(text.length * 1.05, 1)
+      : height * 0.42;
+    effectiveFontSize = Math.max(8, Math.min(maxFontByW, maxFontByH, 20));
   }
 
-  const scaleX = approxTextWidth > availableWidth ? Math.max(0.15, availableWidth / approxTextWidth) : 1;
-  const boxWidth = availableWidth / scaleX;
+  const cx = width / 2 + offsetX;
+  const cy = (isSymbol && shape === 'triangle' && offsetY === 0)
+    ? height * 0.58 + offsetY
+    : height / 2 + offsetY;
+
+  const lineCount = isVertical ? text.length : 1;
+  const extraSpacingW = isVertical ? 0 : Math.max(0, (text.length - 1) * letterSpacing);
+  const extraSpacingH = isVertical ? Math.max(0, (lineCount - 1) * letterSpacing) : 0;
+
+  // 日本語全角文字（1.1em〜1.2em）や太字の幅、letterSpacingを十分にカバーし最後の文字が切れるのを防止
+  const safeCharWidth = isVertical ? effectiveFontSize * 1.25 : effectiveFontSize * 1.35;
+  const contentW = isVertical
+    ? effectiveFontSize * 1.8
+    : Math.max(width * 1.2, text.length * safeCharWidth + extraSpacingW + 24);
+  const contentH = isVertical
+    ? lineCount * effectiveFontSize * 1.35 + extraSpacingH + 16
+    : Math.max(height * 1.2, effectiveFontSize * 1.6);
+
+  const boxW = Math.max(16, contentW);
+  const boxH = Math.max(16, contentH);
+
+  const verticalLineHeight = isVertical
+    ? (effectiveFontSize > 0 ? (effectiveFontSize * 1.15 + letterSpacing) / effectiveFontSize : 1.15)
+    : 1;
+
+  // 親グループのスケール歪みを打ち消す逆スケール（文字の縦横比1:1を完全に維持）
+  const invScaleX = (parentScaleX && parentScaleX !== 0) ? (1 / parentScaleX) : 1;
+  const invScaleY = (parentScaleY && parentScaleY !== 0) ? (1 / parentScaleY) : 1;
 
   return (
-    <Text
-      text={text}
-      x={cx - availableWidth / 2}
-      y={cy - (fontSize * 1.2) / 2}
-      width={boxWidth}
-      height={fontSize * 1.2}
-      fontSize={fontSize}
-      fontFamily="Arial, sans-serif"
-      fontStyle="bold"
-      align="center"
-      verticalAlign="middle"
-      fill={textColor}
-      scaleX={scaleX}
+    <Group
+      name="symbol-text-group"
+      x={cx}
+      y={cy}
+      rotation={rotation}
+      scaleX={invScaleX}
+      scaleY={invScaleY}
       listening={false}
-    />
+    >
+      <Text
+        text={displayText}
+        x={-boxW / 2}
+        y={-boxH / 2}
+        width={boxW}
+        height={boxH}
+        fontSize={effectiveFontSize}
+        fontFamily="'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif"
+        fontStyle="bold"
+        letterSpacing={isVertical ? 0 : letterSpacing}
+        lineHeight={verticalLineHeight}
+        align="center"
+        verticalAlign="middle"
+        wrap="none"
+        ellipsis={false}
+        fill={textColor}
+        listening={false}
+      />
+    </Group>
   );
 }
 
@@ -331,20 +444,30 @@ const CanvasItem: React.FC<{
   iconUrl: string;
   isSelected?: boolean;
   activeItemIds?: string[];
+  activeCurveIds?: string[];
   snapSettings?: SnapSettings;
+  templateReplacements?: Record<string, string>;
   bgCenter: { x: number; y: number };
   effectiveCenter: { x: number; y: number };
-  onSelect: (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
+  onSelect: (e?: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onChange: (newAttrs: Partial<PlacedItem>) => void;
   onUpdateItems?: (updates: { id: string; attrs: Partial<PlacedItem> }[]) => void;
+  onUpdateCurve?: (id: string, newCurve: Partial<CurveObject>, skipHistory?: boolean) => void;
   onDragStartAction?: () => void;
   onDragEndAction?: () => void;
   onSnapGuideChange?: (guideX: number | null, guideY: number | null) => void;
-}> = ({ item, iconUrl, isSelected, activeItemIds, snapSettings, bgCenter, effectiveCenter, onSelect, onChange, onUpdateItems, onDragStartAction, onDragEndAction, onSnapGuideChange }) => {
+  onOpenPercussionLabelModal?: (target: ItemLabelModalTarget) => void;
+}> = ({ item, iconUrl, isSelected, activeItemIds, activeCurveIds, snapSettings, templateReplacements, bgCenter, effectiveCenter, onSelect, onChange, onUpdateItems, onUpdateCurve, onDragStartAction, onDragEndAction, onSnapGuideChange, onOpenPercussionLabelModal }) => {
   const [image] = useImage(iconUrl, 'anonymous');
   const groupRef = useRef<Konva.Group>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const multiDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const multiCurveDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  const matchedTmplId = templateReplacements?.[item.iconId];
+  const isSymbol = item.templateType === 'symbol' ||
+                   matchedTmplId === 'tmpl_symbol' ||
+                   (matchedTmplId?.replace(/^tmpl_/, '') === 'symbol');
 
   const isPerc = item.templateType === 'percussion' || Boolean(item.percussionType);
   const percInfo = isPerc ? getPercussionInfo(item.percussionType) : null;
@@ -363,6 +486,88 @@ const CanvasItem: React.FC<{
     }
   }, [needsAspectCorrection, effectiveWidth, effectiveHeight]);
 
+  // Transformer の選択枠が文字ラベルや装飾に引っ張られて肥大化しないよう、本体サイズで境界を固定
+  useLayoutEffect(() => {
+    const node = groupRef.current;
+    if (!node) return;
+    node.getClientRect = (config?: { skipTransform?: boolean; relativeTo?: Konva.Node }) => {
+      const skipTransform = config?.skipTransform;
+      const relativeTo = config?.relativeTo;
+      const w = effectiveWidth;
+      const h = effectiveHeight;
+
+      if (skipTransform) {
+        return { x: 0, y: 0, width: w, height: h };
+      }
+
+      const transform = relativeTo
+        ? node.getTransform().copy().multiply(relativeTo.getAbsoluteTransform().copy().invert())
+        : node.getAbsoluteTransform();
+
+      const points = [
+        transform.point({ x: 0, y: 0 }),
+        transform.point({ x: w, y: 0 }),
+        transform.point({ x: w, y: h }),
+        transform.point({ x: 0, y: h }),
+      ];
+
+      const xs = points.map(p => p.x);
+      const ys = points.map(p => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+
+      return {
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY,
+      };
+    };
+  }, [effectiveWidth, effectiveHeight]);
+
+  const handleOpenLabelModal = () => {
+    if (isSymbol) {
+      onOpenPercussionLabelModal?.({
+        type: 'placedItem',
+        itemId: item.id,
+        targetType: 'symbol',
+        canvasName: '記号テキスト',
+        symbolShape: item.symbolShape || 'circle',
+        symbolFilled: Boolean(item.symbolFilled),
+        initialText: item.symbolText || '',
+        width: effectiveWidth,
+        height: effectiveHeight,
+        color: item.color,
+        currentOffsetX: item.labelOffsetX || 0,
+        currentOffsetY: item.labelOffsetY || 0,
+        currentRotation: item.labelRotation || 0,
+        currentFontSize: item.labelFontSize || item.symbolFontSize,
+        currentLetterSpacing: item.labelLetterSpacing || 0,
+        isVertical: Boolean(item.isVerticalName),
+      });
+    } else if (isPerc) {
+      onOpenPercussionLabelModal?.({
+        type: 'placedItem',
+        itemId: item.id,
+        targetType: 'percussion',
+        canvasName: percInfo?.canvasName || item.percussionType || '打楽器',
+        percussionType: item.percussionType || 'ティンパニ',
+        initialText: percInfo?.canvasName || '',
+        width: effectiveWidth,
+        height: effectiveHeight,
+        color: item.color,
+        currentOffsetX: item.labelOffsetX || 0,
+        currentOffsetY: item.labelOffsetY || 0,
+        currentRotation: item.labelRotation || 0,
+        currentFontSize: item.labelFontSize,
+        currentLetterSpacing: item.labelLetterSpacing || 0,
+        isVertical: Boolean(item.isVerticalName),
+      });
+    }
+  };
+
   return (
     <Group
       ref={groupRef}
@@ -380,25 +585,36 @@ const CanvasItem: React.FC<{
       onClick={(e) => { e.cancelBubble = true; onSelect(e); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(e); }}
       onDblClick={(e) => {
-        if (item.templateType === 'symbol') {
+        if (isSymbol || isPerc) {
           e.cancelBubble = true;
-          const next = window.prompt('記号内の文字を入力してください:', item.symbolText || '');
-          if (next !== null) {
-            onChange({ symbolText: next });
-          }
+          handleOpenLabelModal();
+        }
+      }}
+      onDblTap={(e) => {
+        if (isSymbol || isPerc) {
+          e.cancelBubble = true;
+          handleOpenLabelModal();
         }
       }}
       onDragStart={(e) => {
         onDragStartAction?.();
         dragStartPosRef.current = { x: e.target.x(), y: e.target.y() };
-        if (isSelected && activeItemIds && activeItemIds.length > 1) {
+        const totalSelected = (activeItemIds?.length || 0) + (activeCurveIds?.length || 0);
+        if (isSelected && totalSelected > 1) {
           multiDragStartRef.current.clear();
+          multiCurveDragStartRef.current.clear();
           const stage = e.target.getStage();
           if (stage) {
-            activeItemIds.forEach(id => {
+            activeItemIds?.forEach(id => {
               const node = stage.findOne(`#${id}`);
               if (node && node.draggable()) {
                 multiDragStartRef.current.set(id, { x: node.x(), y: node.y() });
+              }
+            });
+            activeCurveIds?.forEach(id => {
+              const node = stage.findOne(`#${id}`);
+              if (node && node.draggable()) {
+                multiCurveDragStartRef.current.set(id, { x: node.x(), y: node.y() });
               }
             });
           }
@@ -422,8 +638,9 @@ const CanvasItem: React.FC<{
         e.target.y(snap.y);
         onSnapGuideChange?.(snap.snappedX ? snap.x : null, snap.snappedY ? snap.y : null);
 
-        // If part of multi-selection, translate other selected items
-        if (isSelected && activeItemIds && activeItemIds.length > 1 && dragStartPosRef.current) {
+        // If part of multi-selection, translate other selected items & curves
+        const totalSelected = (activeItemIds?.length || 0) + (activeCurveIds?.length || 0);
+        if (isSelected && totalSelected > 1 && dragStartPosRef.current) {
           const dx = snap.x - dragStartPosRef.current.x;
           const dy = snap.y - dragStartPosRef.current.y;
           const stage = e.target.getStage();
@@ -437,20 +654,36 @@ const CanvasItem: React.FC<{
                 }
               }
             });
+            multiCurveDragStartRef.current.forEach((startPos, id) => {
+              const node = stage.findOne(`#${id}`);
+              if (node) {
+                node.x(startPos.x + dx);
+                node.y(startPos.y + dy);
+              }
+            });
           }
         }
       }}
       onDragEnd={(e) => {
         onSnapGuideChange?.(null, null);
-        if (isSelected && activeItemIds && activeItemIds.length > 1 && dragStartPosRef.current && onUpdateItems) {
+        const totalSelected = (activeItemIds?.length || 0) + (activeCurveIds?.length || 0);
+        if (isSelected && totalSelected > 1 && dragStartPosRef.current) {
           const dx = e.target.x() - dragStartPosRef.current.x;
           const dy = e.target.y() - dragStartPosRef.current.y;
-          const updates: { id: string; attrs: Partial<PlacedItem> }[] = [];
-          multiDragStartRef.current.forEach((startPos, id) => {
-            updates.push({ id, attrs: { x: startPos.x + dx, y: startPos.y + dy } });
-          });
-          onUpdateItems(updates);
+          if (onUpdateItems && multiDragStartRef.current.size > 0) {
+            const updates: { id: string; attrs: Partial<PlacedItem> }[] = [];
+            multiDragStartRef.current.forEach((startPos, id) => {
+              updates.push({ id, attrs: { x: startPos.x + dx, y: startPos.y + dy } });
+            });
+            onUpdateItems(updates);
+          }
+          if (onUpdateCurve && multiCurveDragStartRef.current.size > 0) {
+            multiCurveDragStartRef.current.forEach((startPos, id) => {
+              onUpdateCurve(id, { x: startPos.x + dx, y: startPos.y + dy }, true);
+            });
+          }
           multiDragStartRef.current.clear();
+          multiCurveDragStartRef.current.clear();
         } else {
           onChange({ x: e.target.x(), y: e.target.y() });
         }
@@ -460,10 +693,44 @@ const CanvasItem: React.FC<{
       onTransformStart={() => {
         onDragStartAction?.();
       }}
+      onTransform={() => {
+        const node = groupRef.current;
+        if (!node) return;
+        if (isSymbol) {
+          const textGroup = node.findOne('.symbol-text-group');
+          if (textGroup) {
+            textGroup.scaleX(1 / (node.scaleX() || 1));
+            textGroup.scaleY(1 / (node.scaleY() || 1));
+          }
+        }
+      }}
       onTransformEnd={() => {
         const node = groupRef.current;
         if (!node) return;
-        onChange({ x: node.x(), y: node.y(), rotation: node.rotation(), scaleX: node.scaleX(), scaleY: node.scaleY() });
+        if (isSymbol) {
+          const sx = node.scaleX();
+          const sy = node.scaleY();
+          const newWidth = Math.max(10, Math.round(item.width * sx));
+          const newHeight = Math.max(10, Math.round(item.height * sy));
+          node.scaleX(1);
+          node.scaleY(1);
+          const textGroup = node.findOne('.symbol-text-group');
+          if (textGroup) {
+            textGroup.scaleX(1);
+            textGroup.scaleY(1);
+          }
+          onChange({
+            x: node.x(),
+            y: node.y(),
+            rotation: node.rotation(),
+            width: newWidth,
+            height: newHeight,
+            scaleX: 1,
+            scaleY: 1,
+          });
+        } else {
+          onChange({ x: node.x(), y: node.y(), rotation: node.rotation(), scaleX: node.scaleX(), scaleY: node.scaleY() });
+        }
         onDragEndAction?.();
       }}
     >
@@ -475,96 +742,43 @@ const CanvasItem: React.FC<{
         fill="transparent"
       />
 
-      {/* Visual selection outline & highlight on every selected item */}
-      {isSelected && (
-        <>
+      {/* Visual selection highlight on multiple selected items (Transformer provides the bounding box, so no redundant outer stroke) */}
+      {isSelected && activeItemIds && activeItemIds.length > 1 && (
+        <Group name="canvas-item-selection-outline" listening={false}>
           <Rect
-            x={-3}
-            y={-3}
-            width={effectiveWidth + 6}
-            height={effectiveHeight + 6}
-            fill={activeItemIds && activeItemIds.length > 1 ? 'rgba(37, 99, 235, 0.18)' : 'rgba(37, 99, 235, 0.08)'}
-            stroke="#2563eb"
-            strokeWidth={1.8}
-            cornerRadius={4}
-            dash={activeItemIds && activeItemIds.length > 1 ? [5, 3] : undefined}
+            x={0}
+            y={0}
+            width={effectiveWidth}
+            height={effectiveHeight}
+            fill="rgba(37, 99, 235, 0.12)"
             listening={false}
           />
-          {activeItemIds && activeItemIds.length > 1 && (
-            <>
-              {/* Corner mini handles */}
-              <Rect
-                x={-5}
-                y={-5}
-                width={5}
-                height={5}
-                fill="#ffffff"
-                stroke="#2563eb"
-                strokeWidth={1.2}
-                cornerRadius={1}
-                listening={false}
-              />
-              <Rect
-                x={effectiveWidth}
-                y={-5}
-                width={5}
-                height={5}
-                fill="#ffffff"
-                stroke="#2563eb"
-                strokeWidth={1.2}
-                cornerRadius={1}
-                listening={false}
-              />
-              <Rect
-                x={-5}
-                y={effectiveHeight}
-                width={5}
-                height={5}
-                fill="#ffffff"
-                stroke="#2563eb"
-                strokeWidth={1.2}
-                cornerRadius={1}
-                listening={false}
-              />
-              <Rect
-                x={effectiveWidth}
-                y={effectiveHeight}
-                width={5}
-                height={5}
-                fill="#ffffff"
-                stroke="#2563eb"
-                strokeWidth={1.2}
-                cornerRadius={1}
-                listening={false}
-              />
-              {/* Distinct Checkmark Badge on top-right */}
-              <Group x={effectiveWidth + 2} y={-5} listening={false}>
-                <Circle
-                  radius={7}
-                  fill="#2563eb"
-                  stroke="#ffffff"
-                  strokeWidth={1.5}
-                />
-                <Text
-                  text="✓"
-                  x={-5}
-                  y={-5}
-                  width={10}
-                  height={10}
-                  fontSize={8}
-                  fontFamily="sans-serif"
-                  fontStyle="bold"
-                  align="center"
-                  verticalAlign="middle"
-                  fill="#ffffff"
-                />
-              </Group>
-            </>
-          )}
-        </>
+          {/* Distinct Checkmark Badge on top-right */}
+          <Group x={effectiveWidth + 2} y={-5} listening={false}>
+            <Circle
+              radius={7}
+              fill="#2563eb"
+              stroke="#ffffff"
+              strokeWidth={1.5}
+            />
+            <Text
+              text="✓"
+              x={-5}
+              y={-5}
+              width={10}
+              height={10}
+              fontSize={8}
+              fontFamily="sans-serif"
+              fontStyle="bold"
+              align="center"
+              verticalAlign="middle"
+              fill="#ffffff"
+            />
+          </Group>
+        </Group>
       )}
 
-      {item.templateType === 'symbol' ? (
+      {isSymbol ? (
         <Group listening={false}>
           {renderSymbolShape(
             item.symbolShape,
@@ -573,15 +787,23 @@ const CanvasItem: React.FC<{
             effectiveWidth,
             effectiveHeight
           )}
-          {renderSymbolText(
-            item.symbolText,
-            item.symbolShape,
-            item.symbolFilled,
-            item.symbolFontSize,
-            item.color || '#000000',
-            effectiveWidth,
-            effectiveHeight
-          )}
+          {renderItemLabel({
+            text: item.symbolText,
+            width: effectiveWidth,
+            height: effectiveHeight,
+            color: item.color || '#000000',
+            offsetX: item.labelOffsetX,
+            offsetY: item.labelOffsetY,
+            rotation: item.labelRotation,
+            fontSize: item.labelFontSize || item.symbolFontSize,
+            letterSpacing: item.labelLetterSpacing,
+            isVertical: Boolean(item.isVerticalName),
+            shape: item.symbolShape,
+            filled: item.symbolFilled,
+            isSymbol: true,
+            parentScaleX: item.scaleX,
+            parentScaleY: item.scaleY,
+          })}
         </Group>
       ) : (
         <KonvaImage
@@ -591,29 +813,18 @@ const CanvasItem: React.FC<{
           listening={false}
         />
       )}
-      {showText && percInfo && (() => {
-        const text = percInfo.canvasName;
-        const maxFontByW = (effectiveWidth * 0.95) / Math.max(text.length * 0.62, 1);
-        const maxFontByH = effectiveHeight * 0.42;
-        const fontSize = Math.max(8, Math.min(maxFontByW, maxFontByH, 20));
-        return (
-          <Text
-            text={text}
-            x={0}
-            y={0}
-            width={effectiveWidth}
-            height={effectiveHeight}
-            fontSize={fontSize}
-            fontFamily="Arial, sans-serif"
-            fontStyle="bold"
-            align="center"
-            verticalAlign="middle"
-            wrap="none"
-            fill={item.color || '#000000'}
-            listening={false}
-          />
-        );
-      })()}
+      {showText && percInfo && renderItemLabel({
+        text: percInfo.canvasName,
+        width: effectiveWidth,
+        height: effectiveHeight,
+        color: item.color || '#000000',
+        offsetX: item.labelOffsetX,
+        offsetY: item.labelOffsetY,
+        rotation: item.labelRotation,
+        fontSize: item.labelFontSize,
+        letterSpacing: item.labelLetterSpacing,
+        isVertical: Boolean(item.isVerticalName),
+      })}
     </Group>
   );
 };
@@ -628,11 +839,24 @@ const CurveItemRenderer: React.FC<{
   color?: string;
   isSelected?: boolean;
   extractedIcons?: ExtractedIcon[];
+  templateReplacements?: Record<string, string>;
+  curveChairType?: 'normal' | 'pianoChair' | 'pianoChairSvg' | 'pianoChairPi';
+  curveCustomIconStyle?: 'default' | 'xMark' | 'doubleCircle' | 'circlePi';
+  curvePercussionType?: string;
+  curveId?: string;
   onSelect?: () => void;
-}> = ({ item, x, y, rotation, size, color, isSelected, extractedIcons, onSelect }) => {
-  const tmpl = TEMPLATE_SHAPES.find(t => t.type === item.type || t.id === item.type || t.id === `tmpl_${item.type}`);
-  const isPerc = item.type === 'percussion' || Boolean(item.percussionType) || (tmpl && tmpl.type === 'percussion');
-  const percInfo = isPerc ? getPercussionInfo(item.percussionType) : null;
+  onOpenPercussionLabelModal?: (target: ItemLabelModalTarget) => void;
+}> = ({ item, x, y, rotation, size, color, isSelected, extractedIcons, templateReplacements, curveChairType, curveCustomIconStyle, curvePercussionType, curveId, onSelect, onOpenPercussionLabelModal }) => {
+  const matchedTmplId = item.iconId ? templateReplacements?.[item.iconId] : undefined;
+  const tmpl = TEMPLATE_SHAPES.find(t =>
+    t.type === item.type ||
+    t.id === item.type ||
+    t.id === `tmpl_${item.type}` ||
+    (matchedTmplId && (t.id === matchedTmplId || t.type === matchedTmplId.replace(/^tmpl_/, '')))
+  );
+  const effectivePercType = item.percussionType || curvePercussionType || (tmpl?.type === 'percussion' ? 'ティンパニ' : undefined);
+  const isPerc = item.type === 'percussion' || Boolean(item.percussionType) || Boolean(curvePercussionType) || (tmpl && tmpl.type === 'percussion');
+  const percInfo = isPerc ? getPercussionInfo(effectivePercType) : null;
 
   const getUrl = () => {
     // 1. If custom extracted icon, first prefer data URL from extractedIcons
@@ -653,9 +877,10 @@ const CurveItemRenderer: React.FC<{
     }
     if (item.url) return item.url;
     if (isPerc) {
-      return getPercussionDataUrl(item.percussionType || 'ティンパニ', item.color || color);
+      return getPercussionDataUrl(effectivePercType || 'ティンパニ', item.color || color);
     }
-    if (tmpl) return getTemplateDataUrl(tmpl, item.color || color, item.customIconStyle, item.chairType);
+    const effectiveIconStyle = item.customIconStyle || curveCustomIconStyle;
+    if (tmpl) return getTemplateDataUrl(tmpl, item.color || color, effectiveIconStyle, item.chairType || curveChairType);
     return '';
   };
   const [img] = useImage(getUrl(), 'anonymous');
@@ -671,7 +896,50 @@ const CurveItemRenderer: React.FC<{
   const halfW = itemW / 2;
   const halfH = itemH / 2;
   const showText = isPerc && item.showPercussionName !== false && Boolean(percInfo?.canvasName);
-  const isSymbol = tmpl?.type === 'symbol';
+  const isSymbol = tmpl?.type === 'symbol' || item.type === 'symbol' || matchedTmplId === 'tmpl_symbol' || matchedTmplId?.replace(/^tmpl_/, '') === 'symbol';
+
+  const handleOpenLabelModal = () => {
+    if (isSymbol) {
+      onOpenPercussionLabelModal?.({
+        type: 'curveItem',
+        itemId: item.id,
+        curveId,
+        targetType: 'symbol',
+        canvasName: '記号テキスト',
+        symbolShape: item.symbolShape || 'circle',
+        symbolFilled: Boolean(item.symbolFilled),
+        initialText: item.symbolText || '',
+        width: itemW,
+        height: itemH,
+        color: item.color || color,
+        currentOffsetX: item.labelOffsetX || 0,
+        currentOffsetY: item.labelOffsetY || 0,
+        currentRotation: item.labelRotation || 0,
+        currentFontSize: item.labelFontSize || item.symbolFontSize,
+        currentLetterSpacing: item.labelLetterSpacing || 0,
+        isVertical: Boolean(item.isVerticalName),
+      });
+    } else if (isPerc) {
+      onOpenPercussionLabelModal?.({
+        type: 'curveItem',
+        itemId: item.id,
+        curveId,
+        targetType: 'percussion',
+        canvasName: percInfo?.canvasName || effectivePercType || '打楽器',
+        percussionType: effectivePercType || 'ティンパニ',
+        initialText: percInfo?.canvasName || '',
+        width: itemW,
+        height: itemH,
+        color: item.color || color,
+        currentOffsetX: item.labelOffsetX || 0,
+        currentOffsetY: item.labelOffsetY || 0,
+        currentRotation: item.labelRotation || 0,
+        currentFontSize: item.labelFontSize,
+        currentLetterSpacing: item.labelLetterSpacing || 0,
+        isVertical: Boolean(item.isVerticalName),
+      });
+    }
+  };
 
   if (img || isSymbol) {
     return (
@@ -689,6 +957,18 @@ const CurveItemRenderer: React.FC<{
           if (onSelect) {
             e.cancelBubble = true;
             onSelect();
+          }
+        }}
+        onDblClick={(e) => {
+          if (isSymbol || isPerc) {
+            e.cancelBubble = true;
+            handleOpenLabelModal();
+          }
+        }}
+        onDblTap={(e) => {
+          if (isSymbol || isPerc) {
+            e.cancelBubble = true;
+            handleOpenLabelModal();
           }
         }}
         onMouseEnter={(e) => {
@@ -712,6 +992,7 @@ const CurveItemRenderer: React.FC<{
         {/* Selection indicator on the curve item */}
         {isSelected && (
           <Rect
+            name="curve-item-selection-highlight"
             x={-halfW - 3}
             y={-halfH - 3}
             width={itemW + 6}
@@ -734,15 +1015,21 @@ const CurveItemRenderer: React.FC<{
               itemW,
               itemH
             )}
-            {renderSymbolText(
-              item.symbolText,
-              item.symbolShape,
-              item.symbolFilled,
-              item.symbolFontSize,
-              item.color || color || '#000000',
-              itemW,
-              itemH
-            )}
+            {renderItemLabel({
+              text: item.symbolText,
+              width: itemW,
+              height: itemH,
+              color: item.color || color || '#000000',
+              offsetX: item.labelOffsetX,
+              offsetY: item.labelOffsetY,
+              rotation: item.labelRotation,
+              fontSize: item.labelFontSize || item.symbolFontSize,
+              letterSpacing: item.labelLetterSpacing,
+              isVertical: Boolean(item.isVerticalName),
+              shape: item.symbolShape,
+              filled: item.symbolFilled,
+              isSymbol: true,
+            })}
           </Group>
         ) : (
           <KonvaImage
@@ -754,29 +1041,22 @@ const CurveItemRenderer: React.FC<{
             listening={false}
           />
         )}
-        {showText && percInfo && (() => {
-          const text = percInfo.canvasName;
-          const maxFontByW = (itemW * 0.95) / Math.max(text.length * 0.62, 1);
-          const maxFontByH = itemH * 0.42;
-          const fontSize = Math.max(8, Math.min(maxFontByW, maxFontByH, 20));
-          return (
-            <Text
-              text={text}
-              x={-halfW}
-              y={-halfH}
-              width={itemW}
-              height={itemH}
-              fontSize={fontSize}
-              fontFamily="Arial, sans-serif"
-              fontStyle="bold"
-              align="center"
-              verticalAlign="middle"
-              wrap="none"
-              fill={item.color || color || '#000000'}
-              listening={false}
-            />
-          );
-        })()}
+        {showText && percInfo && (
+          <Group x={-halfW} y={-halfH} listening={false}>
+            {renderItemLabel({
+              text: percInfo.canvasName,
+              width: itemW,
+              height: itemH,
+              color: item.color || color || '#000000',
+              offsetX: item.labelOffsetX,
+              offsetY: item.labelOffsetY,
+              rotation: item.labelRotation,
+              fontSize: item.labelFontSize,
+              letterSpacing: item.labelLetterSpacing,
+              isVertical: Boolean(item.isVerticalName),
+            })}
+          </Group>
+        )}
       </Group>
     );
   }
@@ -807,6 +1087,7 @@ const CurveItemRenderer: React.FC<{
     >
       {isSelected && (
         <Circle
+          name="curve-item-selection-highlight"
           radius={halfW + 4}
           stroke="#2563eb"
           strokeWidth={2}
@@ -840,43 +1121,102 @@ const CurveItemRenderer: React.FC<{
   );
 };
 
+// Calculate geometric bounding center of a quadratic bezier curve
+function getBezierCenter(pts: [number, number, number, number, number, number]) {
+  const [x0, y0, x1, y1, x2, y2] = pts;
+  let minX = Math.min(x0, x2);
+  let maxX = Math.max(x0, x2);
+  let minY = Math.min(y0, y2);
+  let maxY = Math.max(y0, y2);
+
+  const denomX = x0 - 2 * x1 + x2;
+  if (denomX !== 0) {
+    const tx = (x0 - x1) / denomX;
+    if (tx > 0 && tx < 1) {
+      const qx = (1 - tx) * (1 - tx) * x0 + 2 * (1 - tx) * tx * x1 + tx * tx * x2;
+      minX = Math.min(minX, qx);
+      maxX = Math.max(maxX, qx);
+    }
+  }
+
+  const denomY = y0 - 2 * y1 + y2;
+  if (denomY !== 0) {
+    const ty = (y0 - y1) / denomY;
+    if (ty > 0 && ty < 1) {
+      const qy = (1 - ty) * (1 - ty) * y0 + 2 * (1 - ty) * ty * y1 + ty * ty * y2;
+      minY = Math.min(minY, qy);
+      maxY = Math.max(maxY, qy);
+    }
+  }
+
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    // 回転中心（ピボット）は回転ハンドルやカーブ凸の影響を除いた両端ベースラインの中央
+    cx: (x0 + x2) / 2,
+    cy: (y0 + y2) / 2,
+  };
+}
+
 // A bezier curve with items placed along it
 const CurveCanvas: React.FC<{
   curve: CurveObject;
   isSelected: boolean;
+  activeItemIds?: string[];
+  activeCurveIds?: string[];
   selectedCurveItemId?: string | null;
-  onSelect: () => void;
+  onSelect: (e?: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onSelectCurveItem?: (curveId: string, itemId: string) => void;
   onUpdatePoints: (points: [number, number, number, number, number, number], isDragging?: boolean) => void;
   onUpdateCurvePos: (x: number, y: number) => void;
+  onUpdateItems?: (updates: { id: string; attrs: Partial<PlacedItem> }[]) => void;
+  onUpdateCurve?: (id: string, newCurve: Partial<CurveObject>, skipHistory?: boolean) => void;
   onDragStartAction?: () => void;
   onDragEndAction?: () => void;
   scale: number;
   snapSettings?: SnapSettings;
+  templateReplacements?: Record<string, string>;
   bgCenter: { x: number; y: number };
   effectiveCenter: { x: number; y: number };
   onSnapGuideChange?: (guideX: number | null, guideY: number | null) => void;
   extractedIcons?: ExtractedIcon[];
+  isCtrlPointSnapped?: boolean;
+  isCurveMoving?: boolean;
+  onOpenPercussionLabelModal?: (target: ItemLabelModalTarget) => void;
 }> = ({
   curve,
   isSelected,
+  isCtrlPointSnapped = false,
+  isCurveMoving: _isCurveMoving = false,
+  activeItemIds,
+  activeCurveIds,
   selectedCurveItemId,
   onSelect,
   onSelectCurveItem,
   onUpdatePoints,
   onUpdateCurvePos,
+  onUpdateItems,
+  onUpdateCurve,
   onDragStartAction,
   onDragEndAction,
   scale,
   snapSettings,
+  templateReplacements,
   bgCenter,
   effectiveCenter,
   onSnapGuideChange,
   extractedIcons,
+  onOpenPercussionLabelModal,
 }) => {
   const pts = curve.points;
   const pathData = getBezierPathData(pts);
   const handleRadius = 8 / scale;
+
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const multiItemDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const multiCurveDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   // Determine items distribution
   const hasItemsArray = Array.isArray(curve.items);
@@ -893,11 +1233,18 @@ const CurveCanvas: React.FC<{
     if (curve.itemType === 'percussion') {
       return getPercussionDataUrl(curve.percussionType || 'ティンパニ', curve.color);
     }
+    if (curve.itemType === 'symbol') {
+      return getSymbolDataUrl({ color: curve.color, shape: 'circle' });
+    }
     const tmpl = TEMPLATE_SHAPES.find(t => t.type === curve.itemType);
     return tmpl ? getTemplateDataUrl(tmpl, curve.color, curve.customIconStyle, curve.chairType) : '';
   };
   const [fallbackImg] = useImage(getFallbackUrl(), 'anonymous');
   const [isSnappedToMid, setIsSnappedToMid] = useState(false);
+  const [isRotating, setIsRotating] = useState(false);
+  const [rotationAngle, setRotationAngle] = useState(curve.rotation || 0);
+  const [isHoveredRotate, setIsHoveredRotate] = useState(false);
+  const rotateCenterRef = useRef<{ x: number; y: number }>({ x: curve.x, y: curve.y });
 
   const isEmptyCurve = hasItemsArray ? curveItems.length === 0 : curve.itemCount === 0;
 
@@ -906,20 +1253,59 @@ const CurveCanvas: React.FC<{
       id={curve.id}
       x={curve.x}
       y={curve.y}
+      rotation={curve.rotation || 0}
       draggable={!curve.isPinned}
-      onClick={(e) => { e.cancelBubble = true; onSelect(); }}
-      onTap={(e) => { e.cancelBubble = true; onSelect(); }}
-      onDragStart={() => {
+      onClick={(e) => { e.cancelBubble = true; onSelect(e); }}
+      onTap={(e) => { e.cancelBubble = true; onSelect(e); }}
+      onDragStart={(e) => {
         onDragStartAction?.();
+        dragStartPosRef.current = { x: e.target.x(), y: e.target.y() };
+        const totalSelected = (activeItemIds?.length || 0) + (activeCurveIds?.length || 0);
+        if (isSelected && totalSelected > 1) {
+          multiItemDragStartRef.current.clear();
+          multiCurveDragStartRef.current.clear();
+          const stage = e.target.getStage();
+          if (stage) {
+            activeItemIds?.forEach(id => {
+              const node = stage.findOne(`#${id}`);
+              if (node && node.draggable()) {
+                multiItemDragStartRef.current.set(id, { x: node.x(), y: node.y() });
+              }
+            });
+            activeCurveIds?.forEach(id => {
+              const node = stage.findOne(`#${id}`);
+              if (node && node.draggable()) {
+                multiCurveDragStartRef.current.set(id, { x: node.x(), y: node.y() });
+              }
+            });
+          }
+        }
       }}
       onDragMove={(e) => {
         if (e.target !== e.currentTarget) return;
         const isCtrl = Boolean(e.evt && (e.evt.ctrlKey || e.evt.metaKey));
         const isShift = Boolean(e.evt && e.evt.shiftKey);
 
+        // ベジェ曲線の中心点（回転ハンドルや上部凸形状を除いた両端ベースラインの中央）
+        const bounds = getBezierCenter(pts);
+        const centerLocalX = bounds.cx;
+        const centerLocalY = bounds.cy;
+
+        const rotRad = ((curve.rotation || 0) * Math.PI) / 180;
+        const cos = Math.cos(rotRad);
+        const sin = Math.sin(rotRad);
+
+        // グループ原点から曲線の真の中心点へのオフセット（回転考慮）
+        const offsetX = centerLocalX * cos - centerLocalY * sin;
+        const offsetY = centerLocalX * sin + centerLocalY * cos;
+
+        // 現在の曲線の中心位置（キャンバス座標）でスナップを計算
+        const currentCenterX = e.target.x() + offsetX;
+        const currentCenterY = e.target.y() + offsetY;
+
         const snap = calculateSnapping({
-          x: e.target.x(),
-          y: e.target.y(),
+          x: currentCenterX,
+          y: currentCenterY,
           snapSettings,
           effectiveCenter,
           bgCenter,
@@ -927,14 +1313,69 @@ const CurveCanvas: React.FC<{
           isShift,
         });
 
-        e.target.x(snap.x);
-        e.target.y(snap.y);
+        // スナップ後の中心位置からグループ原点 (x, y) を逆算
+        const finalGroupX = snap.x - offsetX;
+        const finalGroupY = snap.y - offsetY;
+
+        e.target.x(finalGroupX);
+        e.target.y(finalGroupY);
+
+        // スナップガイド線は曲線の中心位置に表示
         onSnapGuideChange?.(snap.snappedX ? snap.x : null, snap.snappedY ? snap.y : null);
+
+        // If part of multi-selection, translate other selected items & curves
+        const totalSelected = (activeItemIds?.length || 0) + (activeCurveIds?.length || 0);
+        if (isSelected && totalSelected > 1 && dragStartPosRef.current) {
+          const dx = finalGroupX - dragStartPosRef.current.x;
+          const dy = finalGroupY - dragStartPosRef.current.y;
+          const stage = e.target.getStage();
+          if (stage) {
+            multiItemDragStartRef.current.forEach((startPos, id) => {
+              const node = stage.findOne(`#${id}`);
+              if (node) {
+                node.x(startPos.x + dx);
+                node.y(startPos.y + dy);
+              }
+            });
+            multiCurveDragStartRef.current.forEach((startPos, id) => {
+              if (id !== curve.id) {
+                const node = stage.findOne(`#${id}`);
+                if (node) {
+                  node.x(startPos.x + dx);
+                  node.y(startPos.y + dy);
+                }
+              }
+            });
+          }
+        }
       }}
       onDragEnd={(e) => {
         if (e.target !== e.currentTarget) return;
         onSnapGuideChange?.(null, null);
-        onUpdateCurvePos(e.target.x(), e.target.y());
+        const totalSelected = (activeItemIds?.length || 0) + (activeCurveIds?.length || 0);
+        if (isSelected && totalSelected > 1 && dragStartPosRef.current) {
+          const dx = e.target.x() - dragStartPosRef.current.x;
+          const dy = e.target.y() - dragStartPosRef.current.y;
+          if (onUpdateItems && multiItemDragStartRef.current.size > 0) {
+            const updates: { id: string; attrs: Partial<PlacedItem> }[] = [];
+            multiItemDragStartRef.current.forEach((startPos, id) => {
+              updates.push({ id, attrs: { x: startPos.x + dx, y: startPos.y + dy } });
+            });
+            onUpdateItems(updates);
+          }
+          if (onUpdateCurve && multiCurveDragStartRef.current.size > 0) {
+            multiCurveDragStartRef.current.forEach((startPos, id) => {
+              onUpdateCurve(id, { x: startPos.x + dx, y: startPos.y + dy }, true);
+            });
+          } else {
+            onUpdateCurvePos(e.target.x(), e.target.y());
+          }
+          multiItemDragStartRef.current.clear();
+          multiCurveDragStartRef.current.clear();
+        } else {
+          onUpdateCurvePos(e.target.x(), e.target.y());
+        }
+        dragStartPosRef.current = null;
         onDragEndAction?.();
       }}
     >
@@ -947,8 +1388,8 @@ const CurveCanvas: React.FC<{
           strokeWidth={isSelected ? 2.5 / scale : (isEmptyCurve ? 2 / scale : 1.5 / scale)}
           dash={isSelected ? [6 / scale, 4 / scale] : (isEmptyCurve ? [4 / scale, 4 / scale] : undefined)}
           hitStrokeWidth={24 / scale}
-          onClick={(e) => { e.cancelBubble = true; onSelect(); }}
-          onTap={(e) => { e.cancelBubble = true; onSelect(); }}
+          onClick={(e) => { e.cancelBubble = true; onSelect(e); }}
+          onTap={(e) => { e.cancelBubble = true; onSelect(e); }}
         />
       )}
 
@@ -964,6 +1405,12 @@ const CurveCanvas: React.FC<{
           color={curve.color}
           isSelected={selectedCurveItemId === p.item.id}
           extractedIcons={extractedIcons}
+          templateReplacements={templateReplacements}
+          curveChairType={curve.chairType}
+          curveCustomIconStyle={curve.customIconStyle}
+          curvePercussionType={curve.percussionType}
+          curveId={curve.id}
+          onOpenPercussionLabelModal={onOpenPercussionLabelModal}
           onSelect={() => {
             onSelect();
             onSelectCurveItem?.(curve.id, p.item.id);
@@ -1028,29 +1475,14 @@ const CurveCanvas: React.FC<{
 
       {/* Control handles (only when selected) */}
       {isSelected && (
-        <>
-          {/* Guide lines */}
-          <Line
-            points={[pts[0], pts[1], pts[2], pts[3]]}
-            stroke="#94a3b8"
-            strokeWidth={1 / scale}
-            dash={[4 / scale, 3 / scale]}
-            listening={false}
-          />
-          <Line
-            points={[pts[4], pts[5], pts[2], pts[3]]}
-            stroke="#94a3b8"
-            strokeWidth={1 / scale}
-            dash={[4 / scale, 3 / scale]}
-            listening={false}
-          />
-
+        <Group name="curve-control-handle">
           {/* Start handle (left point) — dragging mirrors the right point */}
           <Circle
             key="curve-handle-start"
             x={pts[0]}
             y={pts[1]}
             radius={handleRadius}
+            hitStrokeWidth={36 / scale}
             fill="#2563eb"
             stroke="#ffffff"
             strokeWidth={2 / scale}
@@ -1078,43 +1510,37 @@ const CurveCanvas: React.FC<{
 
               e.target.position({ x: nx, y: ny });
 
-              // 常に左右対称（X座標は反転、Y座標は同一）
-              const newPts: [number, number, number, number, number, number] = [
-                nx,
-                ny,
-                pts[2],
-                pts[3],
-                -nx,
-                ny,
-              ];
+              // Shiftキー押下時は左右対称をオフ（ドラッグしている端点のみ移動）
+              const newPts: [number, number, number, number, number, number] = isShift
+                ? [nx, ny, pts[2], pts[3], pts[4], pts[5]]
+                : [nx, ny, pts[2], pts[3], -nx, ny];
+
               onUpdatePoints(newPts, true);
             }}
             onDragEnd={(e) => {
               e.cancelBubble = true;
               let nx = e.target.x();
               let ny = e.target.y();
+              const isShift = Boolean(e.evt?.shiftKey);
               if (nx > -10) nx = -10;
               e.target.position({ x: nx, y: ny });
 
-              const newPts: [number, number, number, number, number, number] = [
-                nx,
-                ny,
-                pts[2],
-                pts[3],
-                -nx,
-                ny,
-              ];
+              const newPts: [number, number, number, number, number, number] = isShift
+                ? [nx, ny, pts[2], pts[3], pts[4], pts[5]]
+                : [nx, ny, pts[2], pts[3], -nx, ny];
+
               onUpdatePoints(newPts, false);
               onDragEndAction?.();
             }}
           />
 
-          {/* End handle (right point) — dragging mirrors the left point */}
+          {/* End handle (right point) — dragging mirrors the left point unless Shift is held */}
           <Circle
             key="curve-handle-end"
             x={pts[4]}
             y={pts[5]}
             radius={handleRadius}
+            hitStrokeWidth={36 / scale}
             fill="#2563eb"
             stroke="#ffffff"
             strokeWidth={2 / scale}
@@ -1142,35 +1568,44 @@ const CurveCanvas: React.FC<{
 
               e.target.position({ x: nx, y: ny });
 
-              // 常に左右対称（X座標は反転、Y座標は同一）
-              const newPts: [number, number, number, number, number, number] = [
-                -nx,
-                ny,
-                pts[2],
-                pts[3],
-                nx,
-                ny,
-              ];
+              // Shiftキー押下時は左右対称をオフ（ドラッグしている端点のみ移動）
+              const newPts: [number, number, number, number, number, number] = isShift
+                ? [pts[0], pts[1], pts[2], pts[3], nx, ny]
+                : [-nx, ny, pts[2], pts[3], nx, ny];
+
               onUpdatePoints(newPts, true);
             }}
             onDragEnd={(e) => {
               e.cancelBubble = true;
               let nx = e.target.x();
               let ny = e.target.y();
+              const isShift = Boolean(e.evt?.shiftKey);
               if (nx < 10) nx = 10;
               e.target.position({ x: nx, y: ny });
 
-              const newPts: [number, number, number, number, number, number] = [
-                -nx,
-                ny,
-                pts[2],
-                pts[3],
-                nx,
-                ny,
-              ];
+              const newPts: [number, number, number, number, number, number] = isShift
+                ? [pts[0], pts[1], pts[2], pts[3], nx, ny]
+                : [-nx, ny, pts[2], pts[3], nx, ny];
+
               onUpdatePoints(newPts, false);
               onDragEndAction?.();
             }}
+          />
+
+          {/* Guide lines */}
+          <Line
+            points={[pts[0], pts[1], pts[2], pts[3]]}
+            stroke="#94a3b8"
+            strokeWidth={1 / scale}
+            dash={[4 / scale, 3 / scale]}
+            listening={false}
+          />
+          <Line
+            points={[pts[4], pts[5], pts[2], pts[3]]}
+            stroke="#94a3b8"
+            strokeWidth={1 / scale}
+            dash={[4 / scale, 3 / scale]}
+            listening={false}
           />
 
           {/* Control point handle (center red point with midpoint and line snap) */}
@@ -1179,11 +1614,12 @@ const CurveCanvas: React.FC<{
             x={pts[2]}
             y={pts[3]}
             radius={handleRadius}
-            fill={isSnappedToMid ? '#10b981' : '#ef4444'}
+            hitStrokeWidth={36 / scale}
+            fill={(isSnappedToMid || (isSelected && isCtrlPointSnapped)) ? '#10b981' : '#ef4444'}
             stroke="#ffffff"
             strokeWidth={2.5 / scale}
             shadowColor="#000000"
-            shadowBlur={isSnappedToMid ? 8 : 2}
+            shadowBlur={(isSnappedToMid || (isSelected && isCtrlPointSnapped)) ? 8 : 2}
             shadowOpacity={0.4}
             draggable={!curve.isPinned}
             onDragStart={(e) => {
@@ -1265,7 +1701,190 @@ const CurveCanvas: React.FC<{
               onDragEndAction?.();
             }}
           />
-        </>
+
+          {/* Rotation Handle (only when curve is selected) */}
+          {(() => {
+            const bounds = getBezierCenter(pts);
+            const { cx, cy, minY } = bounds;
+            const rotateX = cx;
+            const handleDist = 34 / scale;
+            const rotateY = minY - handleDist;
+            const handleRadius = (isHoveredRotate || isRotating ? 12 : 10.5) / scale;
+
+            return (
+              <Group key="curve-rotation-handle-group">
+                {/* Anchor dot on top of the curve at geometric center X */}
+                <Circle
+                  x={rotateX}
+                  y={minY}
+                  radius={2.5 / scale}
+                  fill="#2563eb"
+                  stroke="#ffffff"
+                  strokeWidth={1 / scale}
+                  listening={false}
+                />
+
+                {/* Connecting dashed guide line */}
+                <Line
+                  points={[rotateX, minY, rotateX, rotateY + handleRadius]}
+                  stroke="#2563eb"
+                  strokeWidth={1.6 / scale}
+                  dash={[3 / scale, 2 / scale]}
+                  opacity={0.8}
+                  listening={false}
+                />
+
+                {/* Real-time angle tooltip badge when rotating */}
+                {isRotating && (
+                  <Group x={rotateX} y={rotateY - 18 / scale} listening={false}>
+                    <Rect
+                      x={-24 / scale}
+                      y={-9 / scale}
+                      width={48 / scale}
+                      height={18 / scale}
+                      fill="rgba(15, 23, 42, 0.9)"
+                      stroke="#38bdf8"
+                      strokeWidth={1 / scale}
+                      cornerRadius={9 / scale}
+                      shadowColor="#000000"
+                      shadowBlur={6}
+                      shadowOpacity={0.35}
+                    />
+                    <Text
+                      text={`${Math.round(rotationAngle)}°`}
+                      x={-24 / scale}
+                      y={-9 / scale}
+                      width={48 / scale}
+                      height={18 / scale}
+                      fontSize={10 / scale}
+                      fontFamily="system-ui, -apple-system, sans-serif"
+                      fontStyle="bold"
+                      align="center"
+                      verticalAlign="middle"
+                      fill="#ffffff"
+                    />
+                  </Group>
+                )}
+
+                {/* Draggable rotation handle circle */}
+                <Group
+                  x={rotateX}
+                  y={rotateY}
+                  draggable={!curve.isPinned}
+                  onMouseEnter={(e) => {
+                    const c = e.target.getStage()?.container();
+                    if (c) c.style.cursor = 'grab';
+                    setIsHoveredRotate(true);
+                  }}
+                  onMouseLeave={(e) => {
+                    const c = e.target.getStage()?.container();
+                    if (c) c.style.cursor = 'default';
+                    setIsHoveredRotate(false);
+                  }}
+                  onDragStart={(e) => {
+                    e.cancelBubble = true;
+                    onDragStartAction?.();
+                    setIsRotating(true);
+                    setRotationAngle(curve.rotation || 0);
+                    const c = e.target.getStage()?.container();
+                    if (c) c.style.cursor = 'grabbing';
+
+                    // ベジェの中心点 (cx, cy) のキャンバス絶対座標を固定ピボットとして保存
+                    const rad0 = ((curve.rotation || 0) * Math.PI) / 180;
+                    const centerCanvasX = curve.x + (cx * Math.cos(rad0) - cy * Math.sin(rad0));
+                    const centerCanvasY = curve.y + (cx * Math.sin(rad0) + cy * Math.cos(rad0));
+                    rotateCenterRef.current = { x: centerCanvasX, y: centerCanvasY };
+                  }}
+                  onDragMove={(e) => {
+                    e.cancelBubble = true;
+                    const stage = e.target.getStage();
+                    if (!stage) return;
+                    const ptr = stage.getPointerPosition();
+                    if (!ptr) return;
+
+                    const transform = stage.getAbsoluteTransform().copy();
+                    transform.invert();
+                    const canvasPos = transform.point(ptr);
+
+                    // ベジェ曲線の中心点 (rotateCenterRef) を原点とした角度計算
+                    const dx = canvasPos.x - rotateCenterRef.current.x;
+                    const dy = canvasPos.y - rotateCenterRef.current.y;
+                    let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+                    angle = Math.round(angle % 360);
+                    if (angle < 0) angle += 360;
+
+                    // 角度スナップ (Shiftキー非押下時、45度または15度単位にスナップ)
+                    if (!e.evt?.shiftKey && snapSettings?.snapAngle !== false) {
+                      const snapAngles = [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240, 255, 270, 285, 300, 315, 330, 345, 360];
+                      for (const sa of snapAngles) {
+                        if (Math.abs(angle - sa) <= 5 || Math.abs(angle - (sa - 360)) <= 5) {
+                          angle = sa % 360;
+                          break;
+                        }
+                      }
+                    }
+
+                    setRotationAngle(angle);
+
+                    // ベジェの中心位置を固定したまま回転させるための新しい (curve.x, curve.y)
+                    const newRad = (angle * Math.PI) / 180;
+                    const newCurveX = rotateCenterRef.current.x - (cx * Math.cos(newRad) - cy * Math.sin(newRad));
+                    const newCurveY = rotateCenterRef.current.y - (cx * Math.sin(newRad) + cy * Math.cos(newRad));
+
+                    // ハンドル自身の位置はローカル座標で固定
+                    e.target.position({ x: rotateX, y: rotateY });
+                    onUpdateCurve?.(curve.id, { x: newCurveX, y: newCurveY, rotation: angle }, true);
+                  }}
+                  onDragEnd={(e) => {
+                    e.cancelBubble = true;
+                    setIsRotating(false);
+                    const c = e.target.getStage()?.container();
+                    if (c) c.style.cursor = isHoveredRotate ? 'grab' : 'default';
+                    e.target.position({ x: rotateX, y: rotateY });
+
+                    const finalAngle = curve.rotation || 0;
+                    const newRad = (finalAngle * Math.PI) / 180;
+                    const finalX = rotateCenterRef.current.x - (cx * Math.cos(newRad) - cy * Math.sin(newRad));
+                    const finalY = rotateCenterRef.current.y - (cx * Math.sin(newRad) + cy * Math.cos(newRad));
+
+                    onUpdateCurve?.(curve.id, { x: finalX, y: finalY, rotation: finalAngle }, false);
+                    onDragEndAction?.();
+                  }}
+                >
+                  {/* Clean white badge with iOS-style blue ring & soft glow shadow */}
+                  <Circle
+                    radius={handleRadius}
+                    hitStrokeWidth={40 / scale}
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth={2 / scale}
+                    shadowColor="rgba(37, 99, 235, 0.4)"
+                    shadowBlur={isHoveredRotate || isRotating ? 8 : 4}
+                    shadowOffsetY={1}
+                  />
+                  {/* Precise Lucide-style Rotate Arrow */}
+                  <Group
+                    offsetX={12}
+                    offsetY={12}
+                    scaleX={0.72 / scale}
+                    scaleY={0.72 / scale}
+                    listening={false}
+                  >
+                    <Path
+                      data="M 21 12 a 9 9 0 1 1 -9 -9 c 2.52 0 4.93 1 6.74 2.74 L 21 8 M 21 3 v 5 h -5"
+                      stroke="#2563eb"
+                      strokeWidth={2.4}
+                      strokeLineCap="round"
+                      strokeLineJoin="round"
+                      fill="transparent"
+                      listening={false}
+                    />
+                  </Group>
+                </Group>
+              </Group>
+            );
+          })()}
+        </Group>
       )}
     </Group>
   );
@@ -1284,6 +1903,9 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     selectedCurveIds,
     selectedCurveItemId,
     onSelectCurveItem,
+    onMoveCurveItemOrder,
+    isCtrlPointSnapped = false,
+    isCurveMoving = false,
     snapSettings,
     zoomMultiplier = 1.0,
     onZoomChange,
@@ -1300,6 +1922,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     onNudgeCurves,
     onAddItem,
     onDeleteItem,
+    onDeleteCurveItem,
     onDeleteSelected,
     onDuplicateItem,
     onDuplicateSelected,
@@ -1307,10 +1930,13 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     onPaste,
     onUpdateCenterOffset,
     isMovingCenter = false,
+    onExitMoveCenter,
     onOpenContextMenu,
     isMeasuringScale = false,
     onMeasureComplete,
     onCancelMeasure,
+    onOpenPercussionLabelModal,
+    templateReplacements,
   }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -1355,11 +1981,17 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
   const [stageDimensions, setStageDimensions] = useState({ width: 900, height: 600, scale: 1 });
 
   // Refs for smooth zoom without jumps
+  const stageWrapperRef = useRef<HTMLDivElement>(null);
   const prevDimensionsRef = useRef(stageDimensions);
-  const zoomAnchorRef = useRef<{ x: number; y: number } | null>(null);
+  const zoomAnchorRef = useRef<{
+    rx: number;
+    ry: number;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
 
-  // Compute stage size to fit container
-  useEffect(() => {
+  // Compute stage size to fit container synchronously
+  useLayoutEffect(() => {
     if (!containerRef.current) return;
 
     const updateSize = () => {
@@ -1383,28 +2015,55 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     return () => window.removeEventListener('resize', updateSize);
   }, [bgImage, zoomMultiplier]);
 
-  // Keep zoom anchor stable so background doesn't jump
+  // Keep zoom anchor perfectly stable so zoomed position stays under finger/cursor
   useLayoutEffect(() => {
     const prev = prevDimensionsRef.current;
     prevDimensionsRef.current = stageDimensions;
 
-    if (!containerRef.current) return;
-    if (prev.scale === stageDimensions.scale || prev.scale === 0) return;
+    if (!containerRef.current || !stageWrapperRef.current) return;
 
     const container = containerRef.current;
-    const ratio = stageDimensions.scale / prev.scale;
+    const stageWrapper = stageWrapperRef.current;
 
-    const anchor = zoomAnchorRef.current || {
-      x: container.clientWidth / 2,
-      y: container.clientHeight / 2,
-    };
-    zoomAnchorRef.current = null;
+    // Canvas の新サイズが DOM に反映されたこの瞬間に CSS Transform を確実にリセット
+    // これにより、拡大中と確定後の表示が 1 フレームのチラつき・巨大化もなくシームレスに引き継がれる
+    stageWrapper.style.transform = '';
+    stageWrapper.style.transformOrigin = '';
+    stageWrapper.style.willChange = '';
 
-    container.scrollLeft = (container.scrollLeft + anchor.x) * ratio - anchor.x;
-    container.scrollTop = (container.scrollTop + anchor.y) * ratio - anchor.y;
+    if (prev.scale === stageDimensions.scale || prev.scale === 0) return;
+
+    const anchor = zoomAnchorRef.current;
+
+    if (anchor) {
+      // 指/カーソルが触れているステージ上の比率点（rx, ry）を画面上の現在位置（clientX, clientY）に完全一致させる
+      const targetContentX = stageWrapper.offsetLeft + anchor.rx * stageDimensions.width;
+      const targetContentY = stageWrapper.offsetTop + anchor.ry * stageDimensions.height;
+
+      container.scrollLeft = targetContentX - anchor.clientX;
+      container.scrollTop = targetContentY - anchor.clientY;
+
+      zoomAnchorRef.current = null;
+    } else {
+      // ツールバーの ＋ / − ボタンなどの場合、コンテナ中央をアンカーにして拡大縮小
+      const box = container.getBoundingClientRect();
+      const centerX = box.width / 2;
+      const centerY = box.height / 2;
+
+      const prevContentX = container.scrollLeft + centerX;
+      const prevContentY = container.scrollTop + centerY;
+      const rx = (prevContentX - stageWrapper.offsetLeft) / prev.width;
+      const ry = (prevContentY - stageWrapper.offsetTop) / prev.height;
+
+      const targetContentX = stageWrapper.offsetLeft + rx * stageDimensions.width;
+      const targetContentY = stageWrapper.offsetTop + ry * stageDimensions.height;
+
+      container.scrollLeft = targetContentX - centerX;
+      container.scrollTop = targetContentY - centerY;
+    }
   }, [stageDimensions]);
 
-  // Container wheel zoom
+  // Container wheel zoom (Ctrl/Cmd + Wheel)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -1414,10 +2073,18 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
         e.preventDefault();
         e.stopPropagation();
 
-        const rect = container.getBoundingClientRect();
+        if (!stageWrapperRef.current) return;
+        const box = container.getBoundingClientRect();
+        const stageRect = stageWrapperRef.current.getBoundingClientRect();
+
+        const rx = (e.clientX - stageRect.left) / stageRect.width;
+        const ry = (e.clientY - stageRect.top) / stageRect.height;
+
         zoomAnchorRef.current = {
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
+          rx,
+          ry,
+          clientX: e.clientX - box.left,
+          clientY: e.clientY - box.top,
         };
 
         const delta = e.deltaY < 0 ? 0.1 : -0.1;
@@ -1520,23 +2187,171 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     };
   }, []);
 
+  // High-performance Gesture-driven Pinch-to-zoom & 2-finger Pan via GPU CSS Transform
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let isPinching = false;
+    let startDist = 0;
+    let initialZoom = zoomMultiplier || 1.0;
+    let startMidX = 0;
+    let startMidY = 0;
+    let currentMidX = 0;
+    let currentMidY = 0;
+    let currentScale = 1.0;
+    let currentDx = 0;
+    let currentDy = 0;
+    let rx = 0.5;
+    let ry = 0.5;
+
+    // Prevent Safari default full-page pinch zoom
+    const preventGestures = (e: Event) => {
+      e.preventDefault();
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        setSelectionBox(null);
+        isPinching = true;
+
+        const stageWrapper = stageWrapperRef.current;
+        if (!stageWrapper) return;
+
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        startDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        initialZoom = zoomMultiplier || 1.0;
+        startMidX = (t1.clientX + t2.clientX) / 2;
+        startMidY = (t1.clientY + t2.clientY) / 2;
+        currentMidX = startMidX;
+        currentMidY = startMidY;
+        currentScale = 1.0;
+        currentDx = 0;
+        currentDy = 0;
+
+        const stageRect = stageWrapper.getBoundingClientRect();
+        // 指のステージ内での正確な相対原点 (px & 比率)
+        const originX = startMidX - stageRect.left;
+        const originY = startMidY - stageRect.top;
+        rx = stageRect.width > 0 ? originX / stageRect.width : 0.5;
+        ry = stageRect.height > 0 ? originY / stageRect.height : 0.5;
+
+        stageWrapper.style.transformOrigin = `${originX}px ${originY}px`;
+        stageWrapper.style.willChange = 'transform';
+        stageWrapper.style.transition = 'none';
+
+        e.preventDefault();
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2 && isPinching) {
+        setSelectionBox(null);
+
+        const stageWrapper = stageWrapperRef.current;
+        if (!stageWrapper) return;
+
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const curDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        currentMidX = (t1.clientX + t2.clientX) / 2;
+        currentMidY = (t1.clientY + t2.clientY) / 2;
+
+        const rawScale = startDist > 10 ? curDist / startDist : 1.0;
+        const minScale = 0.5 / (initialZoom || 1);
+        const maxScale = 2.5 / (initialZoom || 1);
+        currentScale = Math.min(maxScale, Math.max(minScale, rawScale));
+        currentDx = currentMidX - startMidX;
+        currentDy = currentMidY - startMidY;
+
+        // GPU コンポジタによる直接レンダリング (React再レンダリング0回・遅延0ms・完全滑らか)
+        stageWrapper.style.transform = `translate3d(${currentDx}px, ${currentDy}px, 0) scale(${currentScale})`;
+
+        e.preventDefault();
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2 && isPinching) {
+        isPinching = false;
+
+        const stageWrapper = stageWrapperRef.current;
+        if (!stageWrapper) return;
+
+        // 最終ズーム倍率を確定
+        const finalZoom = Math.min(2.5, Math.max(0.5, Number((initialZoom * currentScale).toFixed(2))));
+
+        // ズーム比率がほぼ変わらずパンのみ（指の移動）だった場合
+        if (Math.abs(finalZoom - initialZoom) < 0.02) {
+          stageWrapper.style.transform = '';
+          stageWrapper.style.transformOrigin = '';
+          stageWrapper.style.willChange = '';
+          container.scrollLeft -= currentDx;
+          container.scrollTop -= currentDy;
+        } else if (onZoomChange) {
+          // 指の現在位置を中心にして React state を 1回だけ更新
+          // ※ transform は即時解除せず、useLayoutEffect で新解像度 Canvas がマウントされた瞬間に同期解除する
+          const box = container.getBoundingClientRect();
+          zoomAnchorRef.current = {
+            rx,
+            ry,
+            clientX: currentMidX - box.left,
+            clientY: currentMidY - box.top,
+          };
+          onZoomChange(finalZoom);
+        } else {
+          stageWrapper.style.transform = '';
+          stageWrapper.style.transformOrigin = '';
+          stageWrapper.style.willChange = '';
+        }
+      }
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchEnd);
+    container.addEventListener('gesturestart', preventGestures);
+    container.addEventListener('gesturechange', preventGestures);
+    container.addEventListener('gestureend', preventGestures);
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchEnd);
+      container.removeEventListener('gesturestart', preventGestures);
+      container.removeEventListener('gesturechange', preventGestures);
+      container.removeEventListener('gestureend', preventGestures);
+    };
+  }, [zoomMultiplier, onZoomChange]);
+
   // Attach Transformer to selected placed items (excluding pinned items)
   useEffect(() => {
-    if (!trRef.current || !stageRef.current) return;
-    if (activeItemIds.length > 0 && activeCurveIds.length === 0) {
-      const nodes: Konva.Node[] = [];
-      activeItemIds.forEach(id => {
-        const itemObj = placedItems.find(it => it.id === id);
-        if (itemObj?.isPinned) return;
-        const node = stageRef.current?.findOne(`#${id}`);
-        if (node) nodes.push(node);
-      });
-      trRef.current.nodes(nodes);
+    let animId: number;
+    const updateTransformer = () => {
+      if (!trRef.current || !stageRef.current) return;
+      if (activeItemIds.length > 0 && activeCurveIds.length === 0) {
+        const nodes: Konva.Node[] = [];
+        activeItemIds.forEach(id => {
+          const itemObj = placedItems.find(it => it.id === id);
+          if (itemObj?.isPinned) return;
+          const node = stageRef.current?.findOne(`#${id}`);
+          if (node) nodes.push(node);
+        });
+        trRef.current.nodes(nodes);
+        trRef.current.getLayer()?.batchDraw();
+        return;
+      }
+      trRef.current.nodes([]);
       trRef.current.getLayer()?.batchDraw();
-      return;
-    }
-    trRef.current.nodes([]);
-    trRef.current.getLayer()?.batchDraw();
+    };
+
+    updateTransformer();
+    // Re-verify on next animation frame in case newly added Konva nodes mounted asynchronously
+    animId = requestAnimationFrame(updateTransformer);
+    return () => cancelAnimationFrame(animId);
   }, [activeItemIds, activeCurveIds, placedItems]);
 
   // Keyboard shortcuts (Copy, Paste, Duplicate, Delete, Arrow nudging)
@@ -1570,6 +2385,20 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
         return;
       }
 
+      // Reorder Curve Item: '[' or Alt+ArrowLeft for left, ']' or Alt+ArrowRight for right
+      if (selectedCurveId && selectedCurveItemId && onMoveCurveItemOrder) {
+        if (e.key === '[' || (e.altKey && e.key === 'ArrowLeft')) {
+          e.preventDefault();
+          onMoveCurveItemOrder(selectedCurveId, selectedCurveItemId, 'left');
+          return;
+        }
+        if (e.key === ']' || (e.altKey && e.key === 'ArrowRight')) {
+          e.preventDefault();
+          onMoveCurveItemOrder(selectedCurveId, selectedCurveItemId, 'right');
+          return;
+        }
+      }
+
       // Duplicate: Ctrl+D / Cmd+D
       if (isCmdOrCtrl && (e.key === 'd' || e.key === 'D')) {
         if (hasSelection) {
@@ -1584,8 +2413,12 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
       }
 
       // Delete: Delete / Backspace
-      if (hasSelection && (e.key === 'Delete' || e.key === 'Backspace')) {
+      if ((hasSelection || (selectedCurveId && selectedCurveItemId)) && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault();
+        if (selectedCurveId && selectedCurveItemId && onDeleteCurveItem) {
+          onDeleteCurveItem(selectedCurveId, selectedCurveItemId);
+          return;
+        }
         if (onDeleteSelected) {
           onDeleteSelected();
         } else if (activeItemIds.length > 0) {
@@ -1674,40 +2507,89 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     e.dataTransfer.dropEffect = 'copy';
   };
 
-  // Register contextmenu via native DOM event on the Konva stage container
+  // Register contextmenu via native DOM event & long-press on touch devices
   // (not via React synthetic events, to avoid interfering with Konva's click handling)
   useEffect(() => {
     if (!stageRef.current) return;
     const stageContainer = stageRef.current.container();
 
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
+    const triggerContextMenu = (clientX: number, clientY: number) => {
       if (!onOpenContextMenu) return;
       const stageBox = stageContainer.getBoundingClientRect();
-
-      // Only process if the click is within the actual canvas bounds
-      const relX = e.clientX - stageBox.left;
-      const relY = e.clientY - stageBox.top;
+      const relX = clientX - stageBox.left;
+      const relY = clientY - stageBox.top;
       if (relX < 0 || relY < 0 || relX > stageBox.width || relY > stageBox.height) return;
 
       const canvasX = relX / stageDimensions.scale;
       const canvasY = relY / stageDimensions.scale;
-
-      // Use the currently selected item as the target
       const targetItemId = activeItemIds.length === 1 ? activeItemIds[0] : null;
 
       onOpenContextMenu({
-        x: e.clientX,
-        y: e.clientY,
+        x: clientX,
+        y: clientY,
         canvasX,
         canvasY,
         targetItemId,
       });
     };
 
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      triggerContextMenu(e.clientX, e.clientY);
+    };
+
+    // Long press for touch devices (smartphones, tablets, iPads)
+    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        if (longPressTimer) clearTimeout(longPressTimer);
+        longPressTimer = setTimeout(() => {
+          try {
+            if ('vibrate' in navigator) navigator.vibrate(35);
+          } catch (_) {}
+          triggerContextMenu(touchStartX, touchStartY);
+        }, 500);
+      } else {
+        if (longPressTimer) clearTimeout(longPressTimer);
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (longPressTimer && e.touches.length === 1) {
+        const touch = e.touches[0];
+        if (Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY) > 12) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }
+    };
+
+    const handleTouchEnd = () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    };
+
     stageContainer.addEventListener('contextmenu', handleContextMenu);
+    stageContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
+    stageContainer.addEventListener('touchmove', handleTouchMove, { passive: true });
+    stageContainer.addEventListener('touchend', handleTouchEnd);
+    stageContainer.addEventListener('touchcancel', handleTouchEnd);
+
     return () => {
+      if (longPressTimer) clearTimeout(longPressTimer);
       stageContainer.removeEventListener('contextmenu', handleContextMenu);
+      stageContainer.removeEventListener('touchstart', handleTouchStart);
+      stageContainer.removeEventListener('touchmove', handleTouchMove);
+      stageContainer.removeEventListener('touchend', handleTouchEnd);
+      stageContainer.removeEventListener('touchcancel', handleTouchEnd);
     };
   }, [onOpenContextMenu, stageDimensions.scale, activeItemIds]);
 
@@ -1735,6 +2617,19 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
       if (guide) guide.visible(false);
       if (tr) tr.nodes([]);
 
+      // Temporarily hide all selection indicators & control handles from export
+      const selectionOutlines = stageRef.current.find('.canvas-item-selection-outline');
+      const prevOutlinesVisible = selectionOutlines.map(o => o.visible());
+      selectionOutlines.forEach(o => o.visible(false));
+
+      const curveHandles = stageRef.current.find('.curve-control-handle');
+      const prevHandlesVisible = curveHandles.map(h => h.visible());
+      curveHandles.forEach(h => h.visible(false));
+
+      const curveHighlights = stageRef.current.find('.curve-item-selection-highlight');
+      const prevHighlightsVisible = curveHighlights.map(h => h.visible());
+      curveHighlights.forEach(h => h.visible(false));
+
       // Hide bezier curve guide lines if requested
       const bezierPaths = stageRef.current.find('.bezier-curve-path');
       const prevBezierVisibles = bezierPaths.map(p => p.visible());
@@ -1751,6 +2646,10 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
       if (guide && prevGuideVisible !== undefined) guide.visible(prevGuideVisible);
       if (tr && prevNodes) tr.nodes(prevNodes);
 
+      selectionOutlines.forEach((o, idx) => o.visible(prevOutlinesVisible[idx] ?? true));
+      curveHandles.forEach((h, idx) => h.visible(prevHandlesVisible[idx] ?? true));
+      curveHighlights.forEach((h, idx) => h.visible(prevHighlightsVisible[idx] ?? true));
+
       if (options?.hideCurveLines) {
         bezierPaths.forEach((p, idx) => p.visible(prevBezierVisibles[idx] ?? true));
       }
@@ -1765,11 +2664,45 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
       x: Math.round(baseWidth / 2) + (snapSettings?.centerOffset?.x || 0),
       y: Math.round(baseHeight / 2) + (snapSettings?.centerOffset?.y || 0),
     }),
+    calculateSnapping: (x: number, y: number, isCtrl = false, isShift = false) => {
+      const bgCenter = {
+        x: Math.round(baseWidth / 2),
+        y: Math.round(baseHeight / 2),
+      };
+      const effCenter = {
+        x: bgCenter.x + (snapSettings?.centerOffset?.x || 0),
+        y: bgCenter.y + (snapSettings?.centerOffset?.y || 0),
+      };
+      return calculateSnapping({
+        x,
+        y,
+        snapSettings,
+        effectiveCenter: effCenter,
+        bgCenter,
+        isCtrl,
+        isShift,
+      });
+    },
+    setSnapGuides: (guideX: number | null, guideY: number | null) => {
+      setActiveGuideX(guideX);
+      setActiveGuideY(guideY);
+    },
   }));
 
   const getItemUrl = (item: PlacedItem): string => {
-    // Template item
+    // 1. Explicit templateType on item
     if (item.templateType) {
+      if (item.templateType === 'symbol') {
+        return getSymbolDataUrl({
+          shape: item.symbolShape || 'circle',
+          filled: Boolean(item.symbolFilled),
+          text: item.symbolText,
+          fontSize: item.labelFontSize || item.symbolFontSize,
+          color: item.color,
+          width: item.width,
+          height: item.height,
+        });
+      }
       if (item.templateType === 'percussion') {
         const pType = item.percussionType || 'ティンパニ';
         return getPercussionDataUrl(pType, item.color);
@@ -1777,12 +2710,39 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
       const tmpl = TEMPLATE_SHAPES.find(t => t.type === item.templateType);
       if (tmpl) return getTemplateDataUrl(tmpl, item.color, item.customIconStyle, item.chairType);
     }
-    // Extracted PDF icon
+    // 2. Replaced template for extracted icon
+    const tmplId = templateReplacements?.[item.iconId];
+    if (tmplId) {
+      const tmpl = TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''));
+      if (tmpl) {
+        if (tmpl.type === 'symbol') {
+          return getSymbolDataUrl({
+            shape: item.symbolShape || 'circle',
+            filled: Boolean(item.symbolFilled),
+            text: item.symbolText,
+            fontSize: item.labelFontSize || item.symbolFontSize,
+            color: item.color,
+            width: item.width,
+            height: item.height,
+          });
+        }
+        if (tmpl.type === 'percussion') {
+          return getPercussionDataUrl(tmpl.percussionType || 'ティンパニ', item.color);
+        }
+        return getTemplateDataUrl(tmpl, item.color, item.customIconStyle, item.chairType);
+      }
+    }
+    // 3. Extracted PDF icon
     const iconDef = extractedIcons.find(ic => ic.id === item.iconId);
     return iconDef?.url || '';
   };
 
   const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    // 2本指以上のタッチ操作中はピンチズーム/パンを優先し選択ボックスや計測をスキップ
+    if ('touches' in e.evt && e.evt.touches.length > 1) {
+      setSelectionBox(null);
+      return;
+    }
     if ('button' in e.evt && e.evt.button === 1) return;
     if (isMovingCenter) return;
 
@@ -1834,7 +2794,13 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     }
   };
 
-  const handleStageMouseMove = () => {
+  const handleStageMouseMove = (e?: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    // 2本指以上のタッチ操作中は選択ボックスを破棄
+    if (e?.evt && 'touches' in e.evt && e.evt.touches.length > 1) {
+      setSelectionBox(null);
+      return;
+    }
+
     if (isMeasuringScale) {
       if (measureStartPos) {
         const stage = stageRef.current;
@@ -1860,6 +2826,12 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
   };
 
   const handleStageMouseUp = (e?: Konva.KonvaEventObject<MouseEvent | TouchEvent> | MouseEvent | TouchEvent) => {
+    const rawEvt = e && 'evt' in e ? e.evt : e;
+    if (rawEvt && 'touches' in rawEvt && rawEvt.touches.length > 1) {
+      setSelectionBox(null);
+      return;
+    }
+
     if (!selectionBox) return;
 
     const x1 = Math.min(selectionBox.startX, selectionBox.curX);
@@ -1896,8 +2868,16 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     // Check curves intersecting with selection rectangle
     curveObjects.forEach(curve => {
       const pts = curve.points;
-      const xs = [curve.x + pts[0], curve.x + pts[2], curve.x + pts[4]];
-      const ys = [curve.y + pts[1], curve.y + pts[3], curve.y + pts[5]];
+      const rot = ((curve.rotation || 0) * Math.PI) / 180;
+      const cos = Math.cos(rot);
+      const sin = Math.sin(rot);
+      const rotatedPts = [
+        { x: pts[0] * cos - pts[1] * sin, y: pts[0] * sin + pts[1] * cos },
+        { x: pts[2] * cos - pts[3] * sin, y: pts[2] * sin + pts[3] * cos },
+        { x: pts[4] * cos - pts[5] * sin, y: pts[4] * sin + pts[5] * cos },
+      ];
+      const xs = rotatedPts.map(p => curve.x + p.x);
+      const ys = rotatedPts.map(p => curve.y + p.y);
       const left = Math.min(...xs) - 20;
       const right = Math.max(...xs) + 20;
       const top = Math.min(...ys) - 20;
@@ -1937,18 +2917,12 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
   }, [selectionBox, activeItemIds, activeCurveIds, placedItems, curveObjects]);
 
   return (
-    <div
-      ref={containerRef}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      className={`flex-1 w-full h-full flex bg-slate-200/80 dark:bg-slate-950 overflow-auto relative select-none p-4 transition-colors ${
-        isMeasuringScale ? 'cursor-crosshair' : ''
-      }`}
-    >
+    <div className="flex-1 w-full h-full relative overflow-hidden flex">
+      {/* ── Fixed Overlays: キャンバスのスクロール/パンに流されず画面上部・下部に常に固定表示 ── */}
       {isMeasuringScale && (
-        <div key="measuring-banner" className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-full shadow-xl flex items-center gap-2.5 border border-indigo-400 animate-in fade-in slide-in-from-top-2 duration-150">
-          <span className="text-sm">📏</span>
-          <span>
+        <div key="measuring-banner" className="absolute top-4 left-1/2 -translate-x-1/2 z-40 liquid-glass-heavy text-slate-900 dark:text-white text-xs font-bold px-5 py-2.5 rounded-full flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto shadow-lg">
+          <Ruler className="w-4 h-4 text-[#007AFF]" />
+          <span className="text-[#007AFF] dark:text-sky-400">
             {measureStartPos
               ? '「2点目」をクリックして距離を確定してください（Escでキャンセル）'
               : 'キャンバス上で基準となる長さの「1点目」をクリックしてください'}
@@ -1961,35 +2935,104 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
               setMeasureCurPos(null);
               onCancelMeasure?.();
             }}
-            className="ml-2 bg-white/20 hover:bg-white/30 text-white px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors"
+            className="ml-2 liquid-btn text-slate-700 dark:text-slate-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
           >
-            ✕ キャンセル
+            <X className="w-3 h-3" />
+            <span>キャンセル</span>
           </button>
         </div>
       )}
       {isMovingCenter && !isMeasuringScale && (
-        <div key="moving-center-banner" className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 backdrop-blur-sm text-white text-xs font-medium px-4 py-2 rounded-full shadow-lg flex items-center gap-2.5 border border-slate-700 pointer-events-none">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#ff00ff] animate-pulse shrink-0" />
+        <div key="moving-center-banner" className="absolute top-4 left-1/2 -translate-x-1/2 z-30 liquid-glass-heavy text-slate-800 dark:text-white text-xs font-semibold px-4 py-2 rounded-full flex items-center gap-3 shadow-lg select-none pointer-events-auto">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#ff00ff] animate-pulse shrink-0 shadow-[0_0_8px_#ff00ff]" />
           <span>基準点移動モード：ピンクのマーカーをドラッグして位置を移動できます</span>
+          <button
+            type="button"
+            onClick={() => onExitMoveCenter?.()}
+            className="liquid-btn-primary text-white text-[11px] font-bold px-3 py-1 rounded-full flex items-center gap-1 cursor-pointer transition-all hover:scale-105 active:scale-95"
+            title="基準点の移動モードを終了します"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>移動を終了</span>
+          </button>
         </div>
       )}
 
-      {/* Floating Multi-Selection Action Pill */}
+      {/* Curve Item Reorder Quick Control Bar */}
+      {selectedCurveId && selectedCurveItemId && !isMovingCenter && !isMeasuringScale && (() => {
+        const curve = curveObjects.find(c => c.id === selectedCurveId);
+        const items = curve?.items || [];
+        const idx = items.findIndex(it => it.id === selectedCurveItemId);
+        if (idx === -1) return null;
+        const currentItem = items[idx];
+        return (
+          <div
+            key="curve-item-reorder-banner"
+            className="absolute top-4 left-1/2 -translate-x-1/2 z-30 liquid-glass-heavy text-slate-800 dark:text-white text-xs font-semibold px-4 py-2 rounded-full flex items-center gap-3 shadow-lg select-none pointer-events-auto animate-in fade-in slide-in-from-top-2 duration-150"
+          >
+            <span className="w-2.5 h-2.5 rounded-full bg-[#007AFF] shrink-0" />
+            <span className="truncate max-w-[140px] sm:max-w-none">
+              {idx + 1}. {currentItem.label || currentItem.type || 'アイテム'}
+            </span>
+            <div className="flex items-center gap-1.5 border-l border-slate-300 dark:border-slate-600 pl-2">
+              <button
+                type="button"
+                disabled={idx <= 0}
+                onClick={() => onMoveCurveItemOrder?.(selectedCurveId, selectedCurveItemId, 'left')}
+                className="liquid-btn text-slate-700 dark:text-slate-200 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer transition-all hover:scale-105 active:scale-95"
+                title="左隣へ移動 ([ または Alt+←])"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>左隣へ</span>
+              </button>
+              <button
+                type="button"
+                disabled={idx >= items.length - 1}
+                onClick={() => onMoveCurveItemOrder?.(selectedCurveId, selectedCurveItemId, 'right')}
+                className="liquid-btn text-slate-700 dark:text-slate-200 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer transition-all hover:scale-105 active:scale-95"
+                title="右隣へ移動 (] または Alt+→)"
+              >
+                <span>右隣へ</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onDeleteCurveItem?.(selectedCurveId, selectedCurveItemId)}
+                className="liquid-btn text-red-600 dark:text-red-400 hover:bg-red-500/15 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 cursor-pointer transition-all hover:scale-105 active:scale-95"
+                title="このオブジェクトを曲線から削除 (Deleteキー)"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>削除</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectCurveItem?.(selectedCurveId, '')}
+                className="ml-1 p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+                title="選択を解除"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Floating Multi-Selection Action Pill (Liquid Glass) */}
       {(activeItemIds.length + activeCurveIds.length) > 1 && (
-        <div key="multi-select-action-pill" className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-full shadow-2xl flex items-center gap-3 border border-slate-700/80 animate-in fade-in slide-in-from-bottom-2 duration-150">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-blue-300">
-            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+        <div key="multi-select-action-pill" className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 liquid-glass-heavy text-slate-800 dark:text-white px-4 py-2 rounded-full flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2 duration-150 pointer-events-auto shadow-lg">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-[#007AFF] dark:text-sky-400">
+            <span className="w-2 h-2 rounded-full bg-[#007AFF] animate-pulse" />
             <span>{activeItemIds.length + activeCurveIds.length} 個選択中</span>
           </div>
-          <div className="h-3.5 w-px bg-slate-700" />
+          <div className="h-3.5 w-px bg-slate-300/70 dark:bg-slate-600/70" />
           {onDuplicateSelected && (
             <button
               type="button"
               onClick={onDuplicateSelected}
-              className="text-xs font-medium text-slate-200 hover:text-white flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded-md transition-colors cursor-pointer"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-200 hover:text-[#007AFF] flex items-center gap-1 liquid-btn px-2.5 py-1 rounded-full transition-colors cursor-pointer"
               title="選択したアイテムを複製 (Ctrl+D)"
             >
-              <span>📑</span>
+              <Copy className="w-3.5 h-3.5" />
               <span>複製</span>
             </button>
           )}
@@ -1997,14 +3040,14 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
             <button
               type="button"
               onClick={onDeleteSelected}
-              className="text-xs font-medium text-rose-300 hover:text-rose-200 flex items-center gap-1 hover:bg-rose-950/60 px-2 py-1 rounded-md transition-colors cursor-pointer"
+              className="text-xs font-semibold text-rose-600 dark:text-rose-400 hover:text-rose-700 flex items-center gap-1 liquid-btn hover:!bg-rose-50 dark:hover:!bg-rose-950/60 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
               title="選択したアイテムを一括削除 (Delete)"
             >
-              <span>🗑️</span>
+              <Trash2 className="w-3.5 h-3.5" />
               <span>削除</span>
             </button>
           )}
-          <div className="h-3.5 w-px bg-slate-700" />
+          <div className="h-3.5 w-px bg-slate-300/70 dark:bg-slate-600/70" />
           <button
             type="button"
             onClick={() => {
@@ -2013,19 +3056,33 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
               if (onSelectCurves) onSelectCurves([]);
               else onSelectCurve(null);
             }}
-            className="text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+            className="text-xs text-slate-400 hover:text-slate-700 dark:hover:white p-1 rounded-full transition-colors cursor-pointer flex items-center justify-center"
             title="選択を解除"
           >
-            ✕
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
+
+      {/* ── Scrollable Workspace Container ── */}
       <div
-        key="stage-konva-wrapper"
-        className="bg-white dark:bg-slate-900 shadow-xl ring-1 ring-slate-900/10 dark:ring-white/10 rounded-sm relative m-auto transition-colors"
-        style={{ width: stageDimensions.width, height: stageDimensions.height }}
+        ref={containerRef}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        style={{ touchAction: 'pan-x pan-y' }}
+        className={`flex-1 w-full h-full flex bg-transparent overflow-auto relative select-none p-5 transition-colors ${
+          isMeasuringScale ? 'cursor-crosshair' : ''
+        }`}
       >
-        <Stage
+      {/* Scrollable centering canvas wrapper */}
+      <div className="min-w-full min-h-full w-max h-max flex items-center justify-center p-6 shrink-0 m-auto">
+        <div
+          ref={stageWrapperRef}
+          key="stage-konva-wrapper"
+          className="bg-white dark:bg-slate-900 shadow-[0_16px_48px_-8px_rgba(15,23,42,0.16)] ring-1 ring-white/80 dark:ring-white/15 rounded-xl overflow-hidden relative shrink-0 transition-colors"
+          style={{ width: stageDimensions.width, height: stageDimensions.height }}
+        >
+          <Stage
           ref={stageRef}
           width={stageDimensions.width}
           height={stageDimensions.height}
@@ -2152,41 +3209,59 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                       });
                     }}
                   >
-                    {/* Horizontal Center Axis */}
-                    <Line
-                      points={isMovingCenter ? [-5000, 0, 5000, 0] : [-20 / stageDimensions.scale, 0, 20 / stageDimensions.scale, 0]}
-                      stroke="#ff00ff"
-                      strokeWidth={1.5 / stageDimensions.scale}
-                      dash={[6 / stageDimensions.scale, 6 / stageDimensions.scale]}
-                      opacity={0.65}
-                      listening={false}
-                    />
-                    {/* Vertical Center Axis */}
-                    <Line
-                      points={isMovingCenter ? [0, -5000, 0, 5000] : [0, -20 / stageDimensions.scale, 0, 20 / stageDimensions.scale]}
-                      stroke="#ff00ff"
-                      strokeWidth={1.5 / stageDimensions.scale}
-                      dash={[6 / stageDimensions.scale, 6 / stageDimensions.scale]}
-                      opacity={0.65}
-                      listening={false}
-                    />
-                    {/* Grab handle shown only when in moving mode */}
+                    {/* Touch & Click enlarged hit area for dragging center marker */}
                     {isMovingCenter && (
-                      <>
-                        <Circle
-                          radius={16 / stageDimensions.scale}
-                          stroke="#ff00ff"
-                          strokeWidth={2 / stageDimensions.scale}
-                          dash={[4 / stageDimensions.scale, 4 / stageDimensions.scale]}
-                          fill="rgba(255, 0, 255, 0.15)"
-                          listening={false}
-                        />
-                        <Circle
-                          radius={20 / stageDimensions.scale}
-                          fill="transparent"
-                          hitStrokeWidth={40 / stageDimensions.scale}
-                        />
-                      </>
+                      <Circle
+                        radius={32 / stageDimensions.scale}
+                        fill="transparent"
+                        listening={true}
+                      />
+                    )}
+                    {/* Center Point Marker Dot */}
+                    <Circle
+                      radius={5 / stageDimensions.scale}
+                      fill="#ff00ff"
+                      stroke="#ffffff"
+                      strokeWidth={1.5 / stageDimensions.scale}
+                      shadowColor="#ff00ff"
+                      shadowBlur={4 / stageDimensions.scale}
+                      shadowOpacity={0.7}
+                      listening={false}
+                    />
+                    {/* Target Ring Marker */}
+                    <Circle
+                      radius={16 / stageDimensions.scale}
+                      stroke="#ff00ff"
+                      strokeWidth={2 / stageDimensions.scale}
+                      dash={[4 / stageDimensions.scale, 4 / stageDimensions.scale]}
+                      fill="rgba(255, 0, 255, 0.15)"
+                      listening={false}
+                    />
+                    {/* Horizontal Center Axis (screen-wide) */}
+                    <Line
+                      points={[-5000, 0, 5000, 0]}
+                      stroke="#ff00ff"
+                      strokeWidth={1.5 / stageDimensions.scale}
+                      dash={[6 / stageDimensions.scale, 6 / stageDimensions.scale]}
+                      opacity={0.75}
+                      listening={false}
+                    />
+                    {/* Vertical Center Axis (screen-wide) */}
+                    <Line
+                      points={[0, -5000, 0, 5000]}
+                      stroke="#ff00ff"
+                      strokeWidth={1.5 / stageDimensions.scale}
+                      dash={[6 / stageDimensions.scale, 6 / stageDimensions.scale]}
+                      opacity={0.75}
+                      listening={false}
+                    />
+                    {/* Hit target for dragging when in moving mode */}
+                    {isMovingCenter && (
+                      <Circle
+                        radius={20 / stageDimensions.scale}
+                        fill="transparent"
+                        hitStrokeWidth={40 / stageDimensions.scale}
+                      />
                     )}
                   </Group>
                 );
@@ -2230,14 +3305,34 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   key={curve.id}
                   curve={curve}
                   isSelected={activeCurveIds.includes(curve.id)}
+                  isCtrlPointSnapped={isCtrlPointSnapped}
+                  isCurveMoving={isCurveMoving}
+                  activeItemIds={activeItemIds}
+                  activeCurveIds={activeCurveIds}
                   selectedCurveItemId={selectedCurveItemId}
                   onSelectCurveItem={onSelectCurveItem}
-                  onSelect={() => {
-                    onSelectCurve(curve.id);
-                    onSelectItem(null);
+                  onSelect={(e) => {
+                    if (e?.evt?.shiftKey) {
+                      if (activeCurveIds.includes(curve.id)) {
+                        const next = activeCurveIds.filter(id => id !== curve.id);
+                        if (onSelectCurves) onSelectCurves(next);
+                        else onSelectCurve(next[0] || null);
+                      } else {
+                        const next = [...activeCurveIds, curve.id];
+                        if (onSelectCurves) onSelectCurves(next);
+                        else onSelectCurve(curve.id);
+                      }
+                    } else {
+                      if (onSelectCurves) onSelectCurves([curve.id]);
+                      else onSelectCurve(curve.id);
+                      if (onSelectItems) onSelectItems([]);
+                      else onSelectItem(null);
+                    }
                   }}
                   onUpdatePoints={(points, isDragging) => onUpdateCurve(curve.id, { points }, isDragging)}
                   onUpdateCurvePos={(x, y) => onUpdateCurve(curve.id, { x, y })}
+                  onUpdateItems={onUpdateItems}
+                  onUpdateCurve={onUpdateCurve}
                   onDragStartAction={onDragStartAction}
                   onDragEndAction={onDragEndAction}
                   scale={stageDimensions.scale}
@@ -2249,6 +3344,8 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                     setActiveGuideY(gy);
                   }}
                   extractedIcons={extractedIcons}
+                  templateReplacements={templateReplacements}
+                  onOpenPercussionLabelModal={onOpenPercussionLabelModal}
                 />
               );
             })}
@@ -2272,11 +3369,13 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   iconUrl={url}
                   isSelected={activeItemIds.includes(item.id)}
                   activeItemIds={activeItemIds}
+                  activeCurveIds={activeCurveIds}
                   snapSettings={snapSettings}
+                  templateReplacements={templateReplacements}
                   bgCenter={{ x: bgCenterX, y: bgCenterY }}
                   effectiveCenter={effCenter}
                   onSelect={(e) => {
-                    if (e.evt.shiftKey) {
+                    if (e?.evt?.shiftKey) {
                       if (activeItemIds.includes(item.id)) {
                         const next = activeItemIds.filter(id => id !== item.id);
                         if (onSelectItems) onSelectItems(next);
@@ -2295,77 +3394,142 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   }}
                   onChange={(attrs) => onUpdateItem(item.id, attrs)}
                   onUpdateItems={onUpdateItems}
+                  onUpdateCurve={onUpdateCurve}
                   onDragStartAction={onDragStartAction}
                   onDragEndAction={onDragEndAction}
                   onSnapGuideChange={(gx, gy) => {
                     setActiveGuideX(gx);
                     setActiveGuideY(gy);
                   }}
+                  onOpenPercussionLabelModal={onOpenPercussionLabelModal}
                 />
               );
             })}
           </Layer>
 
           {/* Transformer & Selection Rectangle Layer */}
-          <Layer>
-            <Transformer
-              ref={trRef}
-              boundBoxFunc={(oldBox, newBox) => {
-                if (Math.abs(newBox.width) < 10 || Math.abs(newBox.height) < 10) return oldBox;
-                return newBox;
-              }}
-              rotateEnabled={true}
-              rotationSnaps={snapSettings?.snapAngle !== false ? [0, 45, 90, 135, 180, 225, 270, 315] : []}
-              rotationSnapTolerance={15}
-              enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
-              borderStroke="#2563eb"
-              borderStrokeWidth={1.5}
-              anchorStroke="#2563eb"
-              anchorFill="#ffffff"
-              anchorSize={8}
-              onTransformStart={() => {
-                onDragStartAction?.();
-              }}
-              onTransformEnd={() => {
-                if (!stageRef.current) return;
-                if (activeItemIds.length > 1 && onUpdateItems) {
-                  const updates: { id: string; attrs: Partial<PlacedItem> }[] = [];
-                  activeItemIds.forEach(id => {
-                    const node = stageRef.current?.findOne(`#${id}`);
-                    if (node) {
-                      updates.push({
-                        id,
-                        attrs: {
-                          x: node.x(),
-                          y: node.y(),
-                          rotation: node.rotation(),
-                          scaleX: node.scaleX(),
-                          scaleY: node.scaleY(),
+          {(() => {
+            const selectedSingleItem = activeItemIds.length === 1 ? placedItems.find(it => it.id === activeItemIds[0]) : null;
+            const singleItemTmplId = selectedSingleItem ? templateReplacements?.[selectedSingleItem.iconId] : undefined;
+            const isSelectedSymbol = selectedSingleItem?.templateType === 'symbol' ||
+                                     singleItemTmplId === 'tmpl_symbol' ||
+                                     singleItemTmplId?.replace(/^tmpl_/, '') === 'symbol';
+
+            return (
+              <Layer>
+                <Transformer
+                  ref={trRef}
+                  boundBoxFunc={(oldBox, newBox) => {
+                    if (Math.abs(newBox.width) < 10 || Math.abs(newBox.height) < 10) return oldBox;
+                    return newBox;
+                  }}
+                  rotateEnabled={true}
+                  rotationSnaps={snapSettings?.snapAngle !== false ? [0, 45, 90, 135, 180, 225, 270, 315] : []}
+                  rotationSnapTolerance={15}
+                  keepRatio={!isSelectedSymbol}
+                  enabledAnchors={
+                    isSelectedSymbol
+                      ? ['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left']
+                      : ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+                  }
+                  borderStroke="#2563eb"
+                  borderStrokeWidth={typeof window !== 'undefined' && ('ontouchstart' in window || window.innerWidth < 1024) ? 2 : 1.5}
+                  anchorStroke="#2563eb"
+                  anchorFill="#ffffff"
+                  anchorSize={typeof window !== 'undefined' && ('ontouchstart' in window || window.innerWidth < 1024) ? 16 : 8}
+                  anchorCornerRadius={typeof window !== 'undefined' && ('ontouchstart' in window || window.innerWidth < 1024) ? 5 : 2}
+                  onTransformStart={() => {
+                    onDragStartAction?.();
+                  }}
+                  onTransform={() => {
+                    if (!stageRef.current) return;
+                    activeItemIds.forEach(id => {
+                      const node = stageRef.current?.findOne(`#${id}`);
+                      if (node) {
+                        const textGroup = (node as Konva.Container).findOne?.('.symbol-text-group');
+                        if (textGroup) {
+                          textGroup.scaleX(1 / (node.scaleX() || 1));
+                          textGroup.scaleY(1 / (node.scaleY() || 1));
+                        }
+                      }
+                    });
+                  }}
+                  onTransformEnd={() => {
+                    if (!stageRef.current) return;
+                    if (activeItemIds.length > 1 && onUpdateItems) {
+                      const updates: { id: string; attrs: Partial<PlacedItem> }[] = [];
+                      activeItemIds.forEach(id => {
+                        const node = stageRef.current?.findOne(`#${id}`);
+                        if (node) {
+                          updates.push({
+                            id,
+                            attrs: {
+                              x: node.x(),
+                              y: node.y(),
+                              rotation: node.rotation(),
+                              scaleX: node.scaleX(),
+                              scaleY: node.scaleY(),
+                            }
+                          });
                         }
                       });
+                      onUpdateItems(updates);
+                    } else if (activeItemIds.length === 1) {
+                      const node = stageRef.current?.findOne(`#${activeItemIds[0]}`);
+                      if (node) {
+                        const targetItem = placedItems.find(it => it.id === activeItemIds[0]);
+                        const targetTmplId = targetItem ? templateReplacements?.[targetItem.iconId] : undefined;
+                        const isTargetSymbol = targetItem?.templateType === 'symbol' ||
+                                               targetTmplId === 'tmpl_symbol' ||
+                                               targetTmplId?.replace(/^tmpl_/, '') === 'symbol';
+                        if (targetItem && isTargetSymbol) {
+                          const sx = node.scaleX();
+                          const sy = node.scaleY();
+                          const newWidth = Math.max(10, Math.round(targetItem.width * sx));
+                          const newHeight = Math.max(10, Math.round(targetItem.height * sy));
+                          node.scaleX(1);
+                          node.scaleY(1);
+                          onUpdateItem(activeItemIds[0], {
+                            x: node.x(),
+                            y: node.y(),
+                            rotation: node.rotation(),
+                            width: newWidth,
+                            height: newHeight,
+                            scaleX: 1,
+                            scaleY: 1,
+                          });
+                        } else {
+                          onUpdateItem(activeItemIds[0], {
+                            x: node.x(),
+                            y: node.y(),
+                            rotation: node.rotation(),
+                            scaleX: node.scaleX(),
+                            scaleY: node.scaleY(),
+                          });
+                        }
+                      }
                     }
-                  });
-                  onUpdateItems(updates);
-                }
-                onDragEndAction?.();
-              }}
-            />
+                    onDragEndAction?.();
+                  }}
+                />
 
-            {/* Selection Rectangle (Rubberband Box) */}
-            {selectionBox && (
-              <Rect
-                x={Math.min(selectionBox.startX, selectionBox.curX)}
-                y={Math.min(selectionBox.startY, selectionBox.curY)}
-                width={Math.abs(selectionBox.curX - selectionBox.startX)}
-                height={Math.abs(selectionBox.curY - selectionBox.startY)}
-                fill="rgba(59, 130, 246, 0.15)"
-                stroke="#3b82f6"
-                strokeWidth={1.5 / stageDimensions.scale}
-                dash={[6 / stageDimensions.scale, 3 / stageDimensions.scale]}
-                listening={false}
-              />
-            )}
-          </Layer>
+                {/* Selection Rectangle (Rubberband Box) */}
+                {selectionBox && (
+                  <Rect
+                    x={Math.min(selectionBox.startX, selectionBox.curX)}
+                    y={Math.min(selectionBox.startY, selectionBox.curY)}
+                    width={Math.abs(selectionBox.curX - selectionBox.startX)}
+                    height={Math.abs(selectionBox.curY - selectionBox.startY)}
+                    fill="rgba(59, 130, 246, 0.15)"
+                    stroke="#3b82f6"
+                    strokeWidth={1.5 / stageDimensions.scale}
+                    dash={[6 / stageDimensions.scale, 3 / stageDimensions.scale]}
+                    listening={false}
+                  />
+                )}
+              </Layer>
+            );
+          })()}
 
           {/* Measure Scale Preview Layer */}
           {isMeasuringScale && (
@@ -2428,6 +3592,8 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
             </Layer>
           )}
         </Stage>
+        </div>
+      </div>
       </div>
     </div>
   );

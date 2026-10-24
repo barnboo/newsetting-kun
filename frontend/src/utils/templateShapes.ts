@@ -412,6 +412,9 @@ export const TEMPLATE_SHAPES: TemplateShape[] = [
     defaultH: 34,
     origW: 40,
     origH: 40,
+    svg: `<svg viewBox="0 0 40 40" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="20" cy="20" r="16" fill="none" stroke="#000000" stroke-width="2.5"/>
+    </svg>`,
     targetTallies: [{ label: '記号', multiplier: 1 }],
   },
 ];
@@ -428,10 +431,132 @@ export function cleanSvg(svg: string, color = '#000000'): string {
 }
 
 /**
+ * Percussion category order (from legacy app setting-kun)
+ */
+export const PERCUSSION_CATEGORIES = [
+  '太鼓・ティンパニ',
+  '鍵盤打楽器',
+  'シンバル・金属',
+  'その他',
+] as const;
+
+export type PercussionCategory = typeof PERCUSSION_CATEGORIES[number];
+
+/**
+ * Returns percussion items grouped by category in designated order
+ */
+export function getGroupedPercussionData(): { category: PercussionCategory; items: typeof PERCUSSION_DATA }[] {
+  const groups: { category: PercussionCategory; items: typeof PERCUSSION_DATA }[] = [];
+  for (const cat of PERCUSSION_CATEGORIES) {
+    const items = PERCUSSION_DATA.filter(p => p.category === cat);
+    if (items.length > 0) {
+      groups.push({ category: cat, items });
+    }
+  }
+  return groups;
+}
+
+/**
  * Helper to find percussion info
  */
 export function getPercussionInfo(name?: string) {
   return PERCUSSION_DATA.find(p => p.dropdownName === name) || PERCUSSION_DATA[0];
+}
+
+/**
+ * Generate a standalone SVG markup string for a symbol shape (circle, cross, rect, triangle)
+ */
+export function generateSymbolSvg(options: {
+  shape?: 'circle' | 'cross' | 'rect' | 'triangle';
+  filled?: boolean;
+  color?: string;
+  strokeWidth?: number;
+  text?: string;
+  fontSize?: number;
+  width?: number;
+  height?: number;
+} = {}): string {
+  const shape = options.shape || 'circle';
+  const filled = Boolean(options.filled);
+  const color = options.color || '#000000';
+  const strokeWidth = options.strokeWidth ?? 2.5;
+  const text = options.text || '';
+  const fontSize = options.fontSize || 16;
+  const width = options.width || 40;
+  const height = options.height || 40;
+
+  const pad = 3;
+  const w = width - pad * 2;
+  const h = height - pad * 2;
+  const cx = width / 2;
+  const cy = height / 2;
+  const fillColor = filled ? color : 'none';
+
+  let shapeContent = '';
+  switch (shape) {
+    case 'rect':
+      shapeContent = `<rect x="${pad}" y="${pad}" width="${w}" height="${h}" rx="2" fill="${fillColor}" stroke="${color}" stroke-width="${strokeWidth}"/>`;
+      break;
+    case 'triangle': {
+      const pts = `${cx},${pad} ${width - pad},${height - pad} ${pad},${height - pad}`;
+      shapeContent = `<polygon points="${pts}" fill="${fillColor}" stroke="${color}" stroke-width="${strokeWidth}" stroke-linejoin="round"/>`;
+      break;
+    }
+    case 'cross':
+      if (filled) {
+        const d = 0.35;
+        const rx = w / 2;
+        const ry = h / 2;
+        const rawPoints = [
+          -d, -1,
+          d, -1,
+          d, -d,
+          1, -d,
+          1, d,
+          d, d,
+          d, 1,
+          -d, 1,
+          -d, d,
+          -1, d,
+          -1, -d,
+          -d, -d,
+        ];
+        const cos45 = Math.SQRT1_2;
+        const sin45 = Math.SQRT1_2;
+        const pts: string[] = [];
+        for (let i = 0; i < rawPoints.length; i += 2) {
+          const px = rawPoints[i];
+          const py = rawPoints[i + 1];
+          const nx = px * cos45 - py * sin45;
+          const ny = px * sin45 + py * cos45;
+          pts.push(`${cx + nx * rx},${cy + ny * ry}`);
+        }
+        shapeContent = `<polygon points="${pts.join(' ')}" fill="${color}" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`;
+      } else {
+        const spanX = (w / 2) * 0.85;
+        const spanY = (h / 2) * 0.85;
+        shapeContent = `
+          <line x1="${cx - spanX}" y1="${cy - spanY}" x2="${cx + spanX}" y2="${cy + spanY}" stroke="${color}" stroke-width="${strokeWidth + 0.8}" stroke-linecap="round"/>
+          <line x1="${cx + spanX}" y1="${cy - spanY}" x2="${cx - spanX}" y2="${cy + spanY}" stroke="${color}" stroke-width="${strokeWidth + 0.8}" stroke-linecap="round"/>
+        `;
+      }
+      break;
+    case 'circle':
+    default:
+      shapeContent = `<circle cx="${cx}" cy="${cy}" r="${Math.min(w, h) / 2}" fill="${fillColor}" stroke="${color}" stroke-width="${strokeWidth}"/>`;
+      break;
+  }
+
+  let textContent = '';
+  if (text) {
+    const textColor = filled ? '#ffffff' : color;
+    textContent = `<text x="${cx}" y="${cy + fontSize * 0.35}" font-family="sans-serif" font-size="${fontSize}" font-weight="bold" text-anchor="middle" fill="${textColor}">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>`;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+    ${shapeContent}
+    ${textContent}
+  </svg>`;
 }
 
 /**
@@ -440,20 +565,18 @@ export function getPercussionInfo(name?: string) {
 export function generateSvgString(
   template: TemplateShape,
   color = '#000000',
-  customIconStyle?: 'default' | 'xMark' | 'doubleCircle',
-  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg'
+  customIconStyle?: 'default' | 'xMark' | 'doubleCircle' | 'circlePi',
+  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg' | 'pianoChairPi'
 ): string {
   if (template.type === 'symbol') {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
-      <circle cx="20" cy="20" r="17" fill="none" stroke="${color}" stroke-width="2.5"/>
-      <text x="20" y="25" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="${color}">記</text>
-    </svg>`;
+    return generateSymbolSvg({ color, shape: 'circle', filled: false });
   }
 
   // Special combination: 椅子＋譜面台 (ensembleChairAndStand)
   if (template.type === 'ensembleChairAndStand') {
     const isPianoCircle = chairType === 'pianoChair';
     const isPianoSvg = chairType === 'pianoChairSvg';
+    const isPianoPi = chairType === 'pianoChairPi';
     const isX = customIconStyle === 'xMark';
 
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 86" width="50" height="86">
@@ -466,6 +589,10 @@ export function generateSvgString(
         <svg x="5" y="4" width="40" height="40" viewBox="0 0 37.570835 37.570835">
           <path d="m 102.34725,130.87744 v -16.27187 h 0.39688 0.39687 v 7.27247 7.27248 l 8.7974,0.0697 8.7974,0.0697 0.0697,8.92969 0.0697,8.92969 h -0.4004 -0.40039 v -8.59896 -8.59896 h -8.46667 -8.46667 v 8.59896 8.59896 h -0.39687 -0.39688 z" fill="${color}" transform="translate(-94.938919, -112.4889)"/>
         </svg>
+      ` : isPianoPi ? `
+        <!-- ピアノ椅子 (丸の中に「ピ」) -->
+        <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
+        <text x="25" y="26" font-family="'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif" font-size="22" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="${color}">ピ</text>
       ` : `
         <!-- 合奏用椅子 (一重丸) -->
         <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="4.5"/>
@@ -500,6 +627,15 @@ export function generateSvgString(
     }
   }
 
+  if (customIconStyle === 'circlePi') {
+    if (template.type === 'pianoChair' || template.type === 'turnerChair') {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
+        <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
+        <text x="25" y="26" font-family="'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif" font-size="22" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="${color}">ピ</text>
+      </svg>`;
+    }
+  }
+
   // 2. Standard shape renderings
   if (template.svg) {
     return cleanSvg(template.svg, color);
@@ -529,10 +665,18 @@ export function generateSvgString(
 export function getTemplateDataUrl(
   template: TemplateShape,
   color = '#000000',
-  customIconStyle?: 'default' | 'xMark' | 'doubleCircle',
-  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg'
+  customIconStyle?: 'default' | 'xMark' | 'doubleCircle' | 'circlePi',
+  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg' | 'pianoChairPi'
 ): string {
   const svg = generateSvgString(template, color, customIconStyle, chairType);
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/**
+ * Generate a data URL for symbol items
+ */
+export function getSymbolDataUrl(options: Parameters<typeof generateSymbolSvg>[0] = {}): string {
+  const svg = generateSymbolSvg(options);
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
@@ -790,4 +934,37 @@ export function findMatchingTemplate(iconLabel: string, iconIndex: number): Temp
   }
 
   return null;
+}
+
+/**
+ * Infer template replacements from placed items and scenes if templateReplacements is missing.
+ * This ensures backwards-compatibility for older JSON backups or imported projects.
+ */
+export function inferTemplateReplacements(
+  extractedIcons: { id: string }[],
+  placedItems: { iconId: string; templateType?: string }[],
+  scenes?: { placedItems?: { iconId: string; templateType?: string }[] }[]
+): Record<string, string> {
+  const inferred: Record<string, string> = {};
+  if (!Array.isArray(extractedIcons) || extractedIcons.length === 0) return inferred;
+
+  const extractedIdSet = new Set(extractedIcons.map(ic => ic.id));
+  const allItems = [...(placedItems || [])];
+  if (Array.isArray(scenes)) {
+    scenes.forEach(sc => {
+      if (Array.isArray(sc.placedItems)) {
+        allItems.push(...sc.placedItems);
+      }
+    });
+  }
+
+  allItems.forEach(it => {
+    if (it.iconId && it.templateType && extractedIdSet.has(it.iconId)) {
+      const tmpl = TEMPLATE_SHAPES.find(t => t.type === it.templateType);
+      const tmplId = tmpl ? (tmpl.id || `tmpl_${tmpl.type}`) : `tmpl_${it.templateType}`;
+      inferred[it.iconId] = tmplId;
+    }
+  });
+
+  return inferred;
 }

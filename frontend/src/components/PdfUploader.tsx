@@ -48,28 +48,36 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({ onUploadSuccess }) => 
   });
 
   return (
-    <div className="w-full max-w-2xl mx-auto mt-8">
+    <div className="w-full max-w-2xl mx-auto mt-4">
       <div
         {...getRootProps()}
-        className={`border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-colors ${
-          isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+        className={`relative border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-300 ${
+          isDragActive
+            ? 'border-[#007AFF] bg-blue-500/10 scale-[1.01] shadow-[0_0_30px_rgba(0,122,255,0.2)]'
+            : 'border-slate-300/80 dark:border-slate-600/70 bg-white/45 dark:bg-slate-800/40 hover:bg-white/75 dark:hover:bg-slate-800/65 hover:border-blue-400/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9)]'
         }`}
       >
         <input {...getInputProps()} />
-        <UploadCloud className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+        <div className={`w-14 h-14 mx-auto mb-3.5 rounded-2xl flex items-center justify-center transition-all duration-300 ${
+          isDragActive
+            ? 'bg-[#007AFF] text-white scale-110 shadow-lg shadow-blue-500/30'
+            : 'liquid-btn text-[#007AFF] dark:text-sky-400'
+        }`}>
+          <UploadCloud className="h-7 w-7" />
+        </div>
         {isUploading ? (
-          <p className="text-gray-600 font-medium">PDFをアップロード・処理中...</p>
+          <p className="text-[#007AFF] dark:text-sky-400 font-bold text-sm animate-pulse">PDFをアップロード・処理中...</p>
         ) : isDragActive ? (
-          <p className="text-blue-500 font-medium">ここにPDFファイルをドロップしてください...</p>
+          <p className="text-[#007AFF] dark:text-sky-400 font-bold text-base">ここにPDFファイルをドロップしてください...</p>
         ) : (
           <div>
-            <p className="text-gray-800 text-lg font-medium">ここにステージ配置図のPDFをドラッグ＆ドロップ</p>
-            <p className="text-gray-500 text-sm mt-2">または クリックしてファイルを選択</p>
+            <p className="text-slate-800 dark:text-slate-100 text-base font-bold tracking-tight">ここにステージ配置図のPDFをドラッグ＆ドロップ</p>
+            <p className="text-slate-500 dark:text-slate-400 text-xs mt-1.5 font-medium">または <span className="text-[#007AFF] dark:text-sky-400 underline underline-offset-2 font-semibold">クリックしてファイルを選択</span></p>
           </div>
         )}
       </div>
       {error && (
-        <div className="mt-4 p-3 bg-red-100 text-red-700 rounded-md">
+        <div className="mt-4 p-3.5 bg-rose-500/10 border border-rose-400/40 text-rose-700 dark:text-rose-300 rounded-2xl text-xs font-semibold backdrop-blur-md">
           {error}
         </div>
       )}

@@ -1,13 +1,30 @@
 import React from 'react';
+import { 
+  AlignJustify, 
+  Lock, 
+  Copy, 
+  Trash2, 
+  Sparkles, 
+  Music, 
+  Square, 
+  X,
+  ArrowLeft,
+  ArrowRight,
+  RotateCw,
+  Move
+} from 'lucide-react';
 import type { PlacedItem } from './StageCanvas';
-import type { CurveObject } from '../utils/bezierUtils';
-import { TEMPLATE_SHAPES, PERCUSSION_DATA } from '../utils/templateShapes';
+import type { CurveObject, CurveItem } from '../utils/bezierUtils';
+import { TEMPLATE_SHAPES, PERCUSSION_DATA, getPercussionInfo, getGroupedPercussionData } from '../utils/templateShapes';
+import type { ItemLabelModalTarget } from './PercussionLabelModal';
 
 interface ItemInspectorProps {
   selectedItem: PlacedItem | null;
   selectedCurve: CurveObject | null;
   selectedCurveItemId?: string | null;
   onSelectCurveItem?: (itemId: string | null) => void;
+  onMoveCurveItemOrder?: (curveId: string, itemId: string, direction: 'left' | 'right') => void;
+  onDeleteCurveItem?: (curveId: string, itemId: string) => void;
   selectedCount?: number;
   centerPos?: { x: number; y: number };
   onUpdateItem: (id: string, updates: Partial<PlacedItem>) => void;
@@ -18,10 +35,12 @@ interface ItemInspectorProps {
   onDeleteItem: (id: string) => void;
   onDeleteCurve: (id: string) => void;
   onDeleteSelected?: () => void;
-  onUpdateAllOfType?: (type: 'stand' | 'pianoChair', style: 'default' | 'xMark' | 'doubleCircle') => void;
+  onUpdateAllOfType?: (type: 'stand' | 'pianoChair', style: 'default' | 'xMark' | 'doubleCircle' | 'circlePi') => void;
   onTogglePin?: () => void;
   onMoveOrder?: (direction: 'front' | 'back' | 'forward' | 'backward') => void;
   onAlign?: (type: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => void;
+  onOpenPercussionLabelModal?: (target: ItemLabelModalTarget) => void;
+  templateReplacements?: Record<string, string>;
 }
 
 export const ItemInspector: React.FC<ItemInspectorProps> = ({
@@ -29,6 +48,8 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
   selectedCurve,
   selectedCurveItemId,
   onSelectCurveItem,
+  onMoveCurveItemOrder,
+  onDeleteCurveItem,
   selectedCount = 0,
   centerPos,
   onUpdateItem,
@@ -43,20 +64,22 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
   onTogglePin,
   onMoveOrder,
   onAlign,
+  onOpenPercussionLabelModal,
+  templateReplacements,
 }) => {
   if (selectedCount > 1) {
     return (
-      <div key="multi-selection-inspector" className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors">
+      <div key="multi-selection-inspector" className="flex flex-col gap-4 p-4 text-sm liquid-glass border-l text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors">
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
           <h3 className="font-semibold text-slate-800 dark:text-slate-100">複数選択</h3>
-          <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+          <span className="text-xs font-bold text-[#007AFF] liquid-glass-pill px-2.5 py-0.5 rounded-full">
             {selectedCount} 個選択中
           </span>
         </div>
         <p className="text-xs text-slate-500 leading-relaxed">
           キャンバス上でまとめてドラッグ移動や回転が可能です。
         </p>
-        <div className="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+        <div className="p-3 liquid-card rounded-2xl text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
           <p className="font-semibold text-slate-700 dark:text-slate-200">ショートカット操作:</p>
           <div className="space-y-1 text-[11px]">
             <div>• <kbd className="px-1 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">Ctrl</kbd>+<kbd className="px-1 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">C</kbd> / <kbd className="px-1 py-0.5 bg-white dark:bg-slate-600 border border-slate-300 dark:border-slate-500 rounded font-mono text-[10px]">V</kbd>: 複製貼り付け</div>
@@ -67,8 +90,11 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         </div>
         {/* Align Controls */}
         {onAlign && (
-          <div className="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 space-y-2">
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">📐 一括整列・均等配置:</span>
+          <div className="p-3 liquid-card rounded-2xl space-y-2">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+              <AlignJustify className="w-3.5 h-3.5 text-[#007AFF]" />
+              <span>一括整列・均等配置:</span>
+            </span>
             <div className="grid grid-cols-3 gap-1 text-[11px]">
               <button
                 type="button"
@@ -76,7 +102,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
                 title="左揃え"
               >
-                ⬅ 左揃え
+                ← 左揃え
               </button>
               <button
                 type="button"
@@ -92,7 +118,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
                 title="右揃え"
               >
-                ➡ 右揃え
+                → 右揃え
               </button>
               <button
                 type="button"
@@ -100,7 +126,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
                 title="上揃え"
               >
-                ⬆ 上揃え
+                ↑ 上揃え
               </button>
               <button
                 type="button"
@@ -116,7 +142,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
                 title="下揃え"
               >
-                ⬇ 下揃え
+                ↓ 下揃え
               </button>
             </div>
             <div className="grid grid-cols-2 gap-1 text-[11px] pt-1 border-t border-slate-200 dark:border-slate-600">
@@ -142,7 +168,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
 
         {/* Order Controls */}
         {onMoveOrder && (
-          <div className="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 space-y-1.5">
+          <div className="p-3 liquid-card rounded-2xl space-y-1.5">
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">層（重なり順）:</span>
             <div className="grid grid-cols-2 gap-1.5 text-xs">
               <button
@@ -188,7 +214,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               onClick={onTogglePin}
               className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
             >
-              <span>📌</span>
+              <Lock className="w-3.5 h-3.5" />
               <span>選択オブジェクトを固定/解除 (Ctrl+F)</span>
             </button>
           )}
@@ -198,7 +224,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               onClick={onDuplicateSelected}
               className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
             >
-              <span>📑</span>
+              <Copy className="w-3.5 h-3.5" />
               <span>選択したオブジェクトを複製</span>
             </button>
           )}
@@ -208,7 +234,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               onClick={onDeleteSelected}
               className="w-full py-2.5 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-300 rounded-lg text-xs font-semibold border border-red-200 dark:border-red-800 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
             >
-              <span>🗑️</span>
+              <Trash2 className="w-3.5 h-3.5" />
               <span>選択したアイテムを一括削除</span>
             </button>
           )}
@@ -236,9 +262,12 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
       }
     };
 
-    const isPercussion = selectedItem.templateType === 'percussion';
-    const isPiano = selectedItem.templateType === 'piano';
-    const isSymbol = selectedItem.templateType === 'symbol';
+    const matchedTmplId = selectedItem ? templateReplacements?.[selectedItem.iconId] : undefined;
+    const isPercussion = selectedItem.templateType === 'percussion' || matchedTmplId === 'tmpl_percussion';
+    const isPiano = selectedItem.templateType === 'piano' || matchedTmplId === 'tmpl_piano';
+    const isSymbol = selectedItem.templateType === 'symbol' ||
+                     matchedTmplId === 'tmpl_symbol' ||
+                     matchedTmplId?.replace(/^tmpl_/, '') === 'symbol';
     const isStand = selectedItem.templateType === 'ensembleStand' ||
                     selectedItem.templateType === 'conductorStand' ||
                     selectedItem.templateType === 'ensembleChairAndStand';
@@ -248,7 +277,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
     return (
       <div
         key={`item-inspector-${selectedItem.id}`}
-        className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors"
+        className="flex flex-col gap-4 p-4 text-sm liquid-glass border-l text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors"
       >
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
           <div className="flex items-center gap-2">
@@ -263,7 +292,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                   onChange={onTogglePin}
                   className="rounded text-blue-600 w-3.5 h-3.5"
                 />
-                <span>📌固定</span>
+                <span>固定</span>
               </label>
             )}
           </div>
@@ -302,11 +331,15 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               type="number"
               step="1"
               min="10"
-              value={Math.round(selectedItem.width * selectedItem.scaleX)}
+              value={Math.round(selectedItem.width * (selectedItem.scaleX || 1))}
               onChange={(e) => {
                 const w = parseFloat(e.target.value);
                 if (!isNaN(w) && w > 0) {
-                  onUpdateItem(selectedItem.id, { scaleX: w / selectedItem.width });
+                  if (isSymbol) {
+                    onUpdateItem(selectedItem.id, { width: w, scaleX: 1 });
+                  } else {
+                    onUpdateItem(selectedItem.id, { scaleX: w / selectedItem.width });
+                  }
                 }
               }}
               className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
@@ -318,11 +351,15 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               type="number"
               step="1"
               min="10"
-              value={Math.round(selectedItem.height * selectedItem.scaleY)}
+              value={Math.round(selectedItem.height * (selectedItem.scaleY || 1))}
               onChange={(e) => {
                 const h = parseFloat(e.target.value);
                 if (!isNaN(h) && h > 0) {
-                  onUpdateItem(selectedItem.id, { scaleY: h / selectedItem.height });
+                  if (isSymbol) {
+                    onUpdateItem(selectedItem.id, { height: h, scaleY: 1 });
+                  } else {
+                    onUpdateItem(selectedItem.id, { scaleY: h / selectedItem.height });
+                  }
                 }
               }}
               className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
@@ -368,7 +405,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
           <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
             <h4 className="text-xs font-semibold text-slate-700 flex items-center justify-between">
               <span className="flex items-center gap-1">
-                <span>🎼</span> 譜面台アイコン表示
+                <span>♪</span> 譜面台アイコン表示
               </span>
               <span className="text-[10px] text-slate-400 font-normal">
                 {selectedItem.customIconStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
@@ -378,10 +415,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <button
                 type="button"
                 onClick={() => onUpdateItem(selectedItem.id, { customIconStyle: 'default' })}
-                className={`py-2 px-2 rounded-lg border text-xs font-bold flex flex-col items-center gap-1 transition-all ${
+                className={`py-2 px-2 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
                   (selectedItem.customIconStyle || 'default') === 'default'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'liquid-btn-primary'
+                    : 'liquid-btn text-slate-700 dark:text-slate-300'
                 }`}
               >
                 <span className="text-sm font-black leading-none">⊥</span>
@@ -390,13 +427,13 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <button
                 type="button"
                 onClick={() => onUpdateItem(selectedItem.id, { customIconStyle: 'xMark' })}
-                className={`py-2 px-2 rounded-lg border text-xs font-bold flex flex-col items-center gap-1 transition-all ${
+                className={`py-2 px-2 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
                   selectedItem.customIconStyle === 'xMark'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'liquid-btn-primary'
+                    : 'liquid-btn text-slate-700 dark:text-slate-300'
                 }`}
               >
-                <span className="text-sm font-black leading-none text-rose-600">✕</span>
+                <span className={`text-sm font-black leading-none ${selectedItem.customIconStyle === 'xMark' ? 'text-white' : 'text-rose-600'}`}>✕</span>
                 <span className="text-[11px]">Xマーク</span>
               </button>
             </div>
@@ -404,10 +441,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <button
                 type="button"
                 onClick={() => onUpdateAllOfType('stand', selectedItem.customIconStyle === 'xMark' ? 'xMark' : 'default')}
-                className="mt-1 text-[11px] text-blue-600 hover:text-blue-700 hover:bg-blue-50/70 border border-blue-200 py-1.5 px-2 rounded-md transition-colors font-medium flex items-center justify-center gap-1"
+                className="mt-1 text-[11px] liquid-btn text-[#007AFF] hover:text-blue-700 py-1.5 px-2 rounded-full transition-colors font-medium flex items-center justify-center gap-1 cursor-pointer"
                 title="ステージ上のすべての譜面台をこの表示スタイルに統一"
               >
-                <span>⚡</span>
+                <Sparkles className="w-3.5 h-3.5" />
                 <span>すべての譜面台に一括適用</span>
               </button>
             )}
@@ -416,59 +453,125 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
 
         {/* 椅子＋譜面台 (ensembleChairAndStand) の場合の「椅子の種類」切り替え */}
         {selectedItem.templateType === 'ensembleChairAndStand' && (
-          <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
-            <h4 className="text-xs font-semibold text-slate-700 flex items-center justify-between">
+          <div className="pt-4 border-t border-slate-200/60 dark:border-slate-700/60 flex flex-col gap-2.5">
+            <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center justify-between">
               <span className="flex items-center gap-1">
-                <span>🪑</span> 椅子の種類
+                <Square className="w-3.5 h-3.5 text-[#007AFF]" /> 椅子の種類
               </span>
-              <span className="text-[10px] text-slate-400 font-normal">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                 {selectedItem.chairType === 'pianoChairSvg'
-                  ? 'ピアノ椅子 (🪑)'
+                  ? 'ピアノ椅子 (角型)'
                   : selectedItem.chairType === 'pianoChair'
                   ? 'ピアノ椅子 (◎)'
+                  : selectedItem.chairType === 'pianoChairPi'
+                  ? 'ピアノ椅子 (ピ)'
                   : '合奏用椅子 (○)'}
               </span>
             </h4>
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                type="button"
-                onClick={() => onUpdateItem(selectedItem.id, { chairType: 'normal' })}
-                className={`py-2 px-1 rounded-lg border text-xs font-bold flex flex-col items-center gap-1 transition-all ${
-                  (selectedItem.chairType || 'normal') === 'normal'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="text-sm font-bold leading-none">○</span>
-                <span className="text-[10px]">合奏用椅子</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateItem(selectedItem.id, { chairType: 'pianoChair' })}
-                className={`py-2 px-1 rounded-lg border text-xs font-bold flex flex-col items-center gap-1 transition-all ${
-                  selectedItem.chairType === 'pianoChair'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="text-sm font-black leading-none text-emerald-600">◎</span>
-                <span className="text-[10px]">二重丸</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateItem(selectedItem.id, { chairType: 'pianoChairSvg' })}
-                className={`py-2 px-1 rounded-lg border text-xs font-bold flex flex-col items-center gap-1 transition-all ${
-                  selectedItem.chairType === 'pianoChairSvg'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="text-sm leading-none">🪑</span>
-                <span className="text-[10px]">ピアノ椅子</span>
-              </button>
+
+            {/* 1. 椅子の分類選択 (合奏用椅子 vs ピアノ椅子) */}
+            <div>
+              <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1.5 block">
+                1. 椅子の種類を選択:
+              </span>
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/80 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => onUpdateItem(selectedItem.id, { chairType: 'normal' })}
+                  className={`py-2 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    (selectedItem.chairType || 'normal') === 'normal'
+                      ? 'liquid-btn-primary shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <span className="text-xs">○</span>
+                  <span>合奏用椅子</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const currentIsPiano = selectedItem.chairType === 'pianoChair' || selectedItem.chairType === 'pianoChairSvg' || selectedItem.chairType === 'pianoChairPi';
+                    const targetType = currentIsPiano ? selectedItem.chairType : 'pianoChairSvg';
+                    onUpdateItem(selectedItem.id, { chairType: targetType });
+                  }}
+                  className={`py-2 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    selectedItem.chairType === 'pianoChair' || selectedItem.chairType === 'pianoChairSvg' || selectedItem.chairType === 'pianoChairPi'
+                      ? 'liquid-btn-primary shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Square className="w-3.5 h-3.5" />
+                  <span>ピアノ椅子</span>
+                </button>
+              </div>
             </div>
-            <p className="text-[10px] text-slate-500 leading-tight">
-              ※「二重丸」または「ピアノ椅子」を選択すると、提出書類の集計欄でもピアノ椅子として自動カウントされます。
+
+            {/* 2. それに連続してスタイルの選択 */}
+            <div className="pt-1">
+              <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1.5 block">
+                2. 表示スタイルを選択:
+              </span>
+              {(selectedItem.chairType || 'normal') === 'normal' ? (
+                /* 合奏用椅子のスタイル: 丸 */
+                <div className="p-2.5 liquid-card rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-7 h-7 rounded-lg bg-[#007AFF]/15 text-[#007AFF] font-bold flex items-center justify-center text-sm shadow-2xs">
+                      ○
+                    </span>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">丸 (○)</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">通常の合奏用丸椅子として表示・集計</span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-[#007AFF] bg-[#007AFF]/10 px-2 py-0.5 rounded-full">選択中</span>
+                </div>
+              ) : (
+                /* ピアノ椅子のスタイル: ピアノ椅子の画像 か 二重丸 か 丸の中にピ */
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateItem(selectedItem.id, { chairType: 'pianoChairSvg' })}
+                    className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                      selectedItem.chairType === 'pianoChairSvg'
+                        ? 'liquid-btn-primary shadow-xs'
+                        : 'liquid-btn text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <Square className="w-4 h-4" />
+                    <span className="text-[10px]">画像</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateItem(selectedItem.id, { chairType: 'pianoChair' })}
+                    className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                      selectedItem.chairType === 'pianoChair'
+                        ? 'liquid-btn-primary shadow-xs'
+                        : 'liquid-btn text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <span className={`font-black text-sm leading-none ${selectedItem.chairType === 'pianoChair' ? 'text-white' : 'text-emerald-600'}`}>◎</span>
+                    <span className="text-[10px]">二重丸 (◎)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateItem(selectedItem.id, { chairType: 'pianoChairPi' })}
+                    className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                      selectedItem.chairType === 'pianoChairPi'
+                        ? 'liquid-btn-primary shadow-xs'
+                        : 'liquid-btn text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <span className={`w-4 h-4 rounded-full border border-current flex items-center justify-center font-bold text-[10px] leading-none ${selectedItem.chairType === 'pianoChairPi' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`}>ピ</span>
+                    <span className="text-[10px]">丸ピ (ピ)</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+              {(selectedItem.chairType || 'normal') === 'normal'
+                ? '※ 提出書類の集計欄では「合奏用椅子」として自動カウントされます。'
+                : '※「ピアノ椅子画像」「二重丸」「丸ピ」を選択すると、提出書類の集計欄でも「ピアノ椅子」として自動カウントされます。'}
             </p>
           </div>
         )}
@@ -477,46 +580,62 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
           <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
             <h4 className="text-xs font-semibold text-slate-700 flex items-center justify-between">
               <span className="flex items-center gap-1">
-                <span>🪑</span> ピアノ椅子表示
+                <Square className="w-3.5 h-3.5 text-[#007AFF]" /> ピアノ椅子表示
               </span>
               <span className="text-[10px] text-slate-400 font-normal">
-                {selectedItem.customIconStyle === 'doubleCircle' ? '二重丸 (◎)' : '通常'}
+                {selectedItem.customIconStyle === 'doubleCircle'
+                  ? '二重丸 (◎)'
+                  : selectedItem.customIconStyle === 'circlePi'
+                  ? '丸ピ (ピ)'
+                  : '通常'}
               </span>
             </h4>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               <button
                 type="button"
                 onClick={() => onUpdateItem(selectedItem.id, { customIconStyle: 'default' })}
-                className={`py-2 px-2 rounded-lg border text-xs font-bold flex flex-col items-center gap-1 transition-all ${
+                className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
                   (selectedItem.customIconStyle || 'default') === 'default'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'liquid-btn-primary'
+                    : 'liquid-btn text-slate-700 dark:text-slate-300'
                 }`}
               >
-                <span className="text-sm font-bold leading-none">🪑</span>
-                <span className="text-[11px]">通常椅子</span>
+                <Square className="w-3.5 h-3.5" />
+                <span className="text-[10px]">通常椅子</span>
               </button>
               <button
                 type="button"
                 onClick={() => onUpdateItem(selectedItem.id, { customIconStyle: 'doubleCircle' })}
-                className={`py-2 px-2 rounded-lg border text-xs font-bold flex flex-col items-center gap-1 transition-all ${
+                className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
                   selectedItem.customIconStyle === 'doubleCircle'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'liquid-btn-primary'
+                    : 'liquid-btn text-slate-700 dark:text-slate-300'
                 }`}
               >
-                <span className="text-sm font-black leading-none text-emerald-600">◎</span>
-                <span className="text-[11px]">二重丸 (◎)</span>
+                <span className={`text-sm font-black leading-none ${selectedItem.customIconStyle === 'doubleCircle' ? 'text-white' : 'text-emerald-600'}`}>◎</span>
+                <span className="text-[10px]">二重丸 (◎)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateItem(selectedItem.id, { customIconStyle: 'circlePi' })}
+                className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                  selectedItem.customIconStyle === 'circlePi'
+                    ? 'liquid-btn-primary'
+                    : 'liquid-btn text-slate-700 dark:text-slate-300'
+                }`}
+              >
+                <span className={`w-4 h-4 rounded-full border border-current flex items-center justify-center font-bold text-[10px] leading-none ${selectedItem.customIconStyle === 'circlePi' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`}>ピ</span>
+                <span className="text-[10px]">丸ピ (ピ)</span>
               </button>
             </div>
             {onUpdateAllOfType && (
               <button
                 type="button"
-                onClick={() => onUpdateAllOfType('pianoChair', selectedItem.customIconStyle === 'doubleCircle' ? 'doubleCircle' : 'default')}
-                className="mt-1 text-[11px] text-blue-600 hover:text-blue-700 hover:bg-blue-50/70 border border-blue-200 py-1.5 px-2 rounded-md transition-colors font-medium flex items-center justify-center gap-1"
+                onClick={() => onUpdateAllOfType('pianoChair', selectedItem.customIconStyle || 'default')}
+                className="mt-1 text-[11px] liquid-btn text-[#007AFF] hover:text-blue-700 py-1.5 px-2 rounded-full transition-colors font-medium flex items-center justify-center gap-1 cursor-pointer"
                 title="ステージ上のすべてのピアノ椅子をこの表示スタイルに統一"
               >
-                <span>⚡</span>
+                <Sparkles className="w-3.5 h-3.5" />
                 <span>すべてのピアノ椅子に一括適用</span>
               </button>
             )}
@@ -526,7 +645,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         {isPercussion && (
           <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
             <h4 className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-              <span>🥁</span> パーカッション設定
+              <span>●</span> パーカッション設定
             </h4>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-slate-500 font-medium">楽器種類</span>
@@ -549,8 +668,12 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 }}
                 className="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white"
               >
-                {PERCUSSION_DATA.map(p => (
-                  <option key={p.dropdownName} value={p.dropdownName}>{p.dropdownName} ({p.canvasName})</option>
+                {getGroupedPercussionData().map(group => (
+                  <optgroup key={group.category} label={group.category}>
+                    {group.items.map(p => (
+                      <option key={p.dropdownName} value={p.dropdownName}>{p.dropdownName} ({p.canvasName})</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>
@@ -563,13 +686,48 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               />
               <span className="text-xs text-slate-600 font-medium">名前をキャンバスに表示</span>
             </label>
+
+            {selectedItem.showPercussionName !== false && onOpenPercussionLabelModal && (
+              <button
+                type="button"
+                onClick={() => {
+                  const percInfo = getPercussionInfo(selectedItem.percussionType);
+                  const targetAspect = percInfo ? (percInfo.defaultW || 1.34) / (percInfo.defaultH || 1.34) : 1;
+                  const currentAspect = selectedItem.width / selectedItem.height;
+                  const effW = Math.abs(currentAspect - targetAspect) > 0.25 ? Math.round(selectedItem.height * targetAspect) : selectedItem.width;
+                  const effH = selectedItem.height;
+                  onOpenPercussionLabelModal({
+                    type: 'placedItem',
+                    itemId: selectedItem.id,
+                    targetType: 'percussion',
+                    canvasName: percInfo?.canvasName || selectedItem.percussionType || '打楽器',
+                    percussionType: selectedItem.percussionType || 'ティンパニ',
+                    initialText: percInfo?.canvasName || '',
+                    width: effW,
+                    height: effH,
+                    color: selectedItem.color,
+                    currentOffsetX: selectedItem.labelOffsetX || 0,
+                    currentOffsetY: selectedItem.labelOffsetY || 0,
+                    currentRotation: selectedItem.labelRotation || 0,
+                    currentFontSize: selectedItem.labelFontSize,
+                    currentLetterSpacing: selectedItem.labelLetterSpacing || 0,
+                    isVertical: Boolean(selectedItem.isVerticalName),
+                  });
+                }}
+                className="mt-1 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
+              >
+                <Move className="w-3.5 h-3.5" />
+                <span>名前の位置・回転・サイズを設定...</span>
+              </button>
+            )}
           </div>
         )}
 
         {isPiano && (
           <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
-            <h4 className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-              <span>🎹</span> ピアノ設定
+            <h4 className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <Music className="w-3.5 h-3.5 text-[#007AFF]" />
+              <span>ピアノ設定</span>
             </h4>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-slate-500 font-medium">蓋の状態</span>
@@ -590,7 +748,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         {isSymbol && (
           <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex flex-col gap-3">
             <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1">
-              <span>🔲</span> 記号の設定
+              <span>◇</span> 記号の設定
             </h4>
 
             {/* 形状選択 */}
@@ -598,10 +756,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">図形の形状</span>
               <div className="grid grid-cols-4 gap-1">
                 {[
-                  { shape: 'circle', label: '丸 ⭕' },
-                  { shape: 'cross', label: 'バツ ❌' },
-                  { shape: 'rect', label: '四角 ⬛' },
-                  { shape: 'triangle', label: '三角 🔺' },
+                  { shape: 'circle', label: '○ 丸' },
+                  { shape: 'cross', label: '✕ バツ' },
+                  { shape: 'rect', label: '□ 四角' },
+                  { shape: 'triangle', label: '△ 三角' },
                 ].map(({ shape, label }) => {
                   const active = (selectedItem.symbolShape || 'circle') === shape;
                   return (
@@ -609,10 +767,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       key={shape}
                       type="button"
                       onClick={() => onUpdateItem(selectedItem.id, { symbolShape: shape as any })}
-                      className={`py-1.5 px-1 text-xs rounded border text-center transition-all ${
+                      className={`py-1.5 px-1 text-xs rounded-xl text-center transition-all cursor-pointer ${
                         active
-                          ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold shadow-sm'
-                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                          ? 'liquid-btn-primary'
+                          : 'liquid-btn text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       {label}
@@ -629,24 +787,24 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 <button
                   type="button"
                   onClick={() => onUpdateItem(selectedItem.id, { symbolFilled: false })}
-                  className={`py-1.5 px-2 text-xs rounded border text-center transition-all ${
+                  className={`py-1.5 px-2 text-xs rounded-xl text-center transition-all cursor-pointer ${
                     !selectedItem.symbolFilled
-                      ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold shadow-sm'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                      ? 'liquid-btn-primary'
+                      : 'liquid-btn text-slate-700 dark:text-slate-300'
                   }`}
                 >
-                  枠線のみ ◻️
+                  □ 枠線のみ
                 </button>
                 <button
                   type="button"
                   onClick={() => onUpdateItem(selectedItem.id, { symbolFilled: true })}
-                  className={`py-1.5 px-2 text-xs rounded border text-center transition-all ${
+                  className={`py-1.5 px-2 text-xs rounded-xl text-center transition-all cursor-pointer ${
                     selectedItem.symbolFilled
-                      ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold shadow-sm'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                      ? 'liquid-btn-primary'
+                      : 'liquid-btn text-slate-700 dark:text-slate-300'
                   }`}
                 >
-                  塗りつぶし ◼️
+                  ■ 塗りつぶし
                 </button>
               </div>
             </div>
@@ -677,10 +835,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       key={sz}
                       type="button"
                       onClick={() => onUpdateItem(selectedItem.id, { symbolFontSize: sz })}
-                      className={`py-1 text-xs rounded border text-center transition-all ${
+                      className={`py-1 text-xs rounded-xl text-center transition-all cursor-pointer ${
                         active
-                          ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold'
-                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                          ? 'liquid-btn-primary'
+                          : 'liquid-btn text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       {sz}px
@@ -697,6 +855,36 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 className="w-full mt-1 accent-blue-600"
               />
             </div>
+
+            {onOpenPercussionLabelModal && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenPercussionLabelModal({
+                    type: 'placedItem',
+                    itemId: selectedItem.id,
+                    targetType: 'symbol',
+                    canvasName: '記号テキスト',
+                    symbolShape: selectedItem.symbolShape || 'circle',
+                    symbolFilled: Boolean(selectedItem.symbolFilled),
+                    initialText: selectedItem.symbolText || '',
+                    width: selectedItem.width,
+                    height: selectedItem.height,
+                    color: selectedItem.color,
+                    currentOffsetX: selectedItem.labelOffsetX || 0,
+                    currentOffsetY: selectedItem.labelOffsetY || 0,
+                    currentRotation: selectedItem.labelRotation || 0,
+                    currentFontSize: selectedItem.labelFontSize || selectedItem.symbolFontSize,
+                    currentLetterSpacing: selectedItem.labelLetterSpacing || 0,
+                    isVertical: Boolean(selectedItem.isVerticalName),
+                  });
+                }}
+                className="mt-1 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
+              >
+                <Move className="w-3.5 h-3.5" />
+                <span>文字の位置・回転・サイズを設定...</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -725,19 +913,13 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
     };
 
     const isPercussion = selectedCurve.itemType === 'percussion';
-    const hasCurveStands = selectedCurve.itemType === 'ensembleStand' ||
-                           selectedCurve.itemType === 'conductorStand' ||
-                           selectedCurve.itemType === 'ensembleChairAndStand' ||
-                           (Array.isArray(selectedCurve.items) && selectedCurve.items.some(it =>
-                             it.type === 'ensembleStand' || it.type === 'conductorStand' || it.type === 'ensembleChairAndStand'
-                           ));
-    const hasChairAndStand = selectedCurve.itemType === 'ensembleChairAndStand' ||
-                             (Array.isArray(selectedCurve.items) && selectedCurve.items.some(it => it.type === 'ensembleChairAndStand'));
+
+
 
     return (
       <div
         key={`curve-inspector-${selectedCurve.id}`}
-        className="flex flex-col gap-4 p-4 text-sm bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors"
+        className="flex flex-col gap-4 p-4 text-sm liquid-glass border-l text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors"
       >
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
           <div className="flex items-center gap-2">
@@ -752,7 +934,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                   onChange={onTogglePin}
                   className="rounded text-blue-600 w-3.5 h-3.5"
                 />
-                <span>📌固定</span>
+                <span>固定</span>
               </label>
             )}
           </div>
@@ -788,9 +970,86 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
           </label>
         </div>
 
+        {/* Rotation Controls */}
+        <div className="flex flex-col gap-1.5 p-2.5 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+              <RotateCw className="w-3.5 h-3.5 text-[#007AFF]" />
+              回転角度
+            </span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                step="1"
+                min="-360"
+                max="360"
+                value={Math.round(selectedCurve.rotation || 0)}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) {
+                    let norm = Math.round(val % 360);
+                    if (norm < 0) norm += 360;
+                    onUpdateCurve(selectedCurve.id, { rotation: norm });
+                  }
+                }}
+                className="w-16 px-1.5 py-0.5 text-xs border border-slate-300 dark:border-slate-600 dark:bg-slate-700 rounded text-right font-mono"
+              />
+              <span className="text-xs text-slate-500 dark:text-slate-400">度</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pt-0.5">
+            <input
+              type="range"
+              min="0"
+              max="360"
+              step="1"
+              value={Math.round(((selectedCurve.rotation || 0) % 360 + 360) % 360)}
+              onChange={(e) => {
+                onUpdateCurve(selectedCurve.id, { rotation: parseFloat(e.target.value) });
+              }}
+              className="w-full accent-[#007AFF] cursor-pointer"
+            />
+          </div>
+
+          {/* Quick Rotation Buttons */}
+          <div className="grid grid-cols-5 gap-1 pt-0.5">
+            {[
+              { label: '-90°', delta: -90 },
+              { label: '-15°', delta: -15 },
+              { label: '0°', reset: 0 },
+              { label: '+15°', delta: 15 },
+              { label: '+90°', delta: 90 },
+            ].map((btn, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  if (btn.reset !== undefined) {
+                    onUpdateCurve(selectedCurve.id, { rotation: 0 });
+                  } else if (btn.delta !== undefined) {
+                    const cur = selectedCurve.rotation || 0;
+                    let next = Math.round((cur + btn.delta) % 360);
+                    if (next < 0) next += 360;
+                    onUpdateCurve(selectedCurve.id, { rotation: next });
+                  }
+                }}
+                className={`py-1 rounded text-[11px] font-mono font-medium transition-all cursor-pointer ${
+                  btn.reset !== undefined && (selectedCurve.rotation || 0) === 0
+                    ? 'liquid-btn-primary shadow-xs'
+                    : 'liquid-btn text-slate-700 dark:text-slate-300 hover:text-slate-900'
+                }`}
+                title={btn.reset !== undefined ? '角度を0°にリセット' : `${btn.label} 回転`}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Order Controls */}
         {onMoveOrder && (
-          <div className="p-3 bg-slate-50 dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 space-y-1.5">
+          <div className="p-3 liquid-card rounded-2xl space-y-1.5">
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">層（重なり順）:</span>
             <div className="grid grid-cols-2 gap-1.5 text-xs">
               <button
@@ -834,6 +1093,32 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
             const curveItems = selectedCurve.items || [];
             const activeItemIndex = selectedCurveItemId ? curveItems.findIndex(it => it.id === selectedCurveItemId) : -1;
             const activeItem = activeItemIndex >= 0 ? curveItems[activeItemIndex] : null;
+
+            const isEnsembleChairAndStand = (it?: CurveItem | null) => {
+              if (!it) return false;
+              const t = it.type || '';
+              return t === 'ensembleChairAndStand' ||
+                Boolean(it.label && (it.label.includes('椅子') || it.label.includes('イス')) && (it.label.includes('譜面台') || it.label.includes('スタンド')));
+            };
+
+            const isPianoChairItem = (it?: CurveItem | null) => {
+              if (!it) return false;
+              if (isEnsembleChairAndStand(it)) return false;
+              const t = it.type || '';
+              return t === 'pianoChair' ||
+                t === 'turnerChair' ||
+                Boolean(it.label && (it.label.includes('ピアノ') && (it.label.includes('椅子') || it.label.includes('イス'))));
+            };
+
+            const isStandItem = (it?: CurveItem | null) => {
+              if (!it) return false;
+              const t = it.type || '';
+              return t === 'ensembleStand' ||
+                t === 'conductorStand' ||
+                t === 'ensembleChairAndStand' ||
+                t.includes('Stand') ||
+                Boolean(it.label && (it.label.includes('譜面台') || it.label.includes('スタンド')));
+            };
 
             const handleUpdateItemGap = (itemId: string, newGap: number | undefined) => {
               const nextItems = curveItems.map(it => {
@@ -880,77 +1165,669 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                           選択中: {activeItemIndex + 1}. {activeItem.label || activeItem.type}
                         </span>
                       </div>
-                      <button
-                        onClick={() => onSelectCurveItem?.(null)}
-                        className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
-                      >
-                        選択解除
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onDeleteCurveItem) {
+                              onDeleteCurveItem(selectedCurve.id, activeItem.id);
+                            } else {
+                              const next = curveItems.filter(it => it.id !== activeItem.id);
+                              onSelectCurveItem?.(null);
+                              onUpdateCurve(selectedCurve.id, { items: next, itemCount: next.length });
+                            }
+                          }}
+                          className="text-[11px] text-red-600 hover:text-red-700 dark:text-red-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                          title="このオブジェクトを曲線から削除 (Deleteキー)"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>削除</span>
+                        </button>
+                        <button
+                          onClick={() => onSelectCurveItem?.(null)}
+                          className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
+                        >
+                          選択解除
+                        </button>
+                      </div>
                     </div>
 
-                    {activeItemIndex === curveItems.length - 1 ? (
-                      <div className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded border border-amber-200 dark:border-amber-800 leading-snug">
-                        ※ 末尾のアイテムのため、右隣に配置アイテムはありません
+                    {/* 左右への順序移動ボタン */}
+                    <div className="flex items-center justify-between pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
+                      <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        並び順を移動:
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={activeItemIndex <= 0}
+                          onClick={() => onMoveCurveItemOrder?.(selectedCurve.id, activeItem.id, 'left')}
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer transition-all hover:scale-102 active:scale-98"
+                          title="左隣（始点側）へ移動 ([ または Alt+←])"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                          <span>左隣へ</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={activeItemIndex >= curveItems.length - 1}
+                          onClick={() => onMoveCurveItemOrder?.(selectedCurve.id, activeItem.id, 'right')}
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer transition-all hover:scale-102 active:scale-98"
+                          title="右隣（終点側）へ移動 (] または Alt+→)"
+                        >
+                          <span>右隣へ</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                    ) : (
-                      <div className="flex flex-col gap-1.5 pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                            右隣との間隔
-                          </span>
-                          {activeItem.gap !== undefined && (
+                    </div>
+
+                    {/* 左隣との間隔（末尾アイテム選択時に左隣との間隔も素早く変更できるように提供） */}
+                    {activeItemIndex > 0 && activeItemIndex === curveItems.length - 1 && (() => {
+                      const prevItem = curveItems[activeItemIndex - 1];
+                      const prevGap = prevItem.gap !== undefined ? prevItem.gap : selectedCurve.itemGap;
+                      return (
+                        <div className="flex flex-col gap-1.5 pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                              左隣との間隔
+                            </span>
+                            {prevItem.gap !== undefined && (
+                              <button
+                                onClick={() => handleUpdateItemGap(prevItem.id, undefined)}
+                                className="text-[10px] text-slate-500 hover:text-blue-700 dark:text-slate-400 dark:hover:text-blue-300 underline cursor-pointer"
+                                title="曲線全体の標準間隔に戻す"
+                              >
+                                標準 ({Math.round(selectedCurve.itemGap)}px) に戻す
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="0"
+                              max="500"
+                              value={Math.round(prevGap)}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                if (!isNaN(val) && val >= 0) {
+                                  handleUpdateItemGap(prevItem.id, val);
+                                }
+                              }}
+                              className="w-20 px-2 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono"
+                            />
+                            <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
+                            <div className="flex items-center gap-1 ml-auto">
+                              {[-5, -1, 1, 5].map((delta) => (
+                                <button
+                                  key={delta}
+                                  type="button"
+                                  onClick={() => {
+                                    handleUpdateItemGap(prevItem.id, Math.max(0, prevGap + delta));
+                                  }}
+                                  className="px-1.5 py-0.5 text-[11px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
+                                >
+                                  {delta > 0 ? `+${delta}` : delta}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <input
+                            type="range"
+                            min="0"
+                            max="200"
+                            value={Math.round(prevGap)}
+                            onChange={(e) => handleUpdateItemGap(prevItem.id, parseFloat(e.target.value))}
+                            className="w-full accent-blue-600 mt-0.5 cursor-pointer"
+                          />
+                        </div>
+                      );
+                    })()}
+
+                    <div className="flex flex-col gap-1.5 pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                          {activeItemIndex === curveItems.length - 1 ? '右の間隔（曲線の終点側）' : '右隣との間隔'}
+                        </span>
+                        {activeItem.gap !== undefined && (
+                          <button
+                            onClick={() => handleUpdateItemGap(activeItem.id, undefined)}
+                            className="text-[10px] text-slate-500 hover:text-blue-700 dark:text-slate-400 dark:hover:text-blue-300 underline cursor-pointer"
+                            title="曲線全体の標準間隔に戻す"
+                          >
+                            標準 ({Math.round(selectedCurve.itemGap)}px) に戻す
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="500"
+                          value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val) && val >= 0) {
+                              handleUpdateItemGap(activeItem.id, val);
+                            }
+                          }}
+                          className="w-20 px-2 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono"
+                        />
+                        <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
+                        <div className="flex items-center gap-1 ml-auto">
+                          {[-5, -1, 1, 5].map((delta) => (
                             <button
-                              onClick={() => handleUpdateItemGap(activeItem.id, undefined)}
-                              className="text-[10px] text-slate-500 hover:text-blue-700 dark:text-slate-400 dark:hover:text-blue-300 underline cursor-pointer"
-                              title="曲線全体の標準間隔に戻す"
+                              key={delta}
+                              type="button"
+                              onClick={() => {
+                                const cur = activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap;
+                                handleUpdateItemGap(activeItem.id, Math.max(0, cur + delta));
+                              }}
+                              className="px-1.5 py-0.5 text-[11px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
                             >
-                              標準 ({Math.round(selectedCurve.itemGap)}px) に戻す
+                              {delta > 0 ? `+${delta}` : delta}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <input
+                        type="range"
+                        min="0"
+                        max="200"
+                        value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
+                        onChange={(e) => handleUpdateItemGap(activeItem.id, parseFloat(e.target.value))}
+                        className="w-full accent-blue-600 mt-0.5 cursor-pointer"
+                      />
+
+                      {activeItemIndex === curveItems.length - 1 && (
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                          ※ 右端のオブジェクトの右側に空ける間隔（余白）としてキャンバス上に直接反映されます
+                        </p>
+                      )}
+                    </div>
+
+                    {/* 合奏用椅子＋譜面台 (ensembleChairAndStand) の時だけ表示する「椅子の種類」設定 */}
+                    {isEnsembleChairAndStand(activeItem) && (() => {
+                      const activeChairType: 'normal' | 'pianoChair' | 'pianoChairSvg' | 'pianoChairPi' =
+                        activeItem.chairType || selectedCurve.chairType || 'normal';
+
+                      const handleUpdateActiveChairType = (targetType: 'normal' | 'pianoChair' | 'pianoChairSvg' | 'pianoChairPi') => {
+                        const nextItems = curveItems.map(it => {
+                          if (it.id === activeItem.id) {
+                            return { ...it, chairType: targetType };
+                          }
+                          return it;
+                        });
+                        onUpdateCurve(selectedCurve.id, {
+                          items: nextItems,
+                        });
+                      };
+
+                      const handleApplyToAllCurveChairs = () => {
+                        const targetType = activeItem.chairType || selectedCurve.chairType || 'normal';
+                        const nextItems = curveItems.map(it => {
+                          if (isEnsembleChairAndStand(it)) {
+                            return { ...it, chairType: targetType };
+                          }
+                          return it;
+                        });
+                        onUpdateCurve(selectedCurve.id, {
+                          chairType: targetType,
+                          items: nextItems,
+                        });
+                      };
+
+                      return (
+                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
+                              <Square className="w-3.5 h-3.5 text-[#007AFF]" />
+                              椅子の種類設定
+                            </span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                              {activeChairType === 'pianoChairSvg'
+                                ? 'ピアノ椅子 (画像)'
+                                : activeChairType === 'pianoChair'
+                                ? 'ピアノ椅子 (◎)'
+                                : activeChairType === 'pianoChairPi'
+                                ? 'ピアノ椅子 (ピ)'
+                                : '合奏用椅子 (○)'}
+                            </span>
+                          </div>
+
+                          {/* 1. 椅子の分類選択 (合奏用椅子 vs ピアノ椅子) */}
+                          <div>
+                            <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">
+                              1. 椅子の種類
+                            </span>
+                            <div className="grid grid-cols-2 gap-1 p-0.5 bg-white/70 dark:bg-slate-800/70 border border-blue-200/60 dark:border-blue-800/60 rounded-xl">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateActiveChairType('normal')}
+                                className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                  activeChairType === 'normal'
+                                    ? 'liquid-btn-primary shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                              >
+                                <span className="text-xs">○</span>
+                                <span>合奏用椅子</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isPiano = activeChairType === 'pianoChair' || activeChairType === 'pianoChairSvg' || activeChairType === 'pianoChairPi';
+                                  const targetType = isPiano ? activeChairType : 'pianoChairSvg';
+                                  handleUpdateActiveChairType(targetType);
+                                }}
+                                className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                  activeChairType === 'pianoChair' || activeChairType === 'pianoChairSvg' || activeChairType === 'pianoChairPi'
+                                    ? 'liquid-btn-primary shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                              >
+                                <Square className="w-3.5 h-3.5" />
+                                <span>ピアノ椅子</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 2. それに連続して表示スタイルの選択 */}
+                          <div>
+                            <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">
+                              2. 表示スタイル
+                            </span>
+                            {activeChairType === 'normal' ? (
+                              <div className="p-2 liquid-card rounded-xl flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-6 h-6 rounded-lg bg-[#007AFF]/15 text-[#007AFF] font-bold flex items-center justify-center text-xs shadow-2xs">
+                                    ○
+                                  </span>
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">丸 (○)</span>
+                                    <span className="text-[10px] text-slate-500 dark:text-slate-400">通常の合奏用丸椅子として表示・集計</span>
+                                  </div>
+                                </div>
+                                <span className="text-[11px] font-bold text-[#007AFF] bg-[#007AFF]/10 px-2 py-0.5 rounded-full">選択中</span>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-3 gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateActiveChairType('pianoChairSvg')}
+                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                                    activeChairType === 'pianoChairSvg'
+                                      ? 'liquid-btn-primary shadow-xs'
+                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <Square className="w-3.5 h-3.5" />
+                                  <span className="text-[10px]">画像</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateActiveChairType('pianoChair')}
+                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                                    activeChairType === 'pianoChair'
+                                      ? 'liquid-btn-primary shadow-xs'
+                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <span className={`font-black text-xs leading-none ${activeChairType === 'pianoChair' ? 'text-white' : 'text-emerald-600'}`}>◎</span>
+                                  <span className="text-[10px]">二重丸 (◎)</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateActiveChairType('pianoChairPi')}
+                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                                    activeChairType === 'pianoChairPi'
+                                      ? 'liquid-btn-primary shadow-xs'
+                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <span className={`w-4 h-4 rounded-full border border-current flex items-center justify-center font-bold text-[10px] leading-none ${activeChairType === 'pianoChairPi' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`}>ピ</span>
+                                  <span className="text-[10px]">丸ピ (ピ)</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 全てに適応ボタン (ベジェ上のみ) */}
+                          <button
+                            type="button"
+                            onClick={handleApplyToAllCurveChairs}
+                            className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                            title="このベジェ曲線上のすべての合奏用椅子・譜面台をこの設定に一括適用します"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>この曲線のすべての合奏用椅子・譜面台に適用</span>
+                          </button>
+
+                          <p className="text-[9.5px] text-slate-500 dark:text-slate-400 leading-tight">
+                            {activeChairType === 'normal'
+                              ? '※ この椅子は「合奏用椅子」として自動カウントされます。'
+                              : '※ この椅子は「ピアノ椅子」として自動カウントされます。'}
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ピアノ椅子単体の場合: 通常オブジェクトと同様の「ピアノ椅子表示 (通常椅子 vs 二重丸 vs 丸ピ)」 */}
+                    {isPianoChairItem(activeItem) && (() => {
+                      const activeIconStyle: 'default' | 'doubleCircle' | 'circlePi' =
+                        activeItem.customIconStyle === 'doubleCircle'
+                          ? 'doubleCircle'
+                          : activeItem.customIconStyle === 'circlePi'
+                          ? 'circlePi'
+                          : activeItem.customIconStyle === 'default'
+                          ? 'default'
+                          : selectedCurve.customIconStyle === 'doubleCircle'
+                          ? 'doubleCircle'
+                          : selectedCurve.customIconStyle === 'circlePi'
+                          ? 'circlePi'
+                          : 'default';
+
+                      const handleUpdateActivePianoChairStyle = (targetStyle: 'default' | 'doubleCircle' | 'circlePi') => {
+                        const nextItems = curveItems.map(it => {
+                          if (it.id === activeItem.id) {
+                            return { ...it, customIconStyle: targetStyle };
+                          }
+                          return it;
+                        });
+                        onUpdateCurve(selectedCurve.id, {
+                          items: nextItems,
+                        });
+                      };
+
+                      const handleApplyToAllCurvePianoChairs = () => {
+                        const targetStyle = activeIconStyle;
+                        const nextItems = curveItems.map(it => {
+                          if (isPianoChairItem(it)) {
+                            return { ...it, customIconStyle: targetStyle };
+                          }
+                          return it;
+                        });
+                        onUpdateCurve(selectedCurve.id, {
+                          items: nextItems,
+                        });
+                      };
+
+                      return (
+                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
+                              <Square className="w-3.5 h-3.5 text-[#007AFF]" />
+                              ピアノ椅子表示
+                            </span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                              {activeIconStyle === 'doubleCircle'
+                                ? '二重丸 (◎)'
+                                : activeIconStyle === 'circlePi'
+                                ? '丸ピ (ピ)'
+                                : '通常'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateActivePianoChairStyle('default')}
+                              className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                                activeIconStyle === 'default'
+                                  ? 'liquid-btn-primary shadow-xs'
+                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              <Square className="w-3.5 h-3.5" />
+                              <span className="text-[10px]">通常椅子</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateActivePianoChairStyle('doubleCircle')}
+                              className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                                activeIconStyle === 'doubleCircle'
+                                  ? 'liquid-btn-primary shadow-xs'
+                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              <span className={`text-sm font-black leading-none ${activeIconStyle === 'doubleCircle' ? 'text-white' : 'text-emerald-600'}`}>◎</span>
+                              <span className="text-[10px]">二重丸 (◎)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateActivePianoChairStyle('circlePi')}
+                              className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                                activeIconStyle === 'circlePi'
+                                  ? 'liquid-btn-primary shadow-xs'
+                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              <span className={`w-4 h-4 rounded-full border border-current flex items-center justify-center font-bold text-[10px] leading-none ${activeIconStyle === 'circlePi' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`}>ピ</span>
+                              <span className="text-[10px]">丸ピ (ピ)</span>
+                            </button>
+                          </div>
+
+                          {/* すべてのピアノ椅子に適用ボタン (ベジェ上のみ) */}
+                          <button
+                            type="button"
+                            onClick={handleApplyToAllCurvePianoChairs}
+                            className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                            title="このベジェ曲線上のすべてのピアノ椅子をこの表示スタイルに一括適用します"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>この曲線のすべてのピアノ椅子に適用</span>
+                          </button>
+                        </div>
+                      );
+                    })()}
+
+                    {/* 譜面台が含まれるオブジェクトを選択した時だけ表示する「譜面台の表示スタイル」設定 */}
+                    {isStandItem(activeItem) && (() => {
+                      const activeStandStyle: 'default' | 'xMark' =
+                        activeItem.customIconStyle === 'xMark'
+                          ? 'xMark'
+                          : activeItem.customIconStyle === 'default'
+                          ? 'default'
+                          : selectedCurve.customIconStyle === 'xMark'
+                          ? 'xMark'
+                          : 'default';
+
+                      const handleUpdateActiveStandStyle = (targetStyle: 'default' | 'xMark') => {
+                        const nextItems = curveItems.map(it => {
+                          if (it.id === activeItem.id) {
+                            return { ...it, customIconStyle: targetStyle };
+                          }
+                          return it;
+                        });
+                        onUpdateCurve(selectedCurve.id, {
+                          items: nextItems,
+                        });
+                      };
+
+                      const handleApplyToAllCurveStands = () => {
+                        const targetStyle = activeStandStyle;
+                        const nextItems = curveItems.map(it => {
+                          if (isStandItem(it)) {
+                            return { ...it, customIconStyle: targetStyle };
+                          }
+                          return it;
+                        });
+                        onUpdateCurve(selectedCurve.id, {
+                          customIconStyle: targetStyle,
+                          items: nextItems,
+                        });
+                      };
+
+                      return (
+                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
+                              <Music className="w-3.5 h-3.5 text-[#007AFF]" />
+                              譜面台の表示スタイル
+                            </span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                              {activeStandStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateActiveStandStyle('default')}
+                              className={`py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                activeStandStyle === 'default'
+                                  ? 'liquid-btn-primary shadow-xs'
+                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              <span className="font-black text-xs">⊥</span>
+                              <span className="text-[11px]">通常 (T字)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateActiveStandStyle('xMark')}
+                              className={`py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                activeStandStyle === 'xMark'
+                                  ? 'liquid-btn-primary shadow-xs'
+                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              <span className={`font-black text-xs ${activeStandStyle === 'xMark' ? 'text-white' : 'text-rose-600'}`}>✕</span>
+                              <span className="text-[11px]">Xマーク</span>
+                            </button>
+                          </div>
+
+                          {/* 全てに適応ボタン (ベジェ上のみ) */}
+                          <button
+                            type="button"
+                            onClick={handleApplyToAllCurveStands}
+                            className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                            title="このベジェ曲線上のすべての譜面台をこの表示スタイルに一括適用します"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>この曲線のすべての譜面台に適用</span>
+                          </button>
+                        </div>
+                      );
+                    })()}
+
+                    {/* 打楽器が選択された場合 */}
+                    {(activeItem.type === 'percussion' || Boolean(activeItem.percussionType)) && (() => {
+                      const currentType = activeItem.percussionType || selectedCurve.percussionType || PERCUSSION_DATA[0].dropdownName;
+                      const percInfo = getPercussionInfo(currentType);
+                      const size = activeItem.size || selectedCurve.itemSize;
+                      const aspect = (percInfo?.defaultH || 1.34) / (percInfo?.defaultW || 1.34);
+
+                      const handleUpdateActivePercussionType = (newType: string) => {
+                        const nextItems = curveItems.map(it => {
+                          if (it.id === activeItem.id) {
+                            return { ...it, percussionType: newType };
+                          }
+                          return it;
+                        });
+                        onUpdateCurve(selectedCurve.id, {
+                          items: nextItems,
+                        });
+                      };
+
+                      return (
+                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-2">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs text-slate-500 font-medium">楽器種類</span>
+                            <select
+                              value={currentType}
+                              onChange={(e) => handleUpdateActivePercussionType(e.target.value)}
+                              className="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white"
+                            >
+                              {getGroupedPercussionData().map(group => (
+                                <optgroup key={group.category} label={group.category}>
+                                  {group.items.map(p => (
+                                    <option key={p.dropdownName} value={p.dropdownName}>
+                                      {p.dropdownName} ({p.canvasName})
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ))}
+                            </select>
+                          </label>
+                          {onOpenPercussionLabelModal && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onOpenPercussionLabelModal({
+                                  type: 'curveItem',
+                                  itemId: activeItem.id,
+                                  curveId: selectedCurve.id,
+                                  targetType: 'percussion',
+                                  canvasName: percInfo?.canvasName || currentType || '打楽器',
+                                  percussionType: currentType,
+                                  initialText: percInfo?.canvasName || '',
+                                  width: size,
+                                  height: size * aspect,
+                                  color: activeItem.color || selectedCurve.color,
+                                  currentOffsetX: activeItem.labelOffsetX || 0,
+                                  currentOffsetY: activeItem.labelOffsetY || 0,
+                                  currentRotation: activeItem.labelRotation || 0,
+                                  currentFontSize: activeItem.labelFontSize,
+                                  currentLetterSpacing: activeItem.labelLetterSpacing || 0,
+                                  isVertical: Boolean(activeItem.isVerticalName),
+                                });
+                              }}
+                              className="py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
+                            >
+                              <Move className="w-3.5 h-3.5" />
+                              <span>名前の位置・回転・サイズを設定...</span>
                             </button>
                           )}
                         </div>
+                      );
+                    })()}
 
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min="0"
-                            max="500"
-                            value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              if (!isNaN(val) && val >= 0) {
-                                handleUpdateItemGap(activeItem.id, val);
-                              }
+                    {/* 記号が選択された場合の文字位置・回転・サイズ設定 */}
+                    {(() => {
+                      const itemMatchedTmplId = activeItem.iconId ? templateReplacements?.[activeItem.iconId] : undefined;
+                      const isCurveItemSymbol = activeItem.type === 'symbol' ||
+                                                activeItem.symbolShape !== undefined ||
+                                                itemMatchedTmplId === 'tmpl_symbol' ||
+                                                itemMatchedTmplId?.replace(/^tmpl_/, '') === 'symbol';
+                      if (!isCurveItemSymbol || !onOpenPercussionLabelModal) return null;
+                      const size = activeItem.size || selectedCurve.itemSize;
+                      return (
+                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onOpenPercussionLabelModal({
+                                type: 'curveItem',
+                                itemId: activeItem.id,
+                                curveId: selectedCurve.id,
+                                targetType: 'symbol',
+                                canvasName: '記号テキスト',
+                                symbolShape: activeItem.symbolShape || 'circle',
+                                symbolFilled: Boolean(activeItem.symbolFilled),
+                                initialText: activeItem.symbolText || '',
+                                width: size,
+                                height: size,
+                                color: activeItem.color || selectedCurve.color,
+                                currentOffsetX: activeItem.labelOffsetX || 0,
+                                currentOffsetY: activeItem.labelOffsetY || 0,
+                                currentRotation: activeItem.labelRotation || 0,
+                                currentFontSize: activeItem.labelFontSize || activeItem.symbolFontSize,
+                                currentLetterSpacing: activeItem.labelLetterSpacing || 0,
+                                isVertical: Boolean(activeItem.isVerticalName),
+                              });
                             }}
-                            className="w-20 px-2 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono"
-                          />
-                          <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
-                          <div className="flex items-center gap-1 ml-auto">
-                            {[-5, -1, 1, 5].map((delta) => (
-                              <button
-                                key={delta}
-                                type="button"
-                                onClick={() => {
-                                  const cur = activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap;
-                                  handleUpdateItemGap(activeItem.id, Math.max(0, cur + delta));
-                                }}
-                                className="px-1.5 py-0.5 text-[11px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
-                              >
-                                {delta > 0 ? `+${delta}` : delta}
-                              </button>
-                            ))}
-                          </div>
+                            className="py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
+                          >
+                            <Move className="w-3.5 h-3.5" />
+                            <span>文字の位置・回転・サイズを設定...</span>
+                          </button>
                         </div>
-
-                        <input
-                          type="range"
-                          min="0"
-                          max="200"
-                          value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
-                          onChange={(e) => handleUpdateItemGap(activeItem.id, parseFloat(e.target.value))}
-                          className="w-full accent-blue-600 mt-0.5 cursor-pointer"
-                        />
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -970,10 +1847,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                         <div
                           key={it.id || idx}
                           onClick={() => onSelectCurveItem?.(isSelected ? null : it.id)}
-                          className={`flex items-center justify-between px-2 py-1.5 rounded border text-xs cursor-pointer transition-colors shadow-2xs group ${
+                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs cursor-pointer transition-all group ${
                             isSelected
-                              ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-900 dark:text-blue-200 ring-1 ring-blue-300 dark:ring-blue-500 font-semibold'
-                              : 'bg-white dark:bg-slate-750 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200'
+                              ? 'liquid-glass-card-accent font-semibold text-blue-900 dark:text-blue-100'
+                              : 'liquid-card hover:bg-white/90 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200'
                           }`}
                         >
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -983,32 +1860,59 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                             <span className="truncate">{it.label || it.type}</span>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {!isLast && (
-                              it.gap !== undefined ? (
-                                <span className="text-[10px] bg-blue-100 dark:bg-blue-850 text-blue-800 dark:text-blue-200 px-1 py-0.5 rounded font-mono font-semibold" title="個別設定の間隔">
-                                  間隔: {Math.round(it.gap)}px
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-slate-400 font-mono">
-                                  {Math.round(selectedCurve.itemGap)}px
-                                </span>
-                              )
-                            )}
-                            {isLast && (
-                              <span className="text-[10px] text-slate-400 font-mono">末尾</span>
+                            {/* 左右への順序移動ボタン */}
+                            <div className="flex items-center gap-0.5 mr-0.5">
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onMoveCurveItemOrder?.(selectedCurve.id, it.id, 'left');
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-[#007AFF] dark:hover:text-blue-400 disabled:opacity-20 disabled:hover:text-slate-400 transition-colors cursor-pointer"
+                                title="左隣（始点側）へ移動"
+                              >
+                                <ArrowLeft className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isLast}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onMoveCurveItemOrder?.(selectedCurve.id, it.id, 'right');
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-[#007AFF] dark:hover:text-blue-400 disabled:opacity-20 disabled:hover:text-slate-400 transition-colors cursor-pointer"
+                                title="右隣（終点側）へ移動"
+                              >
+                                <ArrowRight className="w-3 h-3" />
+                              </button>
+                            </div>
+
+                            {it.gap !== undefined ? (
+                              <span className="text-[10px] bg-blue-100 dark:bg-blue-850 text-blue-800 dark:text-blue-200 px-1 py-0.5 rounded font-mono font-semibold" title={isLast ? "個別設定の間隔 (末尾)" : "個別設定の間隔"}>
+                                間隔: {Math.round(it.gap)}px{isLast && ' (末尾)'}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 font-mono" title={isLast ? "標準間隔 (末尾)" : "標準間隔"}>
+                                {Math.round(selectedCurve.itemGap)}px{isLast && ' (末尾)'}
+                              </span>
                             )}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                const next = [...curveItems];
-                                next.splice(idx, 1);
-                                if (isSelected) onSelectCurveItem?.(null);
-                                onUpdateCurve(selectedCurve.id, { items: next, itemCount: next.length });
+                                if (onDeleteCurveItem) {
+                                  onDeleteCurveItem(selectedCurve.id, it.id);
+                                } else {
+                                  const next = [...curveItems];
+                                  next.splice(idx, 1);
+                                  if (isSelected) onSelectCurveItem?.(null);
+                                  onUpdateCurve(selectedCurve.id, { items: next, itemCount: next.length });
+                                }
                               }}
-                              className="text-slate-400 hover:text-red-600 px-1 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                              className="text-slate-400 hover:text-red-600 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center"
                               title="このアイテムを削除"
                             >
-                              ✕
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
@@ -1032,196 +1936,89 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
             </label>
           )}
 
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
-            <label className="flex flex-col gap-1 col-span-2">
-              <span className="text-xs text-slate-500 font-medium">アイテムサイズ</span>
-              <input
-                type="number"
-                min="10"
-                max="200"
-                value={Math.round(selectedCurve.itemSize)}
-                onChange={(e) => {
-                  const s = parseFloat(e.target.value);
-                  if (!isNaN(s) && s > 0) onUpdateCurve(selectedCurve.id, { itemSize: s });
-                }}
-                className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
-              />
-            </label>
-            <label className="flex flex-col gap-1 col-span-2">
-              <span className="text-xs text-slate-500 font-medium">配置間隔</span>
-              <input
-                type="number"
-                min="0"
-                max="500"
-                value={Math.round(selectedCurve.itemGap)}
-                onChange={(e) => {
-                  const g = parseFloat(e.target.value);
-                  if (!isNaN(g) && g >= 0) onUpdateCurve(selectedCurve.id, { itemGap: g });
-                }}
-                className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
-              />
-            </label>
-            <label className="flex items-center gap-2 col-span-2 mt-1">
+          <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60">
+            {/* アイテムサイズ */}
+            <div className="flex flex-col gap-1.5 col-span-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">アイテムサイズ</span>
+                <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                  {Math.round(selectedCurve.itemSize)} px
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="10"
+                  max="120"
+                  value={Math.round(selectedCurve.itemSize)}
+                  onChange={(e) => onUpdateCurve(selectedCurve.id, { itemSize: parseFloat(e.target.value) })}
+                  className="flex-1 accent-[#007AFF] cursor-pointer"
+                />
+                <input
+                  type="number"
+                  min="10"
+                  max="200"
+                  value={Math.round(selectedCurve.itemSize)}
+                  onChange={(e) => {
+                    const s = parseFloat(e.target.value);
+                    if (!isNaN(s) && s > 0) onUpdateCurve(selectedCurve.id, { itemSize: s });
+                  }}
+                  className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
+                />
+              </div>
+            </div>
+
+            {/* 配置間隔（スライダ + 数値入力） */}
+            <div className="flex flex-col gap-1.5 col-span-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">配置間隔</span>
+                <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                  {Math.round(selectedCurve.itemGap)} px
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="150"
+                  value={Math.round(selectedCurve.itemGap)}
+                  onChange={(e) => onUpdateCurve(selectedCurve.id, { itemGap: parseFloat(e.target.value) })}
+                  className="flex-1 accent-[#007AFF] cursor-pointer"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="500"
+                  value={Math.round(selectedCurve.itemGap)}
+                  onChange={(e) => {
+                    const g = parseFloat(e.target.value);
+                    if (!isNaN(g) && g >= 0) onUpdateCurve(selectedCurve.id, { itemGap: g });
+                  }}
+                  className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 col-span-2 mt-1 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={selectedCurve.showLine !== false}
                 onChange={(e) => onUpdateCurve(selectedCurve.id, { showLine: e.target.checked })}
-                className="rounded text-indigo-600 focus:ring-indigo-500"
+                className="rounded text-[#007AFF] focus:ring-[#007AFF] w-4 h-4 cursor-pointer"
               />
-              <span className="text-xs text-slate-700 font-medium">ガイド線を表示</span>
+              <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">ガイド線を表示</span>
             </label>
           </div>
         </div>
 
-        {hasCurveStands && (
-          <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
-            <h4 className="text-xs font-semibold text-slate-700 flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <span>🎼</span> 曲線上の譜面台表示
-              </span>
-              <span className="text-[10px] text-slate-400 font-normal">
-                {selectedCurve.customIconStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
-              </span>
-            </h4>
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  const nextItems = selectedCurve.items?.map(it => {
-                    const isSt = it.type === 'ensembleStand' || it.type === 'conductorStand' || it.type === 'ensembleChairAndStand';
-                    return isSt ? { ...it, customIconStyle: 'default' as const } : it;
-                  });
-                  onUpdateCurve(selectedCurve.id, {
-                    customIconStyle: 'default',
-                    items: nextItems || selectedCurve.items,
-                  });
-                }}
-                className={`py-1.5 px-2 rounded-lg border text-xs font-bold flex items-center justify-center gap-1 transition-all ${
-                  (selectedCurve.customIconStyle || 'default') === 'default'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="font-black text-xs">⊥</span>
-                <span className="text-[11px]">通常 (T字)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const nextItems = selectedCurve.items?.map(it => {
-                    const isSt = it.type === 'ensembleStand' || it.type === 'conductorStand' || it.type === 'ensembleChairAndStand';
-                    return isSt ? { ...it, customIconStyle: 'xMark' as const } : it;
-                  });
-                  onUpdateCurve(selectedCurve.id, {
-                    customIconStyle: 'xMark',
-                    items: nextItems || selectedCurve.items,
-                  });
-                }}
-                className={`py-1.5 px-2 rounded-lg border text-xs font-bold flex items-center justify-center gap-1 transition-all ${
-                  selectedCurve.customIconStyle === 'xMark'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="font-black text-xs text-rose-600">✕</span>
-                <span className="text-[11px]">Xマーク</span>
-              </button>
-            </div>
-          </div>
-        )}
 
-        {hasChairAndStand && (
-          <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
-            <h4 className="text-xs font-semibold text-slate-700 flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <span>🪑</span> 曲線上の椅子の種類
-              </span>
-              <span className="text-[10px] text-slate-400 font-normal">
-                {selectedCurve.chairType === 'pianoChairSvg'
-                  ? 'ピアノ椅子 (🪑)'
-                  : selectedCurve.chairType === 'pianoChair'
-                  ? 'ピアノ椅子 (◎)'
-                  : '合奏用椅子 (○)'}
-              </span>
-            </h4>
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  const nextItems = selectedCurve.items?.map(it => {
-                    if (it.type === 'ensembleChairAndStand') {
-                      return { ...it, chairType: 'normal' as const };
-                    }
-                    return it;
-                  });
-                  onUpdateCurve(selectedCurve.id, {
-                    chairType: 'normal',
-                    items: nextItems || selectedCurve.items,
-                  });
-                }}
-                className={`py-1.5 px-1 rounded-lg border text-xs font-bold flex flex-col items-center justify-center gap-0.5 transition-all ${
-                  (selectedCurve.chairType || 'normal') === 'normal'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="font-bold text-xs">○</span>
-                <span className="text-[10px]">合奏用椅子</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const nextItems = selectedCurve.items?.map(it => {
-                    if (it.type === 'ensembleChairAndStand') {
-                      return { ...it, chairType: 'pianoChair' as const };
-                    }
-                    return it;
-                  });
-                  onUpdateCurve(selectedCurve.id, {
-                    chairType: 'pianoChair',
-                    items: nextItems || selectedCurve.items,
-                  });
-                }}
-                className={`py-1.5 px-1 rounded-lg border text-xs font-bold flex flex-col items-center justify-center gap-0.5 transition-all ${
-                  selectedCurve.chairType === 'pianoChair'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="font-black text-xs text-emerald-600">◎</span>
-                <span className="text-[10px]">二重丸</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const nextItems = selectedCurve.items?.map(it => {
-                    if (it.type === 'ensembleChairAndStand') {
-                      return { ...it, chairType: 'pianoChairSvg' as const };
-                    }
-                    return it;
-                  });
-                  onUpdateCurve(selectedCurve.id, {
-                    chairType: 'pianoChairSvg',
-                    items: nextItems || selectedCurve.items,
-                  });
-                }}
-                className={`py-1.5 px-1 rounded-lg border text-xs font-bold flex flex-col items-center justify-center gap-0.5 transition-all ${
-                  selectedCurve.chairType === 'pianoChairSvg'
-                    ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="text-xs">🪑</span>
-                <span className="text-[10px]">ピアノ椅子</span>
-              </button>
-            </div>
-          </div>
-        )}
+
+
 
         {isPercussion && (
           <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
             <h4 className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-              <span>🥁</span> パーカッション設定
+              <span>●</span> パーカッション設定
             </h4>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-slate-500 font-medium">楽器種類</span>
@@ -1230,8 +2027,12 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 onChange={(e) => onUpdateCurve(selectedCurve.id, { percussionType: e.target.value })}
                 className="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white"
               >
-                {PERCUSSION_DATA.map(p => (
-                  <option key={p.dropdownName} value={p.dropdownName}>{p.dropdownName} ({p.canvasName})</option>
+                {getGroupedPercussionData().map(group => (
+                  <optgroup key={group.category} label={group.category}>
+                    {group.items.map(p => (
+                      <option key={p.dropdownName} value={p.dropdownName}>{p.dropdownName} ({p.canvasName})</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>

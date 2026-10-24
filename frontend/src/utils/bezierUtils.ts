@@ -24,9 +24,15 @@ export interface CurveItem {
   color?: string;
   percussionType?: string;
   showPercussionName?: boolean;
+  labelOffsetX?: number;
+  labelOffsetY?: number;
+  labelRotation?: number;
+  labelFontSize?: number;
+  labelLetterSpacing?: number;
+  isVerticalName?: boolean;
   pianoLidState?: string;
-  customIconStyle?: 'default' | 'xMark' | 'doubleCircle';
-  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg';
+  customIconStyle?: 'default' | 'xMark' | 'doubleCircle' | 'circlePi';
+  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg' | 'pianoChairPi';
   symbolShape?: 'circle' | 'cross' | 'rect' | 'triangle';
   symbolFilled?: boolean;
   symbolText?: string;
@@ -60,8 +66,10 @@ export interface CurveObject {
   showLine?: boolean;
   percussionType?: string;
   showPercussionName?: boolean;
-  customIconStyle?: 'default' | 'xMark' | 'doubleCircle';
-  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg';
+  labelLetterSpacing?: number;
+  customIconStyle?: 'default' | 'xMark' | 'doubleCircle' | 'circlePi';
+  chairType?: 'normal' | 'pianoChair' | 'pianoChairSvg' | 'pianoChairPi';
+  rotation?: number; // in degrees
   isPinned?: boolean;
 }
 
@@ -192,11 +200,15 @@ export function distributeItemsAlongCurve(
   for (const it of items) {
     totalItemWidth += (it.size || defaultSize);
   }
+  // 末尾アイテム（右端のオブジェクト）の右側の間隔（余白）
+  const lastItem = items[items.length - 1];
+  const endGap = (lastItem && lastItem.gap !== undefined) ? lastItem.gap : 0;
+
   const totalGapWidth = items.reduce(
     (acc, it, i) => i < items.length - 1 ? acc + (it.gap !== undefined ? it.gap : defaultGap) : acc,
     0
   );
-  const totalNeededLen = totalItemWidth + totalGapWidth;
+  const totalNeededLen = totalItemWidth + totalGapWidth + endGap;
 
   let startDist = 0;
   if (align === 'center') {
@@ -269,7 +281,7 @@ export function createDefaultCurveObject(
   return {
     id: `curve_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
     x: cx,
-    y: cy,
+    y: cy - archDepth / 2,
     // [Start X, Start Y, Control X, Control Y, End X, End Y]
     points: [-span / 2, archDepth / 2, 0, -archDepth, span / 2, archDepth / 2],
     items: [],
@@ -279,6 +291,7 @@ export function createDefaultCurveObject(
     itemSize: 32,
     align: 'center',
     color: '#000000',
+    rotation: 0,
     showLine: true,
   };
 }

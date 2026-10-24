@@ -6,6 +6,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    host: true, // 同じLAN内の他デバイス（スマホやiPad等）からのアクセスを許可
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

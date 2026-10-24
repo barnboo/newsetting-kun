@@ -62,7 +62,7 @@ const ExportModal: React.FC<Props> = ({
         <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
           <div>
             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-              <span>📄</span>
+              <span className="font-mono text-sm px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">PDF</span>
               提出用PDFの作成・出力
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -101,7 +101,7 @@ const ExportModal: React.FC<Props> = ({
                   download="stage_setting_completed.pdf"
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-lg shadow-sm flex items-center gap-2 transition-colors"
                 >
-                  <span>📥</span>
+                  <span className="font-bold">↓</span>
                   <span>PDFをダウンロード</span>
                 </a>
                 <a
@@ -110,7 +110,7 @@ const ExportModal: React.FC<Props> = ({
                   rel="noreferrer"
                   className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-5 py-2.5 rounded-lg border border-gray-300 transition-colors flex items-center gap-1.5"
                 >
-                  <span>👁️</span>
+                  <span className="font-bold">↗</span>
                   <span>ブラウザで開く</span>
                 </a>
               </div>
@@ -267,7 +267,7 @@ const ExportModal: React.FC<Props> = ({
                 </>
               ) : (
                 <>
-                  <span className="shrink-0">📄</span>
+                  <span className="shrink-0 font-bold">↓</span>
                   <span>PDFを作成・出力する</span>
                 </>
               )}
