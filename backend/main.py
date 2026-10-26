@@ -1,5 +1,5 @@
 import time
-
+import unicodedata
 import os
 import uuid
 import fitz  # PyMuPDF
@@ -134,6 +134,22 @@ class CropIconsRequest(BaseModel):
     icons_region_url: str
     rects: List[AdjustedRect]
 
+def clean_japanese_text(text: str) -> str:
+    """Normalize Japanese text from PDFs, fixing CJK/Kangxi radical codepoint discrepancies."""
+    if not text:
+        return ""
+    # 1. NFKC normalization
+    text = unicodedata.normalize("NFKC", text)
+    # 2. Map CJK Radicals Supplement (2E80-2EFF) and Kangxi Radicals (2F00-2FDF) to standard unified ideographs
+    radical_map = {
+        '\u2ED1': '長', '\u2EC8': '長', '\u2F26': '子', '\u2F64': '用',
+        '\u2FAD': '面', '\u2FA8': '風', '\u2F47': '木', '\u2F57': '示',
+        '\u2F6F': '生', '\u2F77': '目', '\u2F96': '見', '\u2F9F': '言'
+    }
+    for k, v in radical_map.items():
+        text = text.replace(k, v)
+    return text
+
 def extract_label_for_icon(bbox: fitz.Rect, page_words: list) -> str:
     """
     Given an icon bounding box on the PDF page, finds the associated item name
@@ -166,7 +182,7 @@ def extract_label_for_icon(bbox: fitz.Rect, page_words: list) -> str:
         "使用備品", "数", "脚", "本", "台", "個", "枚", "組", "記", "号"
     }
 
-    # Known standard item names to prioritize
+    # Known standard item names to prioritize (longer names first)
     standard_names = [
         "合奏用譜面台", "合奏用椅子", "合奏譜面台", "合奏椅子", "パイプ椅子",
         "指揮用譜面台", "指揮譜面台", "指揮者用譜面台", "指揮者譜面台",
@@ -182,7 +198,8 @@ def extract_label_for_icon(bbox: fitz.Rect, page_words: list) -> str:
         return ""
 
     # 1. Primary check: left side (most common in Japanese band sheets, e.g. [品名] [記号])
-    left_text = "".join(w[4] for w in left_words).strip().replace(" ", "")
+    raw_left = "".join(w[4] for w in left_words).strip().replace(" ", "")
+    left_text = clean_japanese_text(raw_left)
     matched_left = find_standard_name(left_text)
     if matched_left:
         return matched_left
@@ -197,7 +214,8 @@ def extract_label_for_icon(bbox: fitz.Rect, page_words: list) -> str:
         "閉", "蒲鉾板", "半開", "全開", "○", "レ", "有", "無"
     }
     filtered_right = [w for w in right_words if w[4] not in units_stop and not w[4].isdigit()]
-    right_text = "".join(w[4] for w in filtered_right).strip().replace(" ", "")
+    raw_right = "".join(w[4] for w in filtered_right).strip().replace(" ", "")
+    right_text = clean_japanese_text(raw_right)
     matched_right = find_standard_name(right_text)
     if matched_right:
         return matched_right
@@ -352,10 +370,12 @@ async def extract_regions(req: ExtractRequest):
                 for w in page_words:
                     if not fitz.Rect(w[:4]).intersects(rect_points):
                         continue
-                    if 'ピアノの蓋' in w[4]:
+                    w_norm = clean_japanese_text(w[4])
+                    if 'ピアノの蓋' in w_norm:
                         continue
+                    matched_cell_target = False
                     for tn in target_names:
-                        if tn in w[4]:
+                        if tn in w_norm:
                             r = fitz.Rect(w[:4])
                             # Check to the right (common in Japanese tables) and then to the left
                             for dx0, dx1 in [(10, 95), (-95, -10)]:
@@ -388,8 +408,10 @@ async def extract_regions(req: ExtractRequest):
                                             rect_points.y0 + max_y / icon_zoom
                                         )
                                         candidate_boxes.append((box_pt, tn, 'row_cell'))
+                                        matched_cell_target = True
                                         break
-                            break
+                            if matched_cell_target:
+                                break
 
                 # Strategy 3: Vector drawings fallback / supplement
                 drawings = page.get_drawings()
