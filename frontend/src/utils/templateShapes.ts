@@ -756,29 +756,52 @@ export function getPercussionDataUrl(percussionName: string, color = '#000000'):
 }
 
 /**
+ * Normalize CJK/Kangxi radicals and full-width characters in equipment labels
+ */
+export function normalizeEquipmentText(text: string): string {
+  if (!text) return '';
+  let t = text.normalize('NFKC');
+  const radicalMap: Record<string, string> = {
+    '\u2ED1': '長', '\u2EC8': '長', '\u2F26': '子', '\u2F64': '用',
+    '\u2FAD': '面', '\u2FA8': '風', '\u2F47': '木', '\u2F57': '示',
+    '\u2F6F': '生', '\u2F77': '目', '\u2F96': '見', '\u2F9F': '言',
+    '\u2F8B': '色', '\u2F24': '大', '\u2F1D': '口', '\u2F49': '月',
+    '\u2F4A': '木', '\u2F45': '手',
+  };
+  for (const [k, v] of Object.entries(radicalMap)) {
+    t = t.split(k).join(v);
+  }
+  return t.toLowerCase().trim();
+}
+
+/**
  * Calculate match confidence score (0 to 100) between an extracted icon label and a template type.
  * Higher score indicates better suitability. Score < 50 is treated as no match.
  */
 export function calcTemplateMatchScore(iconLabel: string, template: TemplateShape): number {
-  const norm = iconLabel.toLowerCase().trim();
-  const tmplLabel = template.label.toLowerCase();
+  const norm = normalizeEquipmentText(iconLabel);
+  const tmplLabel = normalizeEquipmentText(template.label);
   const type = template.type;
+
+  const isChairWord = norm.includes('椅子') || norm.includes('イス') || norm.includes('いす') || norm.includes('チェア') || norm.includes('スツール') || norm.includes('chair');
+  const isStandWord = norm.includes('譜面') || norm.includes('譜立') || norm.includes('スタンド') || norm.includes('stand');
+  const isSpecialInstrumentChair = ['コントラバス', 'コンバス', '弦バス', 'チェロ', '打楽器', 'パーカッション', 'ティンパニ', 'ハープ', 'ギター', '補助'].some(k => norm.includes(k));
 
   // 1. 完全一致
   if (norm === tmplLabel) return 100;
 
   // 2. めくり椅子 / 譜めくり椅子 (turnerChair)
   if (type === 'turnerChair') {
-    if (norm.includes('めくり') || norm.includes('turner')) {
-      return norm.includes('椅子') || norm.includes('イス') ? 98 : 90;
+    if (norm.includes('めくり') || norm.includes('譜捲り') || norm.includes('turner')) {
+      return isChairWord ? 98 : 90;
     }
     return 0;
   }
 
   // 3. ピアノ椅子 (pianoChair)
   if (type === 'pianoChair') {
-    if (norm.includes('めくり')) return 0; // めくり椅子は除外
-    if (norm.includes('ピアノ') && (norm.includes('椅子') || norm.includes('イス') || norm.includes('chair'))) {
+    if (norm.includes('めくり') || norm.includes('譜捲り')) return 0;
+    if ((norm.includes('ピアノ') || norm.includes('pf') || norm.includes('背付') || norm.includes('高低')) && isChairWord) {
       return 98;
     }
     return 0;
@@ -786,18 +809,17 @@ export function calcTemplateMatchScore(iconLabel: string, template: TemplateShap
 
   // 4. 合奏用椅子 (chorusChair)
   if (type === 'chorusChair') {
-    // ピアノ、めくり、譜面台が混ざっているものは合奏用椅子ではない
-    if (norm.includes('ピアノ') || norm.includes('めくり') || norm.includes('譜面台') || norm.includes('stand')) {
+    if (norm.includes('ピアノ') || norm.includes('pf') || norm.includes('背付') || norm.includes('めくり') || isStandWord || isSpecialInstrumentChair) {
       return 0;
     }
-    if (norm.includes('合奏') && (norm.includes('椅子') || norm.includes('イス'))) return 96;
-    if (norm.includes('椅子') || norm.includes('イス') || norm === 'chair') return 85;
+    if ((norm.includes('合奏') || norm.includes('演奏') || norm.includes('パイプ') || norm.includes('丸') || norm.includes('普通')) && isChairWord) return 96;
+    if (isChairWord) return 85;
     return 0;
   }
 
   // 5. 椅子＋譜面台 (ensembleChairAndStand)
   if (type === 'ensembleChairAndStand') {
-    if ((norm.includes('椅子') || norm.includes('イス')) && (norm.includes('譜面台') || norm.includes('スタンド'))) {
+    if (isChairWord && isStandWord) {
       return 98;
     }
     return 0;
@@ -805,7 +827,7 @@ export function calcTemplateMatchScore(iconLabel: string, template: TemplateShap
 
   // 6. 指揮譜面台 (conductorStand)
   if (type === 'conductorStand') {
-    if (norm.includes('指揮') && (norm.includes('譜面台') || norm.includes('スタンド') || norm.includes('stand'))) {
+    if ((norm.includes('指揮') || norm.includes('cond')) && isStandWord) {
       return 98;
     }
     return 0;
@@ -813,23 +835,23 @@ export function calcTemplateMatchScore(iconLabel: string, template: TemplateShap
 
   // 7. 合奏用譜面台 (ensembleStand)
   if (type === 'ensembleStand') {
-    if (norm.includes('指揮') || norm.includes('椅子') || norm.includes('イス')) return 0;
-    if (norm.includes('合奏') && (norm.includes('譜面台') || norm.includes('スタンド'))) return 96;
-    if (norm.includes('譜面台') || norm.includes('スタンド') || norm === 'stand') return 85;
+    if (norm.includes('指揮') || norm.includes('cond') || isChairWord) return 0;
+    if ((norm.includes('合奏') || norm.includes('演奏')) && isStandWord) return 96;
+    if (isStandWord) return 85;
     return 0;
   }
 
   // 8. 指揮台 (podium)
   if (type === 'podium') {
-    if (norm.includes('譜面台') || norm.includes('スタンド')) return 0; // 指揮譜面台を優先
-    if (norm.includes('指揮台') || norm.includes('podium')) return 98;
-    if (norm.includes('指揮') && !norm.includes('譜面台')) return 75;
+    if (isStandWord || isChairWord) return 0;
+    if (norm.includes('指揮台') || norm.includes('指揮者台') || norm.includes('podium')) return 98;
+    if (norm.includes('指揮') && !isStandWord) return 75;
     return 0;
   }
 
   // 9. グランドピアノ (piano)
   if (type === 'piano') {
-    if (norm.includes('椅子') || norm.includes('イス') || norm.includes('めくり')) return 0;
+    if (isChairWord || norm.includes('めくり') || norm.includes('蓋') || norm.includes('反響板')) return 0;
     if (norm.includes('ピアノ') || norm.includes('piano')) return 95;
     return 0;
   }
@@ -842,12 +864,13 @@ export function calcTemplateMatchScore(iconLabel: string, template: TemplateShap
 
   // 11. 延長コード (extensionCord)
   if (type === 'extensionCord') {
-    if (norm.includes('コード') || norm.includes('cord') || norm.includes('電源') || norm.includes('タップ')) return 95;
+    if (norm.includes('コード') || norm.includes('cord') || norm.includes('電源') || norm.includes('コンセント') || norm.includes('タップ')) return 95;
     return 0;
   }
 
   // 12. 打楽器 (percussion)
   if (type === 'percussion') {
+    if (isChairWord || norm.includes('机')) return 0;
     if (norm.includes('打楽器') || norm.includes('percussion') || norm.includes('perc')) return 95;
     const percussionNames = ['ティンパニ', 'timp', 'ドラム', 'drum', 'シンバル', 'cym', 'バスドラム', 'b.d', 'マリンバ', 'シロフォン', 'グロッケン', 'ビブラフォン', 'スネア', 'チャイム', 'タム'];
     if (percussionNames.some(p => norm.includes(p))) return 90;
@@ -952,32 +975,38 @@ export function matchIconsToTemplates(
  * Matching heuristics to associate a PDF-extracted icon with a standard template
  */
 export function findMatchingTemplate(iconLabel: string, iconIndex: number): TemplateShape | null {
-  const norm = iconLabel.toLowerCase().trim();
-  
-  if (norm.includes('めくり') || norm.includes('turner')) {
+  const norm = normalizeEquipmentText(iconLabel);
+  const isChairWord = norm.includes('椅子') || norm.includes('イス') || norm.includes('いす') || norm.includes('チェア') || norm.includes('スツール') || norm.includes('chair');
+  const isStandWord = norm.includes('譜面') || norm.includes('譜立') || norm.includes('スタンド') || norm.includes('stand');
+  const isSpecialInstrumentChair = ['コントラバス', 'コンバス', '弦バス', 'チェロ', '打楽器', 'パーカッション', 'ティンパニ', 'ハープ', 'ギター', '補助'].some(k => norm.includes(k));
+
+  if (norm.includes('めくり') || norm.includes('譜捲り') || norm.includes('turner')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'turnerChair') || null;
   }
-  if (norm.includes('椅子') && norm.includes('譜面台')) {
+  if (isChairWord && isStandWord) {
     return TEMPLATE_SHAPES.find(t => t.type === 'ensembleChairAndStand') || null;
   }
-  if (norm.includes('椅子') || norm.includes('イス') || norm.includes('chair')) {
-    if (norm.includes('ピアノ')) return TEMPLATE_SHAPES.find(t => t.type === 'pianoChair') || null;
+  if (isChairWord) {
+    if (norm.includes('ピアノ') || norm.includes('pf') || norm.includes('背付') || norm.includes('高低')) {
+      return TEMPLATE_SHAPES.find(t => t.type === 'pianoChair') || null;
+    }
+    if (isSpecialInstrumentChair) return null;
     return TEMPLATE_SHAPES.find(t => t.type === 'chorusChair') || null;
   }
-  if (norm.includes('譜面台') || norm.includes('stand')) {
-    if (norm.includes('指揮')) return TEMPLATE_SHAPES.find(t => t.type === 'conductorStand') || null;
+  if (isStandWord) {
+    if (norm.includes('指揮') || norm.includes('cond')) return TEMPLATE_SHAPES.find(t => t.type === 'conductorStand') || null;
     return TEMPLATE_SHAPES.find(t => t.type === 'ensembleStand') || null;
   }
-  if (norm.includes('指揮台') || norm.includes('podium')) {
+  if (norm.includes('指揮台') || norm.includes('指揮者台') || norm.includes('podium')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'podium') || null;
   }
-  if (norm.includes('ピアノ') || norm.includes('piano')) {
+  if ((norm.includes('ピアノ') || norm.includes('piano')) && !norm.includes('蓋')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'piano') || null;
   }
-  if (norm.includes('机') || norm.includes('デスク') || norm.includes('desk')) {
+  if (norm.includes('机') || norm.includes('デスク') || norm.includes('desk') || norm.includes('テーブル')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'longDesk') || null;
   }
-  if (norm.includes('コード') || norm.includes('cord') || norm.includes('電源')) {
+  if (norm.includes('コード') || norm.includes('cord') || norm.includes('電源') || norm.includes('コンセント')) {
     return TEMPLATE_SHAPES.find(t => t.type === 'extensionCord') || null;
   }
 
