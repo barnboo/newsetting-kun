@@ -564,6 +564,7 @@ const CanvasItem: React.FC<{
         currentFontSize: item.labelFontSize,
         currentLetterSpacing: item.labelLetterSpacing || 0,
         isVertical: Boolean(item.isVerticalName),
+        showPercussionName: item.showPercussionName !== false,
       });
     }
   };
@@ -937,6 +938,7 @@ const CurveItemRenderer: React.FC<{
         currentFontSize: item.labelFontSize,
         currentLetterSpacing: item.labelLetterSpacing || 0,
         isVertical: Boolean(item.isVerticalName),
+        showPercussionName: item.showPercussionName !== false,
       });
     }
   };

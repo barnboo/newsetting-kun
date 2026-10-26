@@ -381,6 +381,7 @@ const StageBuilder: React.FC<Props> = ({
       labelFontSize: settings.labelFontSize,
       labelLetterSpacing: settings.labelLetterSpacing,
       isVerticalName: settings.isVerticalName,
+      ...(settings.showPercussionName !== undefined ? { showPercussionName: settings.showPercussionName } : {}),
     };
     if (percLabelModalTarget.targetType === 'symbol' && settings.text !== undefined) {
       updatePayload.symbolText = settings.text;
@@ -3449,6 +3450,7 @@ const StageBuilder: React.FC<Props> = ({
           initialFontSize={percLabelModalTarget.currentFontSize}
           initialLetterSpacing={percLabelModalTarget.currentLetterSpacing}
           initialIsVertical={percLabelModalTarget.isVertical}
+          initialShowPercussionName={percLabelModalTarget.showPercussionName !== false}
           onSave={handleSavePercussionLabel}
         />
       )}

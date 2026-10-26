@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Check, RotateCcw, Move, AlignCenter, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Type, RotateCw, MoveHorizontal } from 'lucide-react';
+import { X, Check, RotateCcw, Move, AlignCenter, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Type, RotateCw, MoveHorizontal, Eye, EyeOff } from 'lucide-react';
 import { getPercussionDataUrl, getPercussionInfo } from '../utils/templateShapes';
 
 export interface ItemLabelSettings {
@@ -10,6 +10,7 @@ export interface ItemLabelSettings {
   labelFontSize: number;
   labelLetterSpacing: number;
   isVerticalName: boolean;
+  showPercussionName?: boolean;
 }
 
 export interface ItemLabelModalTarget {
@@ -31,6 +32,7 @@ export interface ItemLabelModalTarget {
   currentFontSize?: number;
   currentLetterSpacing?: number;
   isVertical?: boolean;
+  showPercussionName?: boolean;
 }
 
 interface PercussionLabelModalProps {
@@ -51,6 +53,7 @@ interface PercussionLabelModalProps {
   initialFontSize?: number;
   initialLetterSpacing?: number;
   initialIsVertical?: boolean;
+  initialShowPercussionName?: boolean;
   onSave: (settings: ItemLabelSettings) => void;
 }
 
@@ -72,6 +75,7 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
   initialFontSize,
   initialLetterSpacing = 0,
   initialIsVertical = false,
+  initialShowPercussionName = true,
   onSave,
 }) => {
   const isSymbol = targetType === 'symbol';
@@ -80,6 +84,7 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
   const defaultText = initialText || (percInfo?.canvasName || itemTitle || percussionType || (isSymbol ? '記' : '打楽器'));
 
   const [text, setText] = useState(defaultText);
+  const [showName, setShowName] = useState(initialShowPercussionName !== false);
   const [offsetX, setOffsetX] = useState(initialOffsetX);
   const [offsetY, setOffsetY] = useState(initialOffsetY);
   const [rotation, setRotation] = useState(initialRotation);
@@ -102,6 +107,7 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setText(defaultText);
+      setShowName(initialShowPercussionName !== false);
       setOffsetX(initialOffsetX || 0);
       setOffsetY(initialOffsetY || 0);
       setRotation(initialRotation || 0);
@@ -109,7 +115,7 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
       setFontSize(calcDefaultFontSize(initialIsVertical));
       setLetterSpacing(initialLetterSpacing || 0);
     }
-  }, [isOpen, defaultText, initialOffsetX, initialOffsetY, initialRotation, initialIsVertical, initialLetterSpacing, calcDefaultFontSize]);
+  }, [isOpen, defaultText, initialOffsetX, initialOffsetY, initialRotation, initialIsVertical, initialLetterSpacing, initialShowPercussionName, calcDefaultFontSize]);
 
   const iconUrl = !isSymbol && percussionType ? getPercussionDataUrl(percussionType, color) : '';
 
@@ -247,6 +253,41 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
 
         {/* Body */}
         <div className="p-4 sm:p-5 flex flex-col gap-3.5 overflow-y-auto max-h-[calc(90vh-115px)]">
+          {/* 打楽器の名前 表示/非表示切り替え */}
+          {!isSymbol && (
+            <div className="flex items-center justify-between p-2.5 bg-blue-50/80 dark:bg-blue-950/40 rounded-xl border border-blue-200/80 dark:border-blue-800/80 transition-all">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                  showName ? 'bg-[#007AFF]/15 text-[#007AFF]' : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                }`}>
+                  {showName ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    キャンバスに名前を表示
+                    <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
+                      showName ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-750 dark:text-slate-400'
+                    }`}>
+                      {showName ? '表示中' : '非表示'}
+                    </span>
+                  </span>
+                  <span className="text-[10.5px] text-slate-500 dark:text-slate-400">
+                    {showName ? 'ステージ上に「大太鼓」等の文字が表示されます' : 'アイコン画像のみ表示され、文字は非表示になります'}
+                  </span>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showName}
+                  onChange={(e) => setShowName(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-[#007AFF]"></div>
+              </label>
+            </div>
+          )}
+
           {/* Symbol Text Input (Only for Symbols) */}
           {isSymbol && (
             <div className="flex flex-col gap-1 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
@@ -265,7 +306,9 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
           )}
 
           {/* Writing Mode: Horizontal vs Vertical */}
-          <div className="flex items-center justify-between gap-3 p-2 bg-slate-100/70 dark:bg-slate-800/60 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+          <div className={`flex items-center justify-between gap-3 p-2 bg-slate-100/70 dark:bg-slate-800/60 rounded-xl border border-slate-200/60 dark:border-slate-700/60 transition-opacity ${
+            !showName ? 'opacity-40 pointer-events-none' : ''
+          }`}>
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 ml-1">
               <Type className="w-3.5 h-3.5 text-[#007AFF]" />
               文字の向き:
@@ -391,63 +434,70 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
               </div>
 
               {/* Draggable & Rotatable Label: 中心ピボットを完全に一致させ、キャンバスと同じ位置に描画 */}
-              <div
-                className="absolute z-10 cursor-grab active:cursor-grabbing group select-none"
-                style={{
-                  left: `${centerX + offsetX * previewScale}px`,
-                  top: `${centerY + offsetY * previewScale}px`,
-                  transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-                  transformOrigin: 'center center',
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  handlePointerDown(e.clientX, e.clientY);
-                }}
-                onTouchStart={(e) => {
-                  e.stopPropagation();
-                  if (e.touches[0]) {
-                    handlePointerDown(e.touches[0].clientX, e.touches[0].clientY);
-                  }
-                }}
-              >
+              {showName ? (
                 <div
-                  className={`relative px-1.5 py-0.5 rounded border border-dashed border-[#007AFF] bg-white/80 dark:bg-slate-900/80 hover:bg-[#007AFF]/10 shadow-xs flex items-center justify-center select-none transition-colors ${
-                    isVertical ? 'flex-col' : 'flex-row'
-                  }`}
+                  className="absolute z-10 cursor-grab active:cursor-grabbing group select-none"
                   style={{
-                    color: isSymbol && symbolFilled ? '#ffffff' : (color || '#000000'),
-                    fontSize: Math.max(9, Math.round(fontSize * previewScale)),
-                    fontFamily: 'Arial, sans-serif',
-                    lineHeight: isVertical ? (fontSize > 0 ? (fontSize * 1.15 + letterSpacing) / fontSize : 1.15) : 1,
-                    letterSpacing: isVertical ? 'normal' : `${letterSpacing * previewScale}px`,
-                    gap: isVertical ? `${Math.max(0, letterSpacing * previewScale * 0.8)}px` : undefined,
+                    left: `${centerX + offsetX * previewScale}px`,
+                    top: `${centerY + offsetY * previewScale}px`,
+                    transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                    transformOrigin: 'center center',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    handlePointerDown(e.clientX, e.clientY);
+                  }}
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    if (e.touches[0]) {
+                      handlePointerDown(e.touches[0].clientX, e.touches[0].clientY);
+                    }
                   }}
                 >
-                  {/* 四隅の操作ハンドルインジケーター */}
-                  <span className="absolute -top-1 -left-1 w-2 h-2 bg-[#007AFF] border border-white dark:border-slate-900 rounded-full" />
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#007AFF] border border-white dark:border-slate-900 rounded-full" />
-                  <span className="absolute -bottom-1 -left-1 w-2 h-2 bg-[#007AFF] border border-white dark:border-slate-900 rounded-full" />
-                  <span className="absolute -bottom-1 -right-1 w-2 h-2 bg-[#007AFF] border border-white dark:border-slate-900 rounded-full" />
+                  <div
+                    className={`relative px-1.5 py-0.5 rounded border border-dashed border-[#007AFF] bg-white/80 dark:bg-slate-900/80 hover:bg-[#007AFF]/10 shadow-xs flex items-center justify-center select-none transition-colors ${
+                      isVertical ? 'flex-col' : 'flex-row'
+                    }`}
+                    style={{
+                      color: isSymbol && symbolFilled ? '#ffffff' : (color || '#000000'),
+                      fontSize: Math.max(9, Math.round(fontSize * previewScale)),
+                      fontFamily: 'Arial, sans-serif',
+                      lineHeight: isVertical ? (fontSize > 0 ? (fontSize * 1.15 + letterSpacing) / fontSize : 1.15) : 1,
+                      letterSpacing: isVertical ? 'normal' : `${letterSpacing * previewScale}px`,
+                      gap: isVertical ? `${Math.max(0, letterSpacing * previewScale * 0.8)}px` : undefined,
+                    }}
+                  >
+                    {/* 四隅の操作ハンドルインジケーター */}
+                    <span className="absolute -top-1 -left-1 w-2 h-2 bg-[#007AFF] border border-white dark:border-slate-900 rounded-full" />
+                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#007AFF] border border-white dark:border-slate-900 rounded-full" />
+                    <span className="absolute -bottom-1 -left-1 w-2 h-2 bg-[#007AFF] border border-white dark:border-slate-900 rounded-full" />
+                    <span className="absolute -bottom-1 -right-1 w-2 h-2 bg-[#007AFF] border border-white dark:border-slate-900 rounded-full" />
 
-                  {isVertical ? (
-                    displayChars.map((char, idx) => (
-                      <span key={idx} className="font-bold leading-tight">
-                        {char}
+                    {isVertical ? (
+                      displayChars.map((char, idx) => (
+                        <span key={idx} className="font-bold leading-tight">
+                          {char}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="whitespace-nowrap font-bold leading-none">
+                        {displayText}
                       </span>
-                    ))
-                  ) : (
-                    <span className="whitespace-nowrap font-bold leading-none">
-                      {displayText}
-                    </span>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="absolute z-10 bottom-3 px-3 py-1.5 bg-slate-900/80 backdrop-blur-xs text-white text-[11px] font-bold rounded-full shadow-lg flex items-center gap-1.5 pointer-events-none">
+                  <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+                  <span>名前は非表示に設定されています</span>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Quick Placement Presets */}
-          <div className="flex flex-col gap-1">
+          <div className={`flex flex-col gap-1 transition-opacity ${!showName ? 'opacity-40 pointer-events-none' : ''}`}>
             <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
               位置プリセット:
             </span>
@@ -503,7 +553,9 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
           </div>
 
           {/* Rotation, Size & Letter Spacing Controls */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+          <div className={`grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-slate-100 dark:border-slate-800 transition-opacity ${
+            !showName ? 'opacity-40 pointer-events-none' : ''
+          }`}>
             {/* Rotation Control */}
             <div className="flex flex-col gap-1 p-2 bg-slate-50/70 dark:bg-slate-800/40 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
               <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -663,6 +715,7 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
                   labelFontSize: fontSize,
                   labelLetterSpacing: letterSpacing,
                   isVerticalName: isVertical,
+                  showPercussionName: !isSymbol ? showName : undefined,
                 });
                 onClose();
               }}

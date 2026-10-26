@@ -712,6 +712,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                     currentFontSize: selectedItem.labelFontSize,
                     currentLetterSpacing: selectedItem.labelLetterSpacing || 0,
                     isVertical: Boolean(selectedItem.isVerticalName),
+                    showPercussionName: selectedItem.showPercussionName !== false,
                   });
                 }}
                 className="mt-1 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
@@ -1774,6 +1775,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                   currentFontSize: activeItem.labelFontSize,
                                   currentLetterSpacing: activeItem.labelLetterSpacing || 0,
                                   isVertical: Boolean(activeItem.isVerticalName),
+                                  showPercussionName: activeItem.showPercussionName !== false,
                                 });
                               }}
                               className="py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
