@@ -564,18 +564,19 @@ export function generateSymbolSvg(options: {
  */
 /**
  * ピアノ椅子のSVGパス描画ヘルパー
- * 合奏用椅子（丸: 直径42〜46.5px）と同等のしっかりとしたサイズになるようセンタリング＆スケール調整
+ * 合奏用椅子（丸: 直径42〜46.5px、線幅4.5px）と同等のしっかりとしたサイズ・太い線になるようセンタリング＆ストローク設定
  */
 export function renderPianoChairSvgPath(
   cx = 25,
   cy = 25,
   color = '#000000',
-  scaleX = 1.5,
-  scaleY = 1.4
+  scaleX = 1.45,
+  scaleY = 1.35,
+  strokeWidth = 2.2
 ): string {
   const path = 'm 102.34725,130.87744 v -16.27187 h 0.39688 0.39687 v 7.27247 7.27248 l 8.7974,0.0697 8.7974,0.0697 0.0697,8.92969 0.0697,8.92969 h -0.4004 -0.40039 v -8.59896 -8.59896 h -8.46667 -8.46667 v 8.59896 8.59896 h -0.39687 -0.39688 z';
   return `<g transform="translate(${cx}, ${cy}) scale(${scaleX}, ${scaleY}) translate(-16.672, -18.389)">
-    <path d="${path}" fill="${color}" transform="translate(-94.938919, -112.4889)"/>
+    <path d="${path}" fill="${color}" stroke="${color}" stroke-width="${strokeWidth}" stroke-linejoin="round" stroke-linecap="round" transform="translate(-94.938919, -112.4889)"/>
   </g>`;
 }
 
@@ -602,8 +603,8 @@ export function generateSvgString(
         <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
         <circle cx="25" cy="25" r="11" fill="none" stroke="${color}" stroke-width="3.5"/>
       ` : isPianoSvg ? `
-        <!-- ピアノ椅子 (テンプレSVG画像: 合奏用椅子と同等のサイズに拡大) -->
-        ${renderPianoChairSvgPath(25, 25, color, 1.5, 1.4)}
+        <!-- ピアノ椅子 (テンプレSVG画像: 合奏用椅子と同等のサイズ・太い線) -->
+        ${renderPianoChairSvgPath(25, 25, color)}
       ` : isPianoPi ? `
         <!-- ピアノ椅子 (丸の中に「ピ」) -->
         <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
@@ -647,7 +648,7 @@ export function generateSvgString(
     }
     if (isPianoSvg) {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
-        ${renderPianoChairSvgPath(25, 25, color, 1.5, 1.4)}
+        ${renderPianoChairSvgPath(25, 25, color)}
       </svg>`;
     }
     if (isPianoPi) {
@@ -679,7 +680,7 @@ export function generateSvgString(
       </svg>`;
     }
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
-      ${renderPianoChairSvgPath(25, 25, color, 1.5, 1.4)}
+      ${renderPianoChairSvgPath(25, 25, color)}
     </svg>`;
   }
 
