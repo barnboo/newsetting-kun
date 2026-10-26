@@ -342,12 +342,12 @@ export const TEMPLATE_SHAPES: TemplateShape[] = [
     type: 'pianoChair',
     label: 'ピアノ椅子',
     category: 'chairs',
-    defaultW: 36,
-    defaultH: 36,
-    origW: 37.570835,
-    origH: 37.570835,
-    tx: -94.938919,
-    ty: -112.4889,
+    defaultW: 34,
+    defaultH: 34,
+    origW: 50,
+    origH: 50,
+    tx: 0,
+    ty: 0,
     pathData: 'm 102.34725,130.87744 v -16.27187 h 0.39688 0.39687 v 7.27247 7.27248 l 8.7974,0.0697 8.7974,0.0697 0.0697,8.92969 0.0697,8.92969 h -0.4004 -0.40039 v -8.59896 -8.59896 h -8.46667 -8.46667 v 8.59896 8.59896 h -0.39687 -0.39688 z',
     targetTallies: [{ label: 'ピアノ椅子', multiplier: 1 }],
   },
@@ -562,6 +562,23 @@ export function generateSymbolSvg(options: {
 /**
  * Generate a standalone SVG markup string for a template shape
  */
+/**
+ * ピアノ椅子のSVGパス描画ヘルパー
+ * 合奏用椅子（丸: 直径42〜46.5px）と同等のしっかりとしたサイズになるようセンタリング＆スケール調整
+ */
+export function renderPianoChairSvgPath(
+  cx = 25,
+  cy = 25,
+  color = '#000000',
+  scaleX = 1.5,
+  scaleY = 1.4
+): string {
+  const path = 'm 102.34725,130.87744 v -16.27187 h 0.39688 0.39687 v 7.27247 7.27248 l 8.7974,0.0697 8.7974,0.0697 0.0697,8.92969 0.0697,8.92969 h -0.4004 -0.40039 v -8.59896 -8.59896 h -8.46667 -8.46667 v 8.59896 8.59896 h -0.39687 -0.39688 z';
+  return `<g transform="translate(${cx}, ${cy}) scale(${scaleX}, ${scaleY}) translate(-16.672, -18.389)">
+    <path d="${path}" fill="${color}" transform="translate(-94.938919, -112.4889)"/>
+  </g>`;
+}
+
 export function generateSvgString(
   template: TemplateShape,
   color = '#000000',
@@ -585,10 +602,8 @@ export function generateSvgString(
         <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
         <circle cx="25" cy="25" r="11" fill="none" stroke="${color}" stroke-width="3.5"/>
       ` : isPianoSvg ? `
-        <!-- ピアノ椅子 (テンプレSVG画像) -->
-        <svg x="5" y="4" width="40" height="40" viewBox="0 0 37.570835 37.570835">
-          <path d="m 102.34725,130.87744 v -16.27187 h 0.39688 0.39687 v 7.27247 7.27248 l 8.7974,0.0697 8.7974,0.0697 0.0697,8.92969 0.0697,8.92969 h -0.4004 -0.40039 v -8.59896 -8.59896 h -8.46667 -8.46667 v 8.59896 8.59896 h -0.39687 -0.39688 z" fill="${color}" transform="translate(-94.938919, -112.4889)"/>
-        </svg>
+        <!-- ピアノ椅子 (テンプレSVG画像: 合奏用椅子と同等のサイズに拡大) -->
+        ${renderPianoChairSvgPath(25, 25, color, 1.5, 1.4)}
       ` : isPianoPi ? `
         <!-- ピアノ椅子 (丸の中に「ピ」) -->
         <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
@@ -618,8 +633,58 @@ export function generateSvgString(
     }
   }
 
+  // 合奏用椅子単体 (chorusChair) の場合も chairType でピアノ椅子に切り替え可能
+  if (template.type === 'chorusChair') {
+    const isPianoCircle = chairType === 'pianoChair';
+    const isPianoSvg = chairType === 'pianoChairSvg';
+    const isPianoPi = chairType === 'pianoChairPi';
+
+    if (isPianoCircle) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
+        <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
+        <circle cx="25" cy="25" r="11" fill="none" stroke="${color}" stroke-width="3.5"/>
+      </svg>`;
+    }
+    if (isPianoSvg) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
+        ${renderPianoChairSvgPath(25, 25, color, 1.5, 1.4)}
+      </svg>`;
+    }
+    if (isPianoPi) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
+        <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
+        <text x="25" y="26" font-family="'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif" font-size="22" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="${color}">ピ</text>
+      </svg>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
+      <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="4.5"/>
+    </svg>`;
+  }
+
+  // ピアノ椅子単体 (pianoChair)
+  if (template.type === 'pianoChair') {
+    const isPianoCircle = chairType === 'pianoChair' || customIconStyle === 'doubleCircle';
+    const isPianoPi = chairType === 'pianoChairPi' || customIconStyle === 'circlePi';
+
+    if (isPianoCircle) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
+        <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
+        <circle cx="25" cy="25" r="11" fill="none" stroke="${color}" stroke-width="3.5"/>
+      </svg>`;
+    }
+    if (isPianoPi) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
+        <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
+        <text x="25" y="26" font-family="'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif" font-size="22" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="${color}">ピ</text>
+      </svg>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
+      ${renderPianoChairSvgPath(25, 25, color, 1.5, 1.4)}
+    </svg>`;
+  }
+
   if (customIconStyle === 'doubleCircle') {
-    if (template.type === 'pianoChair' || template.type === 'turnerChair') {
+    if (template.type === 'turnerChair') {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
         <circle cx="25" cy="25" r="22" fill="none" stroke="${color}" stroke-width="4"/>
         <circle cx="25" cy="25" r="12" fill="none" stroke="${color}" stroke-width="4"/>
@@ -628,7 +693,7 @@ export function generateSvgString(
   }
 
   if (customIconStyle === 'circlePi') {
-    if (template.type === 'pianoChair' || template.type === 'turnerChair') {
+    if (template.type === 'turnerChair') {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="50" height="50">
         <circle cx="25" cy="25" r="21" fill="none" stroke="${color}" stroke-width="3.5"/>
         <text x="25" y="26" font-family="'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif" font-size="22" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="${color}">ピ</text>
