@@ -2508,8 +2508,10 @@ const StageBuilder: React.FC<Props> = ({
               }`}
               title="新しいベジェ曲線（何も置かれていない空の曲線）を追加します"
             >
-              <div className="w-8 h-8 flex items-center justify-center text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <div className={`w-8.5 h-8.5 flex items-center justify-center rounded-xl transition-all group-hover:scale-105 ${
+                isDarkMode ? 'bg-white text-purple-600 shadow-xs p-1' : 'text-purple-600 dark:text-purple-400'
+              }`}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 18 C 7 6, 17 6, 20 18" />
                   <circle cx="4" cy="18" r="2.2" fill="#a855f7" />
                   <circle cx="20" cy="18" r="2.2" fill="#a855f7" />
@@ -2545,7 +2547,9 @@ const StageBuilder: React.FC<Props> = ({
                       +追加
                     </span>
                   )}
-                  <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
+                  <div className={`w-8.5 h-8.5 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl transition-all ${
+                    isDarkMode ? 'bg-white shadow-xs p-1' : ''
+                  }`}>
                     <img src={getTemplateDataUrl(tmpl)} alt={tmpl.label} className="max-w-full max-h-full object-contain" />
                   </div>
                   <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
@@ -2604,7 +2608,9 @@ const StageBuilder: React.FC<Props> = ({
                             テンプレ
                           </span>
                         )}
-                        <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
+                        <div className={`w-8.5 h-8.5 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl transition-all ${
+                          isDarkMode ? 'bg-white shadow-xs p-1' : ''
+                        }`}>
                           <img
                             src={getTemplateDataUrl(matchedTmpl)}
                             alt={label}
@@ -2640,7 +2646,9 @@ const StageBuilder: React.FC<Props> = ({
                           +追加
                         </span>
                       )}
-                      <div className="w-8 h-8 flex items-center justify-center pointer-events-none mt-0.5">
+                      <div className={`w-8.5 h-8.5 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl transition-all ${
+                        isDarkMode ? 'bg-white shadow-xs p-1' : ''
+                      }`}>
                         <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain" />
                       </div>
                       <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
