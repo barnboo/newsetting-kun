@@ -1228,32 +1228,38 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   }, [sceneNodesMap, showCurveLines, fileId, onUpdatePreviewSettings]);
 
   // Initialize nodes for all scenes (restoring from initialPreviewSettings or scene.savedNodes if available)
+  // 保存済みノードを復元する場合も、自動集計ノード（id が 'auto_' で始まるもの）は毎回最新の集計結果に置き換える
   useEffect(() => {
+    const isOrgNode = (n: OverlayNode) => n.id === 'text_org' || !!n.text?.includes('〇〇吹奏楽団');
+    const isAutoNode = (n: OverlayNode) => typeof n.id === 'string' && n.id.startsWith('auto_');
+
     setSceneNodesMap(prevMap => {
       const newMap: Record<string, OverlayNode[]> = { ...prevMap };
 
       effectiveScenes.forEach((sc, idx) => {
+        const freshAutoNodes = (sc.initialNodes || (idx === 0 ? initialNodes : []) || []).filter(
+          n => !isOrgNode(n)
+        );
+        const mergeWithFreshAuto = (saved: OverlayNode[]) => [
+          ...saved.filter(n => !isOrgNode(n) && !isAutoNode(n)),
+          ...freshAutoNodes.filter(isAutoNode),
+        ];
+
         // If already initialized in component state, just filter text_org
         if (newMap[sc.sceneId] && newMap[sc.sceneId].length > 0) {
-          newMap[sc.sceneId] = newMap[sc.sceneId].filter(
-            (n: OverlayNode) => n.id !== 'text_org' && !n.text?.includes('〇〇吹奏楽団')
-          );
+          newMap[sc.sceneId] = newMap[sc.sceneId].filter(n => !isOrgNode(n));
           return;
         }
 
         // 1. Check initialPreviewSettings first
         if (initialPreviewSettings?.sceneNodesMap?.[sc.sceneId] && initialPreviewSettings.sceneNodesMap[sc.sceneId].length > 0) {
-          newMap[sc.sceneId] = initialPreviewSettings.sceneNodesMap[sc.sceneId].filter(
-            (n: OverlayNode) => n.id !== 'text_org' && !n.text?.includes('〇〇吹奏楽団')
-          );
+          newMap[sc.sceneId] = mergeWithFreshAuto(initialPreviewSettings.sceneNodesMap[sc.sceneId]);
           return;
         }
 
         // 2. Check scene.savedNodes
         if (sc.savedNodes && sc.savedNodes.length > 0) {
-          newMap[sc.sceneId] = sc.savedNodes.filter(
-            (n: OverlayNode) => n.id !== 'text_org' && !n.text?.includes('〇〇吹奏楽団')
-          );
+          newMap[sc.sceneId] = mergeWithFreshAuto(sc.savedNodes);
           return;
         }
 
@@ -1268,14 +1274,11 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           radius: 15,
         } : null;
 
-        const scInitial = (sc.initialNodes || (idx === 0 ? initialNodes : []) || []).filter(
-          n => n.id !== 'text_org' && !n.text?.includes('〇〇吹奏楽団')
-        );
         const initialList: OverlayNode[] = [];
         if (defaultSceneNode) {
           initialList.push(defaultSceneNode);
         }
-        initialList.push(...scInitial);
+        initialList.push(...freshAutoNodes);
         newMap[sc.sceneId] = initialList;
       });
 
