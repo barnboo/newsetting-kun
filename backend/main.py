@@ -169,6 +169,8 @@ def classify_equipment_label(raw_text: str):
     """
     import re as _re
     t = clean_japanese_text(raw_text).strip()
+    if t.startswith(("※", "＊")):
+        return None
     t = _re.sub(r'^[0-9０-９①-⑳・\*\-\s\.]+', '', t).strip()
     t = _re.sub(r'[=＝:：→⇒…‥\(\)（）\[\]［］【】]+$', '', t).strip()
     if not t:
@@ -463,28 +465,57 @@ async def extract_regions(req: ExtractRequest):
         icon_urls = []
         icons_region_url = ''
         extracted_icons = []
+        bg_rect_points: Optional[fitz.Rect] = None
         
-        sorted_regions = sorted(req.regions, key=lambda r: 0 if r.type == 'background' else 1)
-        
-        for region in sorted_regions:
-            c = region.crop
-            rect_points = fitz.Rect(
-                c.x / zoom,
-                c.y / zoom,
-                (c.x + c.width) / zoom,
-                (c.y + c.height) / zoom
-            )
-            
+        for region in req.regions:
             if region.type == "background":
+                c = region.crop
+                bg_rect_points = fitz.Rect(
+                    c.x / zoom,
+                    c.y / zoom,
+                    (c.x + c.width) / zoom,
+                    (c.y + c.height) / zoom
+                )
                 bg_zoom = 2.0
                 mat = fitz.Matrix(bg_zoom, bg_zoom)
-                pix = page.get_pixmap(matrix=mat, clip=rect_points)
+                pix = page.get_pixmap(matrix=mat, clip=bg_rect_points)
                 bg_filename = f"{req.file_id}_bg.png"
                 bg_path = os.path.join(STATIC_DIR, bg_filename)
                 pix.save(bg_path)
                 background_url = f"/static/{bg_filename}"
-                
-            elif region.type == "icons":
+                break
+
+        # Use explicit 'icons' region if provided, otherwise automatically scan outside the stage diagram
+        icons_region_item = next((r for r in req.regions if r.type == "icons"), None)
+        is_auto_icons = icons_region_item is None
+        if icons_region_item is not None:
+            ic_crop = icons_region_item.crop
+            rect_points = fitz.Rect(
+                ic_crop.x / zoom,
+                ic_crop.y / zoom,
+                (ic_crop.x + ic_crop.width) / zoom,
+                (ic_crop.y + ic_crop.height) / zoom
+            )
+        else:
+            rect_points = fitz.Rect(page.rect)
+
+        bg_excl: Optional[fitz.Rect] = None
+        if is_auto_icons and bg_rect_points is not None:
+            bg_excl = fitz.Rect(
+                bg_rect_points.x0 + 4.0,
+                bg_rect_points.y0 + 4.0,
+                bg_rect_points.x1 - 4.0,
+                bg_rect_points.y1 - 4.0
+            )
+
+        def is_inside_bg(r: fitz.Rect) -> bool:
+            if bg_excl is None:
+                return False
+            cx = (r.x0 + r.x1) / 2.0
+            cy = (r.y0 + r.y1) / 2.0
+            return bg_excl.x0 <= cx <= bg_excl.x1 and bg_excl.y0 <= cy <= bg_excl.y1
+
+        if True:
                 import time
                 cache_buster = str(int(time.time()))
                 
@@ -494,16 +525,15 @@ async def extract_regions(req: ExtractRequest):
                 icon_zoom = 4.0
                 mat = fitz.Matrix(icon_zoom, icon_zoom)
                 
-                # Render high-resolution region image
+                # Render high-resolution scan region image
                 pix_region = page.get_pixmap(matrix=mat, clip=rect_points)
                 region_filename = f"{req.file_id}_icons_region_{cache_buster}.png"
                 region_path = os.path.join(STATIC_DIR, region_filename)
-                pix_region.save(region_path)
-                icons_region_url = f"/static/{region_filename}"
-
-                # Save clean version for manual crop fidelity
                 region_clean_path = os.path.join(STATIC_DIR, f"{req.file_id}_icons_region_notext_{cache_buster}.png")
-                pix_region.save(region_clean_path)
+                if not is_auto_icons:
+                    pix_region.save(region_path)
+                    pix_region.save(region_clean_path)
+                    icons_region_url = f"/static/{region_filename}"
 
                 # Convert pix_region to OpenCV for table grid removal and symbol cell analysis
                 img_data = np.frombuffer(pix_region.samples, dtype=np.uint8).reshape((pix_region.height, pix_region.width, pix_region.n))
@@ -521,6 +551,15 @@ async def extract_regions(req: ExtractRequest):
                 lines_grid = cv2.add(cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_k), cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_k))
                 no_grid = cv2.subtract(thresh, lines_grid)
 
+                # In auto-scan mode, mask out the user-selected stage diagram region so stage graphics are never picked up
+                if bg_rect_points is not None and is_auto_icons:
+                    bx0 = max(0, int((bg_rect_points.x0 - rect_points.x0) * icon_zoom))
+                    bx1 = min(pix_region.width, int((bg_rect_points.x1 - rect_points.x0) * icon_zoom))
+                    by0 = max(0, int((bg_rect_points.y0 - rect_points.y0) * icon_zoom))
+                    by1 = min(pix_region.height, int((bg_rect_points.y1 - rect_points.y0) * icon_zoom))
+                    if bx1 > bx0 and by1 > by0:
+                        no_grid[by0:by1, bx0:bx1] = 0
+
                 candidate_boxes = []
                 inline_sym_rects = []
                 consumed_tokens = set()  # (line_idx, tok_idx)
@@ -537,7 +576,7 @@ async def extract_regions(req: ExtractRequest):
                     toks = line["tokens"]
                     n_toks = len(toks)
                     for t_idx in range(n_toks):
-                        if (l_idx, t_idx) in consumed_tokens:
+                        if (l_idx, t_idx) in consumed_tokens or is_inside_bg(toks[t_idx]["rect"]):
                             continue
 
                         # Pattern A1: [WORD(label)] [DELIM in PAIR_DELIMS] [SYMBOL]
@@ -625,11 +664,26 @@ async def extract_regions(req: ExtractRequest):
                             if mx1 > mx0 and my1 > my0:
                                 no_grid_no_text[my0:my1, mx0:mx1] = 0
 
+                # Remove oversized graphical structures (e.g. stage walls, large boxes) and tiny specks from no_grid_no_text
+                num_labels, cc_labels, cc_stats, _ = cv2.connectedComponentsWithStats(no_grid_no_text, connectivity=8)
+                for lbl_i in range(1, num_labels):
+                    cw = cc_stats[lbl_i, cv2.CC_STAT_WIDTH]
+                    ch = cc_stats[lbl_i, cv2.CC_STAT_HEIGHT]
+                    carea = cc_stats[lbl_i, cv2.CC_STAT_AREA]
+                    if (
+                        carea < 12
+                        or cw > int(65 * icon_zoom)
+                        or ch > int(48 * icon_zoom)
+                        or (cw >= int(16 * icon_zoom) and ch <= int(3 * icon_zoom))
+                        or (ch >= int(16 * icon_zoom) and cw <= int(3 * icon_zoom))
+                    ):
+                        no_grid_no_text[cc_labels == lbl_i] = 0
+
                 # Detect '記号' column header if present
                 sym_col_bounds = None
                 for line in tokenized_lines:
                     for tok in line["tokens"]:
-                        if tok["text"] in ("記号", "図"):
+                        if not is_inside_bg(tok["rect"]) and tok["text"] in ("記号", "図"):
                             sym_col_bounds = (tok["rect"].x0 - 18.0, tok["rect"].x1 + 18.0)
                             break
                     if sym_col_bounds:
@@ -639,16 +693,17 @@ async def extract_regions(req: ExtractRequest):
                 raw_images = page.get_image_info(xrefs=True)
                 for img in raw_images:
                     b = fitz.Rect(img['bbox'])
-                    if b.intersects(rect_points):
+                    if b.intersects(rect_points) and not is_inside_bg(b):
                         if 6 <= b.width <= 160 and 6 <= b.height <= 160:
                             lbl = extract_label_for_icon(b, page_words, tokenized_lines)
-                            candidate_boxes.append((b, lbl, 'raster'))
+                            if lbl or not is_auto_icons:
+                                candidate_boxes.append((b, lbl, 'raster'))
 
                 # Mode C: Row-based symbol search using reconstructed phrases & text-masked image
                 for l_idx, line in enumerate(tokenized_lines):
                     toks = line["tokens"]
                     for t_idx, tok in enumerate(toks):
-                        if (l_idx, t_idx) in consumed_tokens or tok["type"] != "WORD":
+                        if (l_idx, t_idx) in consumed_tokens or tok["type"] != "WORD" or is_inside_bg(tok["rect"]):
                             continue
                         eq = classify_equipment_label(tok["text"])
                         if not eq:
@@ -715,6 +770,8 @@ async def extract_regions(req: ExtractRequest):
                     r = fitz.Rect(d['rect'])
                     if not r.intersects(rect_points):
                         continue
+                    if bg_excl is not None and r.intersects(bg_excl):
+                        continue
                     if r.width > 120 or r.height > 120:
                         continue
                     # Filter out horizontal and vertical table border segments
@@ -731,7 +788,13 @@ async def extract_regions(req: ExtractRequest):
                     if 5 <= md.width <= 120 and 5 <= md.height <= 120:
                         lbl = extract_label_for_icon(md, page_words, tokenized_lines)
                         if lbl:
-                            candidate_boxes.append((md, lbl, 'drawing'))
+                            md_ymid = (md.y0 + md.y1) / 2.0
+                            already_found_in_row = any(
+                                clbl == lbl and abs(((cb.y0 + cb.y1) / 2.0) - md_ymid) < 16.0
+                                for cb, clbl, _ in candidate_boxes
+                            )
+                            if not already_found_in_row:
+                                candidate_boxes.append((md, lbl, 'drawing'))
 
                 # Deduplicate overlapping candidate boxes
                 unique_candidates = []
@@ -750,6 +813,41 @@ async def extract_regions(req: ExtractRequest):
                     if not overlap:
                         final_lbl = lbl or extract_label_for_icon(b, page_words, tokenized_lines)
                         unique_candidates.append((b, final_lbl, typ))
+
+                # If icons region was auto-detected, crop icons_region_url tightly around the detected legend/table
+                if is_auto_icons:
+                    if unique_candidates:
+                        u_rect = fitz.Rect(unique_candidates[0][0])
+                        for b, _, _ in unique_candidates[1:]:
+                            u_rect = u_rect | b
+                        # Include associated equipment label tokens and nearby table headers ('品名', '記号')
+                        for line in tokenized_lines:
+                            for tok in line["tokens"]:
+                                tr = tok["rect"]
+                                if is_inside_bg(tr):
+                                    continue
+                                if classify_equipment_label(tok["text"]) or tok["text"] in ("品名", "記号", "備品"):
+                                    near_cand = any(
+                                        abs(((tr.y0 + tr.y1) - (b.y0 + b.y1)) / 2.0) < 28.0
+                                        and min(abs(tr.x1 - b.x0), abs(tr.x0 - b.x1), abs(tr.x0 - b.x0)) < 140.0
+                                        for b, _, _ in unique_candidates
+                                    )
+                                    if near_cand:
+                                        u_rect = u_rect | tr
+                        pad_x, pad_y = 24.0, 18.0
+                        rect_points = fitz.Rect(
+                            max(page.rect.x0, u_rect.x0 - pad_x),
+                            max(page.rect.y0, u_rect.y0 - pad_y),
+                            min(page.rect.x1, u_rect.x1 + pad_x),
+                            min(page.rect.y1, u_rect.y1 + pad_y)
+                        )
+                    else:
+                        rect_points = fitz.Rect(page.rect)
+
+                    pix_region = page.get_pixmap(matrix=mat, clip=rect_points)
+                    pix_region.save(region_path)
+                    pix_region.save(region_clean_path)
+                    icons_region_url = f"/static/{region_filename}"
 
                 # Sort candidates in visual reading order:
                 # If all candidates are on roughly the same horizontal band (inline legend), sort left-to-right;
