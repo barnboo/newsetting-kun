@@ -78,8 +78,10 @@ async def upload_pdf(file: UploadFile = File(...)):
                 os.remove(pdf_path)
             raise HTTPException(status_code=400, detail="PDFが空です。")
             
-        # Get first page
+        # Get first page and normalize rotation so text/drawing/image coordinates match visual pixmap
         page = doc[0]
+        if page.rotation != 0:
+            page.remove_rotation()
         
         # Render page to an image (PNG)
         # Using a matrix to increase resolution (e.g., zoom factor 2)
@@ -158,7 +160,7 @@ def clean_japanese_text(text: str) -> str:
 SYMBOL_CHARS = set("○◯⚪◎●◉□■◇◆△▲▽▼×✕✗✘＋+＊*☆✭♩♪♫♬〒⊥⊤⊢⊣┳┻╋") | set("①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳")
 DELIM_CHARS = set("=＝:：→⇒←↔…‥・/／()（）[]［］【】「」『』")
 PAIR_DELIMS = {"=", "＝", ":", "：", "→", "⇒", "←", "↔", "…", "‥", "-", "―", "ー"}
-STANDALONE_STOP_WORDS = {"要", "不要", "有", "無", "閉", "半開", "全開", "蒲鉾板", "立奏", "座奏"}
+STANDALONE_STOP_WORDS = {"要", "不要", "有", "無", "閉", "半開", "半半開", "全開", "蒲鉾板", "立奏", "座奏", "蓋"}
 NON_ICON_1CHAR = set("品名記号要不有無閉開本脚台個枚組式張対番部門団体客席数等印") | set("0123456789")
 
 def classify_equipment_label(raw_text: str):
@@ -180,16 +182,16 @@ def classify_equipment_label(raw_text: str):
         "品名", "記号", "品名記号", "品名/記号", "使用備品", "備品名", "備品",
         "要", "不要", "要・不要", "不要・要", "個数", "数量", "使用数", "個数等",
         "要・不要/個数等", "備考", "番号", "No", "No.", "凡例", "記載例",
-        "閉", "蒲鉾板", "カマボコ", "ｶﾏﾎﾞｺ", "半開", "全開", "立奏", "座奏",
+        "閉", "蒲鉾板", "カマボコ", "ｶﾏﾎﾞｺ", "半開", "半半開", "全開", "立奏", "座奏",
         "本", "脚", "台", "個", "枚", "組", "式", "張", "対", "有", "無",
-        "借用品", "○印", "印", "をつける", "○をつける", "伝達事項", "ステージ配置図",
+        "借用品", "借用楽器等", "○印", "印", "をつける", "○をつける", "伝達事項", "ステージ配置図",
         "団体名", "出演番号", "部門", "プログラム", "番", "客席", "下手側", "上手側",
         "下手", "上手", "待機場所", "次の団体", "本部", "ふりがな", "指揮者氏名",
-        "ピアノ蓋", "ピアノの蓋", "反響板"
+        "ピアノ蓋", "ピアノの蓋", "蓋", "反響板", "合計使用数", "合計"
     }
     if t in ignore_exact or len(t) > 16:
         return None
-    if any(k in t for k in ["ください", "提出", "コピー", "原則", "場合", "貸出可能", "借用楽器", "サイズ", "をつける", "別も忘れず"]):
+    if any(k in t for k in ["ください", "提出", "コピー", "原則", "場合", "貸出可能", "借用楽器", "サイズ", "をつける", "別も忘れず", "の使用", "使用数", "借用する", "借用しない", "使わない"]):
         return None
     if "蓋" in t or "反響板" in t:
         return None
@@ -227,7 +229,13 @@ def classify_equipment_label(raw_text: str):
     # 11. Microphone (マイク / マイクロフォン)
     if any(k in t for k in ["マイク", "マイクロフォン", "マイクロホン"]):
         return ("マイク", "mic")
-    # 12. Stage platform / risers (平台 / ひな壇 / 立奏台)
+    # 12. Chime / Tubular bells (チャイム / チューブラーベル)
+    if any(k in t for k in ["チャイム", "チューブラーベル"]):
+        return ("チャイム", "chime")
+    # 13. Gong / Tam-tam (ドラ / 銅鑼 / ゴング / タムタム)
+    if t in ("ドラ", "銅鑼", "ゴング", "タムタム"):
+        return ("ドラ", "gong")
+    # 14. Stage platform / risers (平台 / ひな壇 / 立奏台)
     if any(k in t for k in ["平台", "ひな壇", "雛壇", "立奏台", "ステージ台", "箱馬"]):
         return (t, f"dyn_{t}")
 
@@ -302,7 +310,7 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
                 if not has_v_line_between(prev["rect"].x1, r.x0, line["y_mid"]):
                     can_merge = False
                     tight_thresh = max(prev["avg_w"] * 0.45, 4.0)
-                    if gap <= tight_thresh:
+                    if gap <= tight_thresh and prev["text"] != "蓋":
                         can_merge = True
                     elif gap <= 24.0 and prev["text"] not in STANDALONE_STOP_WORDS and ch not in STANDALONE_STOP_WORDS:
                         # Only merge across wide justification gaps if BOTH sides are single spaced characters
@@ -333,6 +341,64 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
                 "last_gap": 0.0,
             })
         line["tokens"] = tokens
+
+    # Reconstruct vertically stacked short equipment labels (e.g. '電'+'源' -> '電源', 'ピ'+'ア'+'ノ' -> 'ピアノ', 'チャ'+'イ'+'ム' -> 'チャイム')
+    VERT_EQUIPMENT_WORDS = {"電源", "ピアノ", "チャイム", "ドラ", "銅鑼", "指揮台", "譜面台", "椅子", "長机", "マイク"}
+    consumed_vert = set()  # (line_idx, tok_idx)
+    n_lines = len(lines)
+    for l_i in range(n_lines):
+        for t_i, tok in enumerate(lines[l_i]["tokens"]):
+            if (l_i, t_i) in consumed_vert or tok["type"] != "WORD" or len(tok["text"]) > 2:
+                continue
+            chain = [(l_i, t_i, tok)]
+            cur_rect = fitz.Rect(tok["rect"])
+            cur_cx = (cur_rect.x0 + cur_rect.x1) / 2.0
+            for next_l in range(l_i + 1, min(n_lines, l_i + 6)):
+                found_next = None
+                for nt_i, ntok in enumerate(lines[next_l]["tokens"]):
+                    if (next_l, nt_i) in consumed_vert or ntok["type"] != "WORD" or len(ntok["text"]) > 2:
+                        continue
+                    nr = ntok["rect"]
+                    ncx = (nr.x0 + nr.x1) / 2.0
+                    v_gap = nr.y0 - cur_rect.y1
+                    if abs(ncx - cur_cx) <= 5.0 and -2.0 <= v_gap <= 14.0:
+                        found_next = (next_l, nt_i, ntok)
+                        break
+                if found_next:
+                    chain.append(found_next)
+                    cur_rect = cur_rect | found_next[2]["rect"]
+                    joined_so_far = "".join(item[2]["text"] for item in chain)
+                    if joined_so_far in VERT_EQUIPMENT_WORDS or classify_equipment_label(joined_so_far):
+                        break
+                elif lines[next_l]["y_mid"] - cur_rect.y1 > 16.0:
+                    break
+            if len(chain) >= 2:
+                joined_txt = "".join(item[2]["text"] for item in chain)
+                if joined_txt in VERT_EQUIPMENT_WORDS or classify_equipment_label(joined_txt):
+                    u_rect = fitz.Rect(chain[0][2]["rect"])
+                    u_chars = []
+                    for ch_l, ch_t, ch_tok in chain:
+                        u_rect |= ch_tok["rect"]
+                        u_chars.extend(ch_tok["chars"])
+                        consumed_vert.add((ch_l, ch_t))
+                    # Attach the reconstructed token to the chain line that has choice/tally tokens to its right
+                    best_line_idx = chain[len(chain) // 2][0]
+                    for ch_l, _, _ in chain:
+                        has_right_neighbor = any(
+                            other_t["rect"].x0 > u_rect.x1 and (other_t["rect"].x0 - u_rect.x1) < 60.0
+                            for other_t in lines[ch_l]["tokens"]
+                        )
+                        if has_right_neighbor:
+                            best_line_idx = ch_l
+                            break
+                    for ch_l, ch_t, ch_tok in reversed(chain):
+                        if ch_l == best_line_idx:
+                            ch_tok["text"] = joined_txt
+                            ch_tok["rect"] = u_rect
+                            ch_tok["chars"] = u_chars
+                        else:
+                            lines[ch_l]["tokens"].pop(ch_t)
+
     return lines
 
 def extract_label_for_icon(bbox: fitz.Rect, page_words: list, tokenized_lines: Optional[list] = None) -> str:
@@ -459,6 +525,8 @@ async def extract_regions(req: ExtractRequest):
     try:
         doc = fitz.open(pdf_path)
         page = doc[0]
+        if page.rotation != 0:
+            page.remove_rotation()
         
         zoom = 2.0  
         background_url = ""
@@ -643,6 +711,36 @@ async def extract_regions(req: ExtractRequest):
                                 consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2), (l_idx, t_idx + 3)})
                                 continue
 
+                # Pattern A4 fallback (only if no explicit legend pairs A1/A2/A3 were found): [SYMBOL] [WORD(label)] '(' ')'
+                if not inline_sym_rects:
+                    for l_idx, line in enumerate(tokenized_lines):
+                        toks = line["tokens"]
+                        n_toks = len(toks)
+                        for t_idx in range(n_toks):
+                            if (l_idx, t_idx) in consumed_tokens or is_inside_bg(toks[t_idx]["rect"]):
+                                continue
+                            if (
+                                t_idx + 3 < n_toks
+                                and is_valid_symbol_token(toks[t_idx])
+                                and toks[t_idx + 1]["type"] == "WORD"
+                                and toks[t_idx + 2]["text"] in ("(", "（")
+                                and toks[t_idx + 3]["text"] in (")", "）")
+                                and (toks[t_idx + 1]["rect"].x0 - toks[t_idx]["rect"].x1) < 16.0
+                            ):
+                                eq = classify_equipment_label(toks[t_idx + 1]["text"])
+                                if eq:
+                                    sr = toks[t_idx]["rect"]
+                                    lr = toks[t_idx + 1]["rect"]
+                                    pad = 2.0
+                                    x0 = sr.x0 - pad
+                                    if t_idx > 0:
+                                        x0 = max(toks[t_idx - 1]["rect"].x1 + 1.0, x0)
+                                    x1 = min(lr.x0 - 0.5, sr.x1 + pad)
+                                    sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
+                                    candidate_boxes.append((sym_box, eq[0], "inline_sym"))
+                                    inline_sym_rects.append(sym_box)
+                                    consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1)})
+
                 # Create text-masked binary image (no_grid_no_text) so text words never contaminate icon crops
                 no_grid_no_text = no_grid.copy()
                 for l_idx, line in enumerate(tokenized_lines):
@@ -695,110 +793,126 @@ async def extract_regions(req: ExtractRequest):
                     b = fitz.Rect(img['bbox'])
                     if b.intersects(rect_points) and not is_inside_bg(b):
                         if 6 <= b.width <= 160 and 6 <= b.height <= 160:
+                            # Skip raster images that are actually text-boxes (contain selectable words of len >= 2 inside bbox)
+                            has_word_inside = any(
+                                tok["type"] == "WORD" and len(tok["text"]) >= 2 and b.intersects(tok["rect"])
+                                for line in tokenized_lines
+                                for tok in line["tokens"]
+                            )
+                            if has_word_inside:
+                                continue
                             lbl = extract_label_for_icon(b, page_words, tokenized_lines)
                             if lbl or not is_auto_icons:
                                 candidate_boxes.append((b, lbl, 'raster'))
 
-                # Mode C: Row-based symbol search using reconstructed phrases & text-masked image
-                for l_idx, line in enumerate(tokenized_lines):
-                    toks = line["tokens"]
-                    for t_idx, tok in enumerate(toks):
-                        if (l_idx, t_idx) in consumed_tokens or tok["type"] != "WORD" or is_inside_bg(tok["rect"]):
+                # Mode C & Mode D: Table row-based & vector drawing search
+                # Skip when auto-detect already found an explicit inline symbol legend (e.g. '椅子=○', '譜面台=×') and there is no '記号' table column
+                if not (is_auto_icons and len(inline_sym_rects) >= 2 and sym_col_bounds is None):
+                    for l_idx, line in enumerate(tokenized_lines):
+                        toks = line["tokens"]
+                        line_txt = "".join(t["text"] for t in toks)
+                        if sym_col_bounds is None and any(kw in line_txt for kw in ("借用する", "借用しない", "使う", "使わない")):
                             continue
-                        eq = classify_equipment_label(tok["text"])
-                        if not eq:
-                            continue
-                        r = tok["rect"]
-                        canonical_lbl = eq[0]
+                        for t_idx, tok in enumerate(toks):
+                            if (l_idx, t_idx) in consumed_tokens or tok["type"] != "WORD" or is_inside_bg(tok["rect"]):
+                                continue
+                            eq = classify_equipment_label(tok["text"])
+                            if not eq:
+                                continue
+                            r = tok["rect"]
+                            canonical_lbl = eq[0]
 
-                        # Build search intervals: 1) '記号' column if aligned, 2) right of label, 3) left of label
-                        search_x_ranges = []
-                        if sym_col_bounds and abs(sym_col_bounds[0] - r.x1) < 120.0:
-                            search_x_ranges.append(sym_col_bounds)
+                            # Build search intervals: 1) '記号' column if aligned, 2) right of label, 3) left of label
+                            search_x_ranges = []
+                            if sym_col_bounds and abs(sym_col_bounds[0] - r.x1) < 120.0:
+                                search_x_ranges.append(sym_col_bounds)
 
-                        # Right side: up to the next WORD token (e.g. '要', '本', '脚') or +95pt
-                        right_limit = r.x1 + 95.0
-                        for next_idx in range(t_idx + 1, len(toks)):
-                            nt = toks[next_idx]
-                            if nt["type"] == "WORD" and (len(nt["text"]) >= 2 or nt["text"] in NON_ICON_1CHAR):
-                                right_limit = min(right_limit, nt["rect"].x0 - 3.0)
-                                break
-                        if right_limit > r.x1 + 6.0:
-                            search_x_ranges.append((r.x1 + 4.0, right_limit))
-
-                        # Left side: from previous WORD token or -95pt
-                        left_limit = r.x0 - 95.0
-                        for prev_idx in range(t_idx - 1, -1, -1):
-                            pt = toks[prev_idx]
-                            if pt["type"] == "WORD" and (len(pt["text"]) >= 2 or pt["text"] in NON_ICON_1CHAR):
-                                left_limit = max(left_limit, pt["rect"].x1 + 3.0)
-                                break
-                        if r.x0 - 4.0 > left_limit:
-                            search_x_ranges.append((left_limit, r.x0 - 4.0))
-
-                        sym_y0 = r.y0 - 8.0
-                        sym_y1 = r.y1 + 8.0
-                        for sx0, sx1 in search_x_ranges:
-                            px0 = max(0, int((sx0 - rect_points.x0) * icon_zoom))
-                            px1 = min(pix_region.width, int((sx1 - rect_points.x0) * icon_zoom))
-                            py0 = max(0, int((sym_y0 - rect_points.y0) * icon_zoom))
-                            py1 = min(pix_region.height, int((sym_y1 - rect_points.y0) * icon_zoom))
-
-                            if px1 > px0 and py1 > py0:
-                                cell_content = no_grid_no_text[py0:py1, px0:px1]
-                                dark_y, dark_x = np.where(cell_content > 0)
-                                if len(dark_x) >= 16:
-                                    pad = 4
-                                    min_x = max(0, int(np.min(dark_x)) + px0 - pad)
-                                    max_x = min(pix_region.width, int(np.max(dark_x)) + px0 + pad)
-                                    min_y = max(0, int(np.min(dark_y)) + py0 - pad)
-                                    max_y = min(pix_region.height, int(np.max(dark_y)) + py0 + pad)
-
-                                    box_pt = fitz.Rect(
-                                        rect_points.x0 + min_x / icon_zoom,
-                                        rect_points.y0 + min_y / icon_zoom,
-                                        rect_points.x0 + max_x / icon_zoom,
-                                        rect_points.y0 + max_y / icon_zoom
-                                    )
-                                    candidate_boxes.append((box_pt, canonical_lbl, 'row_cell'))
+                            # Right side: up to the next WORD token (e.g. '要', '本', '脚') or +95pt
+                            right_limit = r.x1 + 95.0
+                            for next_idx in range(t_idx + 1, len(toks)):
+                                nt = toks[next_idx]
+                                if nt["type"] == "WORD" and (len(nt["text"]) >= 2 or nt["text"] in NON_ICON_1CHAR):
+                                    right_limit = min(right_limit, nt["rect"].x0 - 3.0)
                                     break
+                            if right_limit > r.x1 + 6.0:
+                                search_x_ranges.append((r.x1 + 4.0, right_limit))
 
-                # Mode D: Vector drawings fallback / supplement (filtering out cell border segments)
-                drawings = page.get_drawings()
-                drawing_rects = []
-                for d in drawings:
-                    r = fitz.Rect(d['rect'])
-                    if not r.intersects(rect_points):
-                        continue
-                    if bg_excl is not None and r.intersects(bg_excl):
-                        continue
-                    if r.width > 120 or r.height > 120:
-                        continue
-                    # Filter out horizontal and vertical table border segments
-                    if (r.width >= 12 and r.height <= 2.5) or (r.height >= 12 and r.width <= 2.5):
-                        continue
-                    if r.width <= 1.8 and r.height <= 1.8:
-                        continue
-                    sw = d.get('width', 1.0) or 1.0
-                    r_exp = fitz.Rect(r.x0 - sw/2, r.y0 - sw/2, r.x1 + sw/2, r.y1 + sw/2)
-                    drawing_rects.append(r_exp)
+                            # Left side: from previous WORD token or -95pt
+                            left_limit = r.x0 - 95.0
+                            for prev_idx in range(t_idx - 1, -1, -1):
+                                pt = toks[prev_idx]
+                                if pt["type"] == "WORD" and (len(pt["text"]) >= 2 or pt["text"] in NON_ICON_1CHAR):
+                                    left_limit = max(left_limit, pt["rect"].x1 + 3.0)
+                                    break
+                            if r.x0 - 4.0 > left_limit:
+                                search_x_ranges.append((left_limit, r.x0 - 4.0))
 
-                merged_drawings = merge_rects(drawing_rects, margin=6.0)
-                for md in merged_drawings:
-                    if 5 <= md.width <= 120 and 5 <= md.height <= 120:
-                        lbl = extract_label_for_icon(md, page_words, tokenized_lines)
-                        if lbl:
-                            md_ymid = (md.y0 + md.y1) / 2.0
-                            already_found_in_row = any(
-                                clbl == lbl and abs(((cb.y0 + cb.y1) / 2.0) - md_ymid) < 16.0
-                                for cb, clbl, _ in candidate_boxes
-                            )
-                            if not already_found_in_row:
-                                candidate_boxes.append((md, lbl, 'drawing'))
+                            sym_y0 = r.y0 - 8.0
+                            sym_y1 = r.y1 + 8.0
+                            for sx0, sx1 in search_x_ranges:
+                                px0 = max(0, int((sx0 - rect_points.x0) * icon_zoom))
+                                px1 = min(pix_region.width, int((sx1 - rect_points.x0) * icon_zoom))
+                                py0 = max(0, int((sym_y0 - rect_points.y0) * icon_zoom))
+                                py1 = min(pix_region.height, int((sym_y1 - rect_points.y0) * icon_zoom))
 
-                # Deduplicate overlapping candidate boxes
+                                if px1 > px0 and py1 > py0:
+                                    cell_content = no_grid_no_text[py0:py1, px0:px1]
+                                    dark_y, dark_x = np.where(cell_content > 0)
+                                    if len(dark_x) >= 16:
+                                        pad = 4
+                                        min_x = max(0, int(np.min(dark_x)) + px0 - pad)
+                                        max_x = min(pix_region.width, int(np.max(dark_x)) + px0 + pad)
+                                        min_y = max(0, int(np.min(dark_y)) + py0 - pad)
+                                        max_y = min(pix_region.height, int(np.max(dark_y)) + py0 + pad)
+
+                                        box_pt = fitz.Rect(
+                                            rect_points.x0 + min_x / icon_zoom,
+                                            rect_points.y0 + min_y / icon_zoom,
+                                            rect_points.x0 + max_x / icon_zoom,
+                                            rect_points.y0 + max_y / icon_zoom
+                                        )
+                                        candidate_boxes.append((box_pt, canonical_lbl, 'row_cell'))
+                                        break
+
+                    # Mode D: Vector drawings fallback / supplement (filtering out cell border segments)
+                    drawings = page.get_drawings()
+                    drawing_rects = []
+                    for d in drawings:
+                        r = fitz.Rect(d['rect'])
+                        if not r.intersects(rect_points):
+                            continue
+                        if bg_excl is not None and r.intersects(bg_excl):
+                            continue
+                        if r.width > 120 or r.height > 120:
+                            continue
+                        # Filter out horizontal and vertical table border segments
+                        if (r.width >= 12 and r.height <= 2.5) or (r.height >= 12 and r.width <= 2.5):
+                            continue
+                        if r.width <= 1.8 and r.height <= 1.8:
+                            continue
+                        sw = d.get('width', 1.0) or 1.0
+                        r_exp = fitz.Rect(r.x0 - sw/2, r.y0 - sw/2, r.x1 + sw/2, r.y1 + sw/2)
+                        drawing_rects.append(r_exp)
+
+                    merged_drawings = merge_rects(drawing_rects, margin=6.0)
+                    for md in merged_drawings:
+                        if 5 <= md.width <= 120 and 5 <= md.height <= 120:
+                            lbl = extract_label_for_icon(md, page_words, tokenized_lines)
+                            if lbl:
+                                md_ymid = (md.y0 + md.y1) / 2.0
+                                already_found_in_row = any(
+                                    clbl == lbl and abs(((cb.y0 + cb.y1) / 2.0) - md_ymid) < 16.0
+                                    for cb, clbl, _ in candidate_boxes
+                                )
+                                if not already_found_in_row:
+                                    candidate_boxes.append((md, lbl, 'drawing'))
+
+                # Deduplicate overlapping candidate boxes and avoid duplicate icons for the same equipment label in auto mode
                 unique_candidates = []
+                seen_auto_labels = set()
                 for b, lbl, typ in candidate_boxes:
+                    if is_auto_icons and lbl and lbl in seen_auto_labels:
+                        continue
                     overlap = False
                     for idx_u, (ub, ulbl, utyp) in enumerate(unique_candidates):
                         inter = fitz.Rect(b).intersect(fitz.Rect(ub))
@@ -809,9 +923,15 @@ async def extract_regions(req: ExtractRequest):
                                 overlap = True
                                 if not ulbl and lbl:
                                     unique_candidates[idx_u] = (ub, lbl, utyp)
+                                    if is_auto_icons:
+                                        seen_auto_labels.add(lbl)
                                 break
                     if not overlap:
                         final_lbl = lbl or extract_label_for_icon(b, page_words, tokenized_lines)
+                        if is_auto_icons and final_lbl and final_lbl in seen_auto_labels:
+                            continue
+                        if final_lbl:
+                            seen_auto_labels.add(final_lbl)
                         unique_candidates.append((b, final_lbl, typ))
 
                 # If icons region was auto-detected, crop icons_region_url tightly around the detected legend/table
@@ -1005,6 +1125,7 @@ class TallyItem(BaseModel):
     icon_id: str
     label: str
     count: int
+    positions: Optional[List[List[float]]] = None
 
 class PreviewRequest(BaseModel):
     file_id: str
@@ -1022,6 +1143,8 @@ async def preview_bg(req: PreviewRequest):
             }
         doc = fitz.open(pdf_path)
         page = doc[0]
+        if page.rotation != 0:
+            page.remove_rotation()
 
         def circle_word(word_rect, color=(0, 0, 0)): # Match final output (black)
             shape = page.new_shape()
@@ -1103,11 +1226,24 @@ async def preview_bg(req: PreviewRequest):
                 "tmpls": ["tmpl_mic", "tmpl_microphone"],
                 "neg": [],
             },
+            {
+                "key": "chime",
+                "names": ["チャイム", "チューブラーベル", "Chime"],
+                "tmpls": ["tmpl_chime"],
+                "neg": [],
+            },
+            {
+                "key": "gong",
+                "names": ["ドラ", "銅鑼", "ゴング", "タムタム", "Gong"],
+                "tmpls": ["tmpl_gong"],
+                "neg": ["ドラム"],
+            },
         ]
 
         # 1. ユーザーの配置パーツ群を照合（定型定義 STD_DEFS ＋ 意味分類器 ＋ 動的定義 DYNAMIC_DEFS）
         import re as _re
         assigned_counts = {d["key"]: 0 for d in STD_DEFS}
+        assigned_positions = {d["key"]: [] for d in STD_DEFS}
         dynamic_defs = {}
         unmapped_tallies = []
 
@@ -1115,7 +1251,12 @@ async def preview_bg(req: PreviewRequest):
             c = max(0, int(t.count or 0))
             lbl = clean_japanese_text(t.label or "").strip()
             iid = (t.icon_id or "").strip()
-            if not lbl:
+            pos_list = []
+            if t.positions:
+                for p in t.positions:
+                    if isinstance(p, (list, tuple)) and len(p) >= 2:
+                        pos_list.append((float(p[0]), float(p[1])))
+            if not lbl and not iid:
                 continue
 
             best_def = None
@@ -1159,6 +1300,7 @@ async def preview_bg(req: PreviewRequest):
 
             if best_def and best_score >= 2:
                 assigned_counts[best_def["key"]] += c
+                assigned_positions[best_def["key"]].extend(pos_list)
             else:
                 clean_lbl = _re.sub(r'^[0-9０-９①-⑳\.\s・]+', '', lbl).strip()
                 if clean_lbl and not _re.match(r'^(パーツ|アイテム|icon)[_\s]*\d*$', clean_lbl, _re.IGNORECASE):
@@ -1175,7 +1317,9 @@ async def preview_bg(req: PreviewRequest):
                             "neg": [],
                         }
                         assigned_counts[dyn_key] = 0
+                        assigned_positions[dyn_key] = []
                     assigned_counts[dyn_key] += c
+                    assigned_positions[dyn_key].extend(pos_list)
                 if c > 0:
                     unmapped_tallies.append(t)
 
@@ -1225,9 +1369,9 @@ async def preview_bg(req: PreviewRequest):
 
         def circle_yo_or_fuyo_chars(cell_chars, is_yo, name_id):
             """
-            Context-aware '要・不要' / '有・無' / '使用・不使用' detector using character-level rects.
-            Locks negative phrases ('不要', '不使用', '無') first so split characters ('不' '要')
-            never accidentally circle the '要' inside '不要' when is_yo=True.
+            Context-aware '要・不要' / '有・無' / '使用・不使用' / '使う・使わない' / '借用する・借用しない'
+            detector using character-level rects.
+            Locks negative phrases first so split characters never accidentally circle positive substrings.
             """
             if not cell_chars:
                 return False
@@ -1238,13 +1382,16 @@ async def preview_bg(req: PreviewRequest):
             locked = [False] * len(cell_chars)
 
             neg_spans = []
-            for neg_kw in ("不要", "不使用", "無"):
+            for neg_kw in ("借用しない", "使用しない", "使わない", "不要", "不使用", "無"):
                 start = 0
                 while True:
                     idx = joined.find(neg_kw, start)
                     if idx == -1:
                         break
                     end_idx = idx + len(neg_kw)
+                    if any(locked[k_i] for k_i in range(idx, end_idx)):
+                        start = end_idx
+                        continue
                     # Avoid matching '無' inside unrelated words like '無線'
                     if neg_kw == "無" and end_idx < len(joined) and joined[end_idx] in ("線", "料", "効"):
                         start = end_idx
@@ -1258,7 +1405,7 @@ async def preview_bg(req: PreviewRequest):
                     start = end_idx
 
             pos_spans = []
-            for pos_kw in ("要", "使用", "有"):
+            for pos_kw in ("借用する", "使用する", "使う", "要", "使用", "有"):
                 start = 0
                 while True:
                     idx = joined.find(pos_kw, start)
@@ -1292,20 +1439,56 @@ async def preview_bg(req: PreviewRequest):
 
         # Detect standalone quantity column headers (for tables where cells have no printed unit)
         qty_col_headers = []
+        total_header_rects = []
         circle_mark_mode = False
         for line in tokenized_lines:
             line_txt = "".join(t["text"] for t in line["tokens"])
             if "○印" in line_txt or "◯印" in line_txt:
                 circle_mark_mode = True
             for tok in line["tokens"]:
-                if tok["text"] in ("数量", "個数", "使用数", "借用数", "必要数") and "要" not in line_txt:
+                if ("合計" in tok["text"] or "総数" in tok["text"]) and len(tok["text"]) <= 8:
+                    total_header_rects.append(tok["rect"])
+                if tok["text"] in ("数量", "個数", "使用数", "借用数", "必要数") and "要" not in line_txt and "合計" not in line_txt:
                     qty_col_headers.append((tok["rect"].x0 - 15.0, tok["rect"].x1 + 15.0, tok["rect"].y1))
 
-        piano_lid_setting = clean_japanese_text(req.piano_lid or "半開").strip()
-        matched_keys = set()
-        UNIT_CHARS = ("脚", "本", "台", "個", "枚", "組", "式", "張", "対")
+        # Detect stage riser tiers (ひな壇) and enclosure boxes from PDF vector drawings
+        drawings = page.get_drawings()
+        raw_riser_rects = []
+        enclosure_boxes = []
+        arrow_segments = []
+        for d in drawings:
+            r = fitz.Rect(d["rect"])
+            if 180 <= r.width <= 450 and 30 <= r.height <= 125 and 120 <= r.x0 <= 350 and 420 <= r.x1 <= 720 and 120 <= r.y0 <= 420:
+                raw_riser_rects.append(r)
+            elif 45 <= r.width <= 240 and 20 <= r.height <= 120:
+                enclosure_boxes.append(r)
+            for item in d.get("items", []):
+                if item[0] == "l":
+                    p1, p2 = item[1], item[2]
+                    if abs(p1.x - p2.x) >= 35.0 and abs(p1.y - p2.y) >= 15.0:
+                        arrow_segments.append((p1, p2))
 
-        # Step 2: 各行内の備品アンカーを検出し、セル区間ごとに集計結果を適用
+        # Deduplicate riser rectangles by approximate Y bounds
+        riser_rects = []
+        for r in sorted(raw_riser_rects, key=lambda x: x.y0):
+            if not riser_rects or abs(r.y0 - riser_rects[-1].y0) > 15.0:
+                riser_rects.append(r)
+
+        stage_tier_bands = []
+        if len(riser_rects) >= 1:
+            for idx_r, rr in enumerate(riser_rects):
+                y_top = 0.0 if idx_r == 0 else (riser_rects[idx_r - 1].y1 + rr.y0) / 2.0
+                y_bot = (rr.y1 + riser_rects[idx_r + 1].y0) / 2.0 if idx_r + 1 < len(riser_rects) else rr.y1
+                stage_tier_bands.append((y_top, y_bot))
+            # Floor tier (平床) below the bottom-most riser
+            stage_tier_bands.append((riser_rects[-1].y1, page.rect.height))
+
+        piano_lid_setting = clean_japanese_text(req.piano_lid or "半開").strip()
+        matched_lid = False
+        UNIT_CHARS = ("脚", "本", "台", "個", "枚", "組", "式", "張", "対")
+        slots_by_key = {}
+
+        # Step 2: 各行内の備品アンカーを検出し、全ての有効スロットを収集
         for line in tokenized_lines:
             toks = line["tokens"]
             full_line_text = "".join(t["text"] for t in toks)
@@ -1324,9 +1507,14 @@ async def preview_bg(req: PreviewRequest):
                 t_text = tok["text"]
                 tr = tok["rect"]
 
-                # Check piano_lid first
-                if ("ピアノ" in t_text and "蓋" in t_text) or t_text in ("ピアノの蓋", "ピアノ蓋"):
-                    if "piano_lid" not in matched_keys:
+                # Check piano_lid first (including standalone '蓋' when line has lid openness options)
+                is_lid_tok = (
+                    ("ピアノ" in t_text and "蓋" in t_text)
+                    or t_text in ("ピアノの蓋", "ピアノ蓋")
+                    or (t_text == "蓋" and any(kw in full_line_text for kw in ("全開", "半開", "半半開", "閉", "カマボコ", "蒲鉾板")))
+                )
+                if is_lid_tok:
+                    if not matched_lid:
                         anchors.append({
                             "def": DEF_BY_KEY["piano_lid"],
                             "key": "piano_lid",
@@ -1360,7 +1548,7 @@ async def preview_bg(req: PreviewRequest):
                                     matched_k = d["key"]
                                     matched_name = name
 
-                if matched_k and matched_k not in matched_keys and matched_k in DEF_BY_KEY:
+                if matched_k and matched_k in DEF_BY_KEY:
                     anchors.append({
                         "def": DEF_BY_KEY[matched_k],
                         "key": matched_k,
@@ -1374,13 +1562,15 @@ async def preview_bg(req: PreviewRequest):
             if not anchors:
                 continue
 
-            # 各定義キーごとに一番長い name のアンカーを残す（重複排除）
-            best_by_key = {}
-            for a in anchors:
-                k = a["key"]
-                if k not in best_by_key or len(a["name"]) > len(best_by_key[k]["name"]):
-                    best_by_key[k] = a
-            final_anchors = sorted(best_by_key.values(), key=lambda a: a["x_start"])
+            # 同一行内で同じキーのアンカーが近接している場合は一番長い name のアンカーを残す
+            dedup_anchors = []
+            for a in sorted(anchors, key=lambda x: x["x_start"]):
+                if dedup_anchors and dedup_anchors[-1]["key"] == a["key"] and (a["x_start"] - dedup_anchors[-1]["x_end"]) < 60.0:
+                    if len(a["name"]) > len(dedup_anchors[-1]["name"]):
+                        dedup_anchors[-1] = a
+                else:
+                    dedup_anchors.append(a)
+            final_anchors = dedup_anchors
 
             # セル境界（X座標）を算出
             splits = [0.0]
@@ -1394,10 +1584,9 @@ async def preview_bg(req: PreviewRequest):
                     break
             splits.append(right_cap)
 
-            # 各セルごとに独立して集計結果を適用
+            # 各セルのスロット情報を収集
             for i, a in enumerate(final_anchors):
                 k = a["key"]
-                cnt = assigned_counts.get(k, 0)
                 x_min = splits[i]
                 x_max = splits[i + 1]
                 cell_tokens = [t for t in toks if x_min <= t["rect"].x0 < x_max]
@@ -1408,7 +1597,7 @@ async def preview_bg(req: PreviewRequest):
                 before_anchor_tokens = [t for t in toks if t["rect"].x1 <= a["x_start"] + 1.0 and (a["x_start"] - t["rect"].x1) < 35.0]
                 has_unit_or_yo = (
                     any(any(u in t["text"] for u in UNIT_CHARS) for t in after_anchor_tokens)
-                    or any("要" in t["text"] for t in after_anchor_tokens)
+                    or any(any(kw in t["text"] for kw in ("要", "使", "借用", "有", "無")) for t in after_anchor_tokens)
                 )
                 is_fwd_legend = (
                     len(after_anchor_tokens) >= 2
@@ -1431,89 +1620,197 @@ async def preview_bg(req: PreviewRequest):
 
                 # ピアノ蓋の処理
                 if k == "piano_lid":
-                    matched_keys.add(k)
+                    matched_lid = True
                     if assigned_counts.get("piano", 0) > 0:
                         lid_targets = [piano_lid_setting]
                         if piano_lid_setting in ("蒲鉾板", "カマボコ", "ｶﾏﾎﾞｺ"):
                             lid_targets.extend(["蒲鉾板", "カマボコ", "ｶﾏﾎﾞｺ"])
 
                         joined_cell = "".join(c["ch"] for c in cell_chars)
+                        # Lock '半半開' when searching for '半開' so '半開' never matches inside '半半開'
+                        locked_lid = [False] * len(cell_chars)
+                        if piano_lid_setting == "半開":
+                            hh_idx = joined_cell.find("半半開")
+                            if hh_idx != -1:
+                                for h_i in range(hh_idx, hh_idx + 3):
+                                    locked_lid[h_i] = True
                         for target in lid_targets:
-                            idx = joined_cell.find(target)
-                            if idx != -1:
+                            start_pos = 0
+                            found_lid = False
+                            while True:
+                                idx = joined_cell.find(target, start_pos)
+                                if idx == -1:
+                                    break
+                                if any(locked_lid[k_i] for k_i in range(idx, idx + len(target))):
+                                    start_pos = idx + len(target)
+                                    continue
                                 r_lid = fitz.Rect(cell_chars[idx]["rect"])
                                 for k_i in range(idx + 1, idx + len(target)):
                                     r_lid |= cell_chars[k_i]["rect"]
                                 add_auto_circle(r_lid, "piano_lid")
+                                found_lid = True
+                                break
+                            if found_lid:
                                 break
                     continue
 
-                has_slot = False
-                num_placed = False
+                slot_info = {
+                    "key": k,
+                    "anchor_rect": a["rect"],
+                    "y_mid": line["y_mid"],
+                    "line_txt": full_line_text,
+                    "num_mode": None,       # 'centered' | 'before_unit' | None
+                    "num_pos": None,        # (cx_pt, cy0_pt) or unit_rect
+                    "after_chars": [c for c in cell_chars if c["rect"].x0 >= a["x_end"] - 1.0],
+                    "has_bullet": any(
+                        t["text"] == "・" and abs(a["x_start"] - t["rect"].x1) < 15.0
+                        for t in cell_tokens
+                    ),
+                }
 
-                # 1) Tier 1: カッコ空欄（例: '椅子（　）個', '・ピアノ椅子( )個'）へのセンタリング記入
+                # 1) Tier 1: カッコ空欄（例: '椅子（　）個', '○椅子( )脚'）へのセンタリング記入
                 open_paren_tok = None
                 close_paren_tok = None
                 for idx_t, t in enumerate(after_anchor_tokens):
                     if t["text"] in ("(", "（"):
-                        # Check if immediately closed by ')' or '）' (empty blank inside parens)
                         if idx_t + 1 < len(after_anchor_tokens) and after_anchor_tokens[idx_t + 1]["text"] in (")", "）"):
                             open_paren_tok = t
                             close_paren_tok = after_anchor_tokens[idx_t + 1]
                             break
 
                 if open_paren_tok is not None and close_paren_tok is not None:
-                    has_slot = True
-                    if cnt > 0:
-                        cx_pt = (open_paren_tok["rect"].x1 + close_paren_tok["rect"].x0) / 2.0
-                        cy0_pt = (open_paren_tok["rect"].y0 + close_paren_tok["rect"].y0) / 2.0
-                        add_auto_num_centered(cx_pt, cy0_pt, cnt, k)
-                        num_placed = True
+                    cx_pt = (open_paren_tok["rect"].x1 + close_paren_tok["rect"].x0) / 2.0
+                    cy0_pt = (open_paren_tok["rect"].y0 + close_paren_tok["rect"].y0) / 2.0
+                    slot_info["num_mode"] = "centered"
+                    slot_info["num_pos"] = (cx_pt, cy0_pt)
 
                 # 2) Tier 2: 助数詞（脚・本・台・個・枚・組など）の手前への記入
-                if not num_placed:
+                if slot_info["num_mode"] is None:
                     for c_idx, c in enumerate(cell_chars):
                         if c["rect"].x0 < a["x_end"] - 1.0:
                             continue
                         if c["ch"] in UNIT_CHARS:
-                            # Skip header words like '個数', '台数', '本数'
                             next_ch = cell_chars[c_idx + 1]["ch"] if c_idx + 1 < len(cell_chars) else ""
                             if next_ch == "数":
                                 continue
-                            has_slot = True
-                            if cnt > 0:
-                                add_auto_num(c["rect"], cnt, k)
-                                num_placed = True
+                            slot_info["num_mode"] = "before_unit"
+                            slot_info["num_pos"] = c["rect"]
                             break
 
                 # 3) Tier 3: 助数詞なしの空欄「数量 / 個数」列へのフォールバック記入
-                if not num_placed and not has_slot:
+                if slot_info["num_mode"] is None:
                     for qx0, qx1, qy1 in qty_col_headers:
                         if x_min <= (qx0 + qx1) / 2.0 < x_max and line["y_mid"] > qy1:
-                            has_slot = True
-                            if cnt > 0:
-                                add_auto_num_centered((qx0 + qx1) / 2.0, a["rect"].y0, cnt, k)
-                                num_placed = True
+                            slot_info["num_mode"] = "centered"
+                            slot_info["num_pos"] = ((qx0 + qx1) / 2.0, a["rect"].y0)
                             break
 
-                # 4) 要・不要 / 有・無 の丸つけ
-                after_chars = [c for c in cell_chars if c["rect"].x0 >= a["x_end"] - 1.0]
-                if circle_yo_or_fuyo_chars(after_chars, cnt > 0, k):
-                    has_slot = True
+                # Check if this cell has any valid output mechanism (number slot, yo/fuyo, or bullet circle)
+                joined_after = "".join(c["ch"] for c in slot_info["after_chars"])
+                has_yo_fuyo = any(kw in joined_after for kw in ("借用", "使用", "使う", "使わない", "要", "不要", "有", "無")) and "有無" not in joined_after and "個数" not in joined_after and "数量" not in joined_after
+                if slot_info["num_mode"] is not None or has_yo_fuyo or (circle_mark_mode and slot_info["has_bullet"]):
+                    slots_by_key.setdefault(k, []).append(slot_info)
 
-                # 5) 借用品（○印）形式（例: '・電源', '・ピアノ椅子'）の丸つけ
-                has_leading_bullet = any(
-                    t["text"] == "・" and abs(a["x_start"] - t["rect"].x1) < 15.0
-                    for t in cell_tokens
-                )
-                if circle_mark_mode and has_leading_bullet:
-                    if not has_slot:
-                        has_slot = True
-                        if cnt > 0:
-                            add_auto_circle(a["rect"], f"{k}_item")
+        # Step 3: 収集したスロットに対して単一スロットまたは複数スロット（ひな壇段別＋合計）の値を解決して出力
+        def is_total_slot(slot):
+            if "合計" in slot["line_txt"] or "総数" in slot["line_txt"]:
+                return True
+            ar = slot["anchor_rect"]
+            # Check if slot is inside an enclosure box that has a '合計' header right above it
+            encl = None
+            for eb in enclosure_boxes:
+                if eb.x0 - 5.0 <= ar.x0 and ar.x1 <= eb.x1 + 5.0 and eb.y0 - 5.0 <= ar.y0 and ar.y1 <= eb.y1 + 5.0:
+                    encl = eb
+                    break
+            for th in total_header_rects:
+                if abs(th.x0 - ar.x0) < 90.0:
+                    ref_y0 = encl.y0 if encl is not None else ar.y0
+                    if -2.0 <= (ref_y0 - th.y1) <= 30.0 or (encl is None and 0.0 <= (ar.y0 - th.y1) <= 45.0):
+                        return True
+            return False
 
-                if has_slot:
-                    matched_keys.add(k)
+        def find_arrow_target_y(slot):
+            ar = slot["anchor_rect"]
+            encl = None
+            for eb in enclosure_boxes:
+                if eb.x0 - 5.0 <= ar.x0 and ar.x1 <= eb.x1 + 5.0 and eb.y0 - 5.0 <= ar.y0 and ar.y1 <= eb.y1 + 5.0:
+                    encl = eb
+                    break
+            box_r = encl if encl is not None else fitz.Rect(ar.x0 - 15.0, ar.y0 - 10.0, ar.x1 + 80.0, ar.y1 + 10.0)
+            for p1, p2 in arrow_segments:
+                if (box_r.x0 - 15.0 <= p1.x <= box_r.x1 + 15.0) and (box_r.y0 - 8.0 <= p1.y <= box_r.y1 + 8.0):
+                    return p2.y
+                if (box_r.x0 - 15.0 <= p2.x <= box_r.x1 + 15.0) and (box_r.y0 - 8.0 <= p2.y <= box_r.y1 + 8.0):
+                    return p1.y
+            return None
+
+        def emit_slot(slot, cnt_val, suffix_id, force_write_zero=False):
+            has_emitted = False
+            if slot["num_mode"] == "centered":
+                if cnt_val > 0 or force_write_zero:
+                    cx_pt, cy0_pt = slot["num_pos"]
+                    add_auto_num_centered(cx_pt, cy0_pt, cnt_val, suffix_id)
+                    has_emitted = True
+            elif slot["num_mode"] == "before_unit":
+                if cnt_val > 0 or force_write_zero:
+                    add_auto_num(slot["num_pos"], cnt_val, suffix_id)
+                    has_emitted = True
+
+            if circle_yo_or_fuyo_chars(slot["after_chars"], cnt_val > 0, suffix_id):
+                has_emitted = True
+
+            if circle_mark_mode and slot["has_bullet"] and not has_emitted and slot["num_mode"] is None:
+                if cnt_val > 0:
+                    add_auto_circle(slot["anchor_rect"], f"{suffix_id}_item")
+
+        for k, slots in slots_by_key.items():
+            total_cnt = assigned_counts.get(k, 0)
+            if len(slots) == 1:
+                emit_slot(slots[0], total_cnt, k, force_write_zero=False)
+            else:
+                # Multiple slots for the same equipment key (e.g. 2段目ひな壇, 1段目ひな壇, 平床, 合計使用数)
+                total_slots = [s for s in slots if is_total_slot(s)]
+                tier_slots = [s for s in slots if not is_total_slot(s)]
+                if not total_slots and len(slots) >= 2:
+                    total_slots = [slots[-1]]
+                    tier_slots = slots[:-1]
+
+                # Emit total slots
+                for idx_s, ts in enumerate(total_slots):
+                    sid = f"{k}_total" if idx_s == 0 else f"{k}_total_{idx_s}"
+                    emit_slot(ts, total_cnt, sid, force_write_zero=False)
+
+                # Emit tier slots
+                if len(tier_slots) == 1:
+                    emit_slot(tier_slots[0], total_cnt, f"{k}_tier_0", force_write_zero=False)
+                elif len(tier_slots) >= 2:
+                    pts = assigned_positions.get(k, [])
+                    tier_counts = [0] * len(tier_slots)
+                    if total_cnt > 0:
+                        if pts and len(stage_tier_bands) >= len(tier_slots):
+                            # Map each tier_slot to its corresponding stage_tier_band via arrow target_y or index
+                            for idx_t, ts in enumerate(tier_slots):
+                                arrow_y = find_arrow_target_y(ts)
+                                band = None
+                                if arrow_y is not None:
+                                    for b_y0, b_y1 in stage_tier_bands:
+                                        if b_y0 <= arrow_y <= b_y1:
+                                            band = (b_y0, b_y1)
+                                            break
+                                if band is None:
+                                    band = stage_tier_bands[min(idx_t, len(stage_tier_bands) - 1)]
+                                b_y0, b_y1 = band
+                                tier_counts[idx_t] = sum(1 for (_, py) in pts if b_y0 <= py <= b_y1)
+                            # Any remainder (or items outside bands) goes to the floor tier (last tier_slot)
+                            rem = total_cnt - sum(tier_counts)
+                            if rem > 0:
+                                tier_counts[-1] += rem
+                        else:
+                            # Default when no position breakdown is provided: put total on floor tier
+                            tier_counts[-1] = total_cnt
+
+                        for idx_t, ts in enumerate(tier_slots):
+                            emit_slot(ts, tier_counts[idx_t], f"{k}_tier_{idx_t}", force_write_zero=(tier_counts[idx_t] == 0))
 
         # Render clean page image without baked-in text/circles
         mat = fitz.Matrix(2.0, 2.0)

@@ -29,7 +29,7 @@ import TallyTable from './TallyTable';
 import { ItemInspector } from './ItemInspector';
 import { FullPageEditor, type SceneExportData, type PreviewSettings } from './FullPageEditor';
 import { TEMPLATE_SHAPES, getTemplateDataUrl, getPercussionInfo, inferTemplateReplacements } from '../utils/templateShapes';
-import { createDefaultCurveObject, type CurveObject, type CurveItem } from '../utils/bezierUtils';
+import { createDefaultCurveObject, distributeAlongCurve, distributeItemsAlongCurve, type CurveObject, type CurveItem } from '../utils/bezierUtils';
 import { ContextMenu } from './ContextMenu';
 import { copyStageObjects, pasteStageObjects, duplicateStageObjects, hasStageObjectsInClipboard } from '../utils/clipboard';
 import { updateSessionTimestampInIndexedDB } from '../utils/indexedDb';
@@ -1808,49 +1808,101 @@ const StageBuilder: React.FC<Props> = ({
     });
   };
 
-  // Compute tallies: merge placed items + curve items
+  // Compute tallies: merge placed items + curve items (including 1x PDF page positions for multi-tier riser breakdowns)
   const computeTallies = (items: PlacedItem[] = placedItems, curves: CurveObject[] = curveObjects) => {
     const counts: Record<string, number> = {};
+    const positionsMap: Record<string, [number, number][]> = {};
+    const effCrop = backgroundCrop || initialBackup?.backgroundCrop || { x: 0, y: 0, width: 1684, height: 1191 };
+
+    const addPos = (key: string, stageX: number, stageY: number) => {
+      if (!positionsMap[key]) positionsMap[key] = [];
+      positionsMap[key].push([(effCrop.x + stageX) / 2.0, (effCrop.y + stageY) / 2.0]);
+    };
 
     // Count normal placed items
     for (const item of items) {
+      const cx = item.x + (item.width * (item.scaleX || 1)) / 2;
+      const cy = item.y + (item.height * (item.scaleY || 1)) / 2;
       if (item.templateType === 'ensembleChairAndStand') {
         const isPiano = item.chairType === 'pianoChair' || item.chairType === 'pianoChairSvg' || item.chairType === 'pianoChairPi';
         const chairKey = isPiano ? 'tmpl_pianoChair' : 'tmpl_chorusChair';
         counts[chairKey] = (counts[chairKey] || 0) + 1;
+        addPos(chairKey, cx, cy);
         counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + 1;
+        addPos('tmpl_ensembleStand', cx, cy);
       } else {
         counts[item.iconId] = (counts[item.iconId] || 0) + 1;
+        addPos(item.iconId, cx, cy);
       }
     }
 
     // Count items in curve objects
     for (const curve of curves) {
+      const rotRad = ((curve.rotation || 0) * Math.PI) / 180;
+      const cosR = Math.cos(rotRad);
+      const sinR = Math.sin(rotRad);
+      const toStagePt = (lx: number, ly: number): [number, number] => [
+        curve.x + lx * cosR - ly * sinR,
+        curve.y + lx * sinR + ly * cosR,
+      ];
+
       if (Array.isArray(curve.items)) {
-        for (const it of curve.items) {
+        const placedCurveItems = distributeItemsAlongCurve(
+          curve.points,
+          curve.items,
+          curve.itemSize || 32,
+          curve.itemGap ?? 10,
+          curve.align || 'center'
+        );
+        for (let idx = 0; idx < curve.items.length; idx++) {
+          const it: CurveItem = curve.items[idx];
+          const p = placedCurveItems[idx];
+          const [sx, sy] = p ? toStagePt(p.x, p.y) : [curve.x, curve.y];
           if (it.isCustom && it.iconId) {
             counts[it.iconId] = (counts[it.iconId] || 0) + 1;
+            addPos(it.iconId, sx, sy);
           } else if (it.type === 'ensembleChairAndStand') {
             const effectiveChairType = it.chairType || curve.chairType;
             const isPiano = effectiveChairType === 'pianoChair' || effectiveChairType === 'pianoChairSvg' || effectiveChairType === 'pianoChairPi';
             const chairKey = isPiano ? 'tmpl_pianoChair' : 'tmpl_chorusChair';
             counts[chairKey] = (counts[chairKey] || 0) + 1;
+            addPos(chairKey, sx, sy);
             counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + 1;
+            addPos('tmpl_ensembleStand', sx, sy);
           } else {
             const key = it.type.startsWith('tmpl_') ? it.type : `tmpl_${it.type}`;
             counts[key] = (counts[key] || 0) + 1;
+            addPos(key, sx, sy);
           }
         }
       } else {
         const tmplType = curve.itemType;
+        const pts = distributeAlongCurve(
+          curve.points,
+          curve.itemCount,
+          curve.itemSize || 32,
+          curve.itemGap ?? 10,
+          curve.align || 'center'
+        );
         if (tmplType === 'ensembleChairAndStand') {
           const isPiano = curve.chairType === 'pianoChair' || curve.chairType === 'pianoChairSvg' || curve.chairType === 'pianoChairPi';
           const chairKey = isPiano ? 'tmpl_pianoChair' : 'tmpl_chorusChair';
           counts[chairKey] = (counts[chairKey] || 0) + curve.itemCount;
           counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + curve.itemCount;
+          for (let idx = 0; idx < curve.itemCount; idx++) {
+            const p = pts[idx];
+            const [sx, sy] = p ? toStagePt(p.x, p.y) : [curve.x, curve.y];
+            addPos(chairKey, sx, sy);
+            addPos('tmpl_ensembleStand', sx, sy);
+          }
         } else if (tmplType) {
           const key = `tmpl_${tmplType}`;
           counts[key] = (counts[key] || 0) + curve.itemCount;
+          for (let idx = 0; idx < curve.itemCount; idx++) {
+            const p = pts[idx];
+            const [sx, sy] = p ? toStagePt(p.x, p.y) : [curve.x, curve.y];
+            addPos(key, sx, sy);
+          }
         }
       }
     }
@@ -1870,11 +1922,16 @@ const StageBuilder: React.FC<Props> = ({
       const rawCount = counts[icon.id] || 0;
       const tmplCount = effectiveTmplId ? (counts[effectiveTmplId] || 0) : 0;
       const totalForIcon = rawCount + tmplCount;
+      const combinedPositions = [
+        ...(positionsMap[icon.id] || []),
+        ...(effectiveTmplId ? (positionsMap[effectiveTmplId] || []) : []),
+      ];
 
       return {
         icon_id: icon.id,
         label: iconLabels[icon.id] || icon.label || matchedTmpl?.label || 'パーツ',
         count: totalForIcon,
+        positions: combinedPositions,
         source: 'pdf' as const,
       };
     });
@@ -1890,6 +1947,7 @@ const StageBuilder: React.FC<Props> = ({
           icon_id: k,
           label: tmpl?.label ?? tmplType,
           count: counts[k] || 0,
+          positions: positionsMap[k] || [],
           source: 'template' as const,
         };
       });
