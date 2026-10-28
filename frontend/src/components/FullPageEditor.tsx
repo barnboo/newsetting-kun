@@ -1228,22 +1228,30 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   }, [sceneNodesMap, showCurveLines, fileId, onUpdatePreviewSettings]);
 
   // Initialize nodes for all scenes (restoring from initialPreviewSettings or scene.savedNodes if available)
-  // 保存済みノードを復元する場合も、自動集計ノード（id が 'auto_' で始まるもの）は毎回最新の集計結果に置き換える
+  // 保存済みノードを復元する場合も、自動集計ノード（id が 'auto_' で始まるもの）は毎回最新の集計結果に置き換える。
+  // 自動検出されたテキスト入力欄（id が 'field_' で始まるもの）は、ユーザーが編集済みの場合は保存値を維持し、未保存の場合は新規追加する。
   useEffect(() => {
     const isOrgNode = (n: OverlayNode) => n.id === 'text_org' || !!n.text?.includes('〇〇吹奏楽団');
     const isAutoNode = (n: OverlayNode) => typeof n.id === 'string' && n.id.startsWith('auto_');
+    const isFieldNode = (n: OverlayNode) => typeof n.id === 'string' && n.id.startsWith('field_');
 
     setSceneNodesMap(prevMap => {
       const newMap: Record<string, OverlayNode[]> = { ...prevMap };
 
       effectiveScenes.forEach((sc, idx) => {
-        const freshAutoNodes = (sc.initialNodes || (idx === 0 ? initialNodes : []) || []).filter(
+        const freshInitialNodes = (sc.initialNodes || (idx === 0 ? initialNodes : []) || []).filter(
           n => !isOrgNode(n)
         );
-        const mergeWithFreshAuto = (saved: OverlayNode[]) => [
-          ...saved.filter(n => !isOrgNode(n) && !isAutoNode(n)),
-          ...freshAutoNodes.filter(isAutoNode),
-        ];
+        const mergeWithFreshAuto = (saved: OverlayNode[]) => {
+          const keptSaved = saved.filter(n => !isOrgNode(n) && !isAutoNode(n));
+          const savedFieldIds = new Set(keptSaved.filter(isFieldNode).map(n => n.id));
+          const missingFreshFields = freshInitialNodes.filter(n => isFieldNode(n) && !savedFieldIds.has(n.id));
+          return [
+            ...keptSaved,
+            ...missingFreshFields,
+            ...freshInitialNodes.filter(isAutoNode),
+          ];
+        };
 
         // If already initialized in component state, just filter text_org
         if (newMap[sc.sceneId] && newMap[sc.sceneId].length > 0) {
@@ -1278,7 +1286,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         if (defaultSceneNode) {
           initialList.push(defaultSceneNode);
         }
-        initialList.push(...freshAutoNodes);
+        initialList.push(...freshInitialNodes);
         newMap[sc.sceneId] = initialList;
       });
 

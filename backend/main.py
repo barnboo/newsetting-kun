@@ -342,8 +342,12 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
             })
         line["tokens"] = tokens
 
-    # Reconstruct vertically stacked short equipment labels (e.g. '電'+'源' -> '電源', 'ピ'+'ア'+'ノ' -> 'ピアノ', 'チャ'+'イ'+'ム' -> 'チャイム')
-    VERT_EQUIPMENT_WORDS = {"電源", "ピアノ", "チャイム", "ドラ", "銅鑼", "指揮台", "譜面台", "椅子", "長机", "マイク"}
+    # Reconstruct vertically stacked short equipment or form labels (e.g. '電'+'源' -> '電源', 'ピ'+'ア'+'ノ' -> 'ピアノ', '団'+'体'+'名' -> '団体名')
+    VERT_EQUIPMENT_WORDS = {
+        "電源", "ピアノ", "チャイム", "ドラ", "銅鑼", "指揮台", "譜面台", "椅子", "長机", "マイク",
+        "部門", "団体名", "学校名", "バンド名", "出演順", "出演番号", "出場順", "出場番号", "受付番号",
+        "出演者名", "指揮者", "指揮者名", "指揮者氏名", "代表者名", "ふりがな", "フリガナ", "備考",
+    }
     consumed_vert = set()  # (line_idx, tok_idx)
     n_lines = len(lines)
     for l_i in range(n_lines):
@@ -1811,6 +1815,226 @@ async def preview_bg(req: PreviewRequest):
 
                         for idx_t, ts in enumerate(tier_slots):
                             emit_slot(ts, tier_counts[idx_t], f"{k}_tier_{idx_t}", force_write_zero=(tier_counts[idx_t] == 0))
+
+        # Step 4: 団体名・指揮者氏名・番号などのテキスト入力欄を自動検出し、係記入欄（「係が記入」「記入しないで」等）を除外して配置
+        STAFF_ONLY_KEYWORDS = (
+            "係が", "係で", "係員", "係記入", "事務局", "本部記入", "主催者記入",
+            "記入しない", "書かない", "入力しない", "記入不要", "空欄のまま", "受付で記入", "未記入",
+        )
+        FORM_FIELD_PATTERNS = [
+            {
+                "key": "org_name",
+                "labels": ["出演団体名", "出場団体名", "団体名", "学校名", "バンド名"],
+                "placeholder": "団体名を入力",
+                "font_size": 20,
+                "min_blank_pt": 35.0,
+            },
+            {
+                "key": "conductor",
+                "labels": ["指揮者氏名", "指揮者名", "出演者氏名", "出演者名", "代表者氏名", "代表者名"],
+                "placeholder": "指揮者氏名を入力",
+                "font_size": 20,
+                "min_blank_pt": 30.0,
+            },
+            {
+                "key": "furigana",
+                "labels": ["ふりがな", "フリガナ"],
+                "placeholder": "ふりがなを入力",
+                "font_size": 14,
+                "min_blank_pt": 30.0,
+            },
+            {
+                "key": "program_no",
+                "labels": ["プログラム", "出演順", "出演番号", "出場順", "出場番号", "受付番号"],
+                "placeholder": "番号",
+                "font_size": 20,
+                "min_blank_pt": 14.0,
+            },
+            {
+                "key": "day_no",
+                "labels": ["第"],
+                "suffix": "日目",
+                "placeholder": "日",
+                "font_size": 20,
+                "min_blank_pt": 12.0,
+            },
+            {
+                "key": "division",
+                "labels": ["部門"],
+                "placeholder": "部門を入力",
+                "font_size": 18,
+                "min_blank_pt": 28.0,
+            },
+        ]
+
+        # 垂直罫線リスト（セル境界の判定用）
+        form_v_lines = []
+        for d in drawings:
+            r = fitz.Rect(d["rect"])
+            if r.width <= 3.5 and r.height >= 12.0:
+                form_v_lines.append(((r.x0 + r.x1) / 2.0, r.y0 - 2.0, r.y1 + 2.0))
+        form_v_lines.sort(key=lambda v: v[0])
+
+        def is_staff_only_region(anchor_r: fitz.Rect, blank_x0: float, blank_x1: float, line_text: str) -> bool:
+            # 1) 自身の空欄範囲〜直後（最大+35pt）またはラベル直前に係記入キーワードがあるかチェック
+            y_mid = (anchor_r.y0 + anchor_r.y1) / 2.0
+            check_x0 = max(0.0, anchor_r.x0 - 25.0)
+            check_x1 = min(blank_x1 + 35.0, blank_x0 + 180.0)
+            for ln in tokenized_lines:
+                if abs(ln["y_mid"] - y_mid) <= 22.0:
+                    sub_txt = "".join(
+                        c["ch"] for c in ln["chars"]
+                        if check_x0 <= c["rect"].x0 <= check_x1
+                    )
+                    if any(kw in sub_txt for kw in STAFF_ONLY_KEYWORDS):
+                        return True
+                    # 行全体に係記入キーワードがある場合、そのキーワードの開始X座標がこのフィールドのセル範囲内にあるか判定
+                    full_ln = "".join(c["ch"] for c in ln["chars"])
+                    if any(kw in full_ln for kw in STAFF_ONLY_KEYWORDS):
+                        for kw in STAFF_ONLY_KEYWORDS:
+                            kw_idx = full_ln.find(kw)
+                            if kw_idx != -1 and kw_idx < len(ln["chars"]):
+                                kw_x = ln["chars"][kw_idx]["rect"].x0
+                                if (anchor_r.x0 - 25.0) <= kw_x <= (blank_x1 + 25.0):
+                                    return True
+            return False
+
+        emitted_field_coords = []
+        field_seq = 0
+        page_w = page.rect.width
+
+        for line in tokenized_lines:
+            full_line_text = "".join(c["ch"] for c in line["chars"])
+            # タイトル行や注意書き文（「〜を記入してください」「〜提出」などの長文）はスキップ
+            if any(skip_w in full_line_text for skip_w in ("記入してください", "提出してください", "コピー", "ステージ配置図", "セッティングシート")):
+                if len(full_line_text) > 25 and "団体名" not in full_line_text and "プログラム" not in full_line_text:
+                    continue
+
+            toks = line["tokens"]
+            for t_idx, tok in enumerate(toks):
+                if tok["type"] != "WORD":
+                    continue
+                t_text = tok["text"]
+                tr = tok["rect"]
+
+                for fp in FORM_FIELD_PATTERNS:
+                    f_key = fp["key"]
+                    matched_lbl = None
+
+                    if f_key == "day_no":
+                        if t_text == "第":
+                            # 直後のトークンに「日目」があるか確認
+                            next_tok = toks[t_idx + 1] if (t_idx + 1) < len(toks) else None
+                            if next_tok and next_tok["text"].startswith("日目"):
+                                gap_w = next_tok["rect"].x0 - tr.x1
+                                if gap_w >= fp["min_blank_pt"]:
+                                    blank_x0 = tr.x1 + 2.0
+                                    blank_x1 = next_tok["rect"].x0 - 2.0
+                                    if not is_staff_only_region(tr, blank_x0, blank_x1, full_line_text):
+                                        cx_pt = (blank_x0 + blank_x1) / 2.0
+                                        cy_pt = (tr.y0 + tr.y1) / 2.0 - fp["font_size"] * 0.25
+                                        field_seq += 1
+                                        auto_nodes.append({
+                                            "id": f"field_{f_key}_{field_seq}",
+                                            "type": "text",
+                                            "text": fp["placeholder"],
+                                            "x": round(cx_pt * 2.0 - 10.0),
+                                            "y": round(cy_pt * 2.0),
+                                            "fontSize": fp["font_size"],
+                                            "radius": 15,
+                                        })
+                                        emitted_field_coords.append((cx_pt, cy_pt))
+                        continue
+
+                    for lbl in fp["labels"]:
+                        if t_text == lbl or (len(lbl) >= 3 and t_text.startswith(lbl) and len(t_text) <= len(lbl) + 2):
+                            matched_lbl = lbl
+                            break
+                    if not matched_lbl:
+                        continue
+
+                    # 「プログラム ○○ 番」のように後ろに「番」がある場合
+                    next_tok = toks[t_idx + 1] if (t_idx + 1) < len(toks) else None
+                    if f_key == "program_no" and next_tok and next_tok["text"].startswith("番"):
+                        blank_x0 = tr.x1 + 2.0
+                        blank_x1 = next_tok["rect"].x0 - 2.0
+                        if (blank_x1 - blank_x0) >= fp["min_blank_pt"]:
+                            if not is_staff_only_region(tr, blank_x0, blank_x1, full_line_text):
+                                cx_pt = (blank_x0 + blank_x1) / 2.0
+                                cy_pt = (tr.y0 + tr.y1) / 2.0 - fp["font_size"] * 0.25
+                                if not any(abs(ex - cx_pt) < 20.0 and abs(ey - cy_pt) < 12.0 for ex, ey in emitted_field_coords):
+                                    field_seq += 1
+                                    auto_nodes.append({
+                                        "id": f"field_{f_key}_{field_seq}",
+                                        "type": "text",
+                                        "text": fp["placeholder"],
+                                        "x": round(cx_pt * 2.0 - 16.0),
+                                        "y": round(cy_pt * 2.0),
+                                        "fontSize": fp["font_size"],
+                                        "radius": 15,
+                                    })
+                                    emitted_field_coords.append((cx_pt, cy_pt))
+                        continue
+
+                    # 右隣のトークンまたはセル右端までの空欄幅を計算
+                    # 1) 同じ行の右隣トークンまでの距離
+                    next_token_x0 = page_w - 20.0
+                    for nt in toks[t_idx + 1:]:
+                        if nt["text"] in (":", "：", "・", "(", "（", ")", "）"):
+                            continue
+                        next_token_x0 = nt["rect"].x0
+                        break
+
+                    # 2) 垂直罫線がある場合は、ラベル右端のすぐ右にある区切り線と、さらにその右のセル終端線を探す
+                    y_mid = (tr.y0 + tr.y1) / 2.0
+                    v_after_label = [vx for (vx, vy0, vy1) in form_v_lines if vy0 <= y_mid <= vy1 and vx >= tr.x1 - 2.0]
+                    cell_x0 = tr.x1 + 8.0
+                    cell_x1 = next_token_x0
+                    if v_after_label:
+                        # ラベル直後の縦罫線（ラベルセルの右端）がある場合
+                        if v_after_label[0] - tr.x1 <= 18.0:
+                            cell_x0 = v_after_label[0] + 6.0
+                            if len(v_after_label) >= 2:
+                                cell_x1 = min(cell_x1, v_after_label[1] - 4.0)
+                        else:
+                            cell_x1 = min(cell_x1, v_after_label[0] - 4.0)
+
+                    blank_w = cell_x1 - cell_x0
+                    if blank_w < fp["min_blank_pt"]:
+                        continue
+
+                    # 係記入欄・記入禁止欄のチェック
+                    if is_staff_only_region(tr, cell_x0, cell_x1, full_line_text):
+                        continue
+
+                    # 配置座標の決定（左寄せ＋適度な余白、または番号系は中央寄せ）
+                    if f_key == "program_no":
+                        target_x_pt = (cell_x0 + min(cell_x1, cell_x0 + 80.0)) / 2.0 - 10.0
+                    else:
+                        target_x_pt = cell_x0 + 6.0
+                    target_y_pt = (tr.y0 + tr.y1) / 2.0 - fp["font_size"] * 0.26
+
+                    if any(abs(ex - target_x_pt) < 25.0 and abs(ey - target_y_pt) < 12.0 for ex, ey in emitted_field_coords):
+                        continue
+
+                    # 出演者名などのラベルの場合はプレースホルダー名をラベルに合わせる
+                    placeholder_txt = fp["placeholder"]
+                    if f_key == "conductor" and "出演者" in matched_lbl:
+                        placeholder_txt = "出演者名を入力"
+                    elif f_key == "conductor" and "代表者" in matched_lbl:
+                        placeholder_txt = "代表者名を入力"
+
+                    field_seq += 1
+                    auto_nodes.append({
+                        "id": f"field_{f_key}_{field_seq}",
+                        "type": "text",
+                        "text": placeholder_txt,
+                        "x": round(target_x_pt * 2.0),
+                        "y": round(target_y_pt * 2.0),
+                        "fontSize": fp["font_size"],
+                        "radius": 15,
+                    })
+                    emitted_field_coords.append((target_x_pt, target_y_pt))
 
         # Render clean page image without baked-in text/circles
         mat = fitz.Matrix(2.0, 2.0)

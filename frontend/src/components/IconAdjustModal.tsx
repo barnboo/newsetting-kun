@@ -4,7 +4,7 @@ import type { ExtractedIcon } from '../App';
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Circle, Line, Label, Tag, Text } from 'react-konva';
 import useImage from 'use-image';
 import Konva from 'konva';
-import { urlToDataUrl } from '../utils/indexedDb';
+import { urlToDataUrl, cropIconFromImage } from '../utils/indexedDb';
 
 interface Props {
   iconsRegionUrl: string;
@@ -719,28 +719,47 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
         rects: validRects
       };
 
-      const res = await fetch('/api/crop-icons/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      let updatedIcons: ExtractedIcon[] | null = null;
+      try {
+        const res = await fetch('/api/crop-icons/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        console.error('crop-icons failed:', res.status, errText);
-        throw new Error(`Failed to save adjustments: ${res.status}`);
+        if (res.ok) {
+          const data = await res.json();
+          updatedIcons = await Promise.all(
+            data.extracted_icons.map(async (icon: any) => ({
+              ...icon,
+              label: labels[icon.id] || icon.label || '',
+              url: await urlToDataUrl(icon.url)
+            }))
+          );
+        } else {
+          const errText = await res.text();
+          console.warn('crop-icons backend failed, falling back to local canvas crop:', res.status, errText);
+        }
+      } catch (fetchErr) {
+        console.warn('crop-icons network error, falling back to local canvas crop:', fetchErr);
       }
-      
-      const data = await res.json();
-      
-      const updatedIcons = await Promise.all(
-        data.extracted_icons.map(async (icon: any) => ({
-          ...icon,
-          label: labels[icon.id] || icon.label || '',
-          url: await urlToDataUrl(icon.url)
-        }))
-      );
-      
+
+      // クライアント側Canvas切り抜きフォールバック（サーバー側が失敗・タイムアウトした場合も確実に完了させる）
+      if (!updatedIcons) {
+        updatedIcons = await Promise.all(
+          validRects.map(async (r) => {
+            const rectObj = { x: r.x, y: r.y, width: r.width, height: r.height };
+            const croppedDataUrl = await cropIconFromImage(iconsRegionUrl, rectObj);
+            return {
+              id: r.id,
+              url: croppedDataUrl,
+              label: r.label,
+              rect: rectObj,
+            };
+          })
+        );
+      }
+
       onSave(updatedIcons, labels);
     } catch (err) {
       console.error(err);

@@ -161,7 +161,7 @@ function App() {
         });
       });
 
-      // Also check any localStorage-only backups
+      // Also check any localStorage-only backups or orphaned preview caches
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i) || '';
         if (k.startsWith('settingkun_backup_') && !k.endsWith('_ts')) {
@@ -601,30 +601,33 @@ function App() {
     setTemplateReplacements(cleanReplacements);
 
     if (fileData?.file_id) {
-      try {
-        const sess = await loadSessionFromIndexedDB(fileData.file_id);
-        if (sess) {
-          const iconsWithDataUrls = await Promise.all(
-            icons.map(async (ic) => ({
-              ...ic,
-              url: ic.url.startsWith('data:') ? ic.url : await urlToDataUrl(ic.url),
-            }))
-          );
-          await saveSessionToIndexedDB({
-            ...sess,
-            extractedData: {
-              backgroundUrl: sess.extractedData?.backgroundUrl || '',
-              iconsRegionUrl: sess.extractedData?.iconsRegionUrl || '',
-              extractedIcons: iconsWithDataUrls,
-            },
-            iconLabels: cleanLabels,
-            templateReplacements: cleanReplacements,
-            updatedAt: Date.now(),
-          });
+      const fid = fileData.file_id;
+      void (async () => {
+        try {
+          const sess = await loadSessionFromIndexedDB(fid);
+          if (sess) {
+            const iconsWithDataUrls = await Promise.all(
+              icons.map(async (ic) => ({
+                ...ic,
+                url: ic.url.startsWith('data:') ? ic.url : await urlToDataUrl(ic.url),
+              }))
+            );
+            await saveSessionToIndexedDB({
+              ...sess,
+              extractedData: {
+                backgroundUrl: sess.extractedData?.backgroundUrl || '',
+                iconsRegionUrl: sess.extractedData?.iconsRegionUrl || '',
+                extractedIcons: iconsWithDataUrls,
+              },
+              iconLabels: cleanLabels,
+              templateReplacements: cleanReplacements,
+              updatedAt: Date.now(),
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to update session in IndexedDB:', e);
         }
-      } catch (e) {
-        console.warn('Failed to update session in IndexedDB:', e);
-      }
+      })();
     }
   };
 
@@ -984,8 +987,42 @@ function App() {
                       style={{ width: `${Math.min(100, storageUsage.percent)}%` }}
                     />
                   </div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400 text-right mt-1.5">
-                    ※上限(5MB)に達すると自動保存が停止します
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 mt-1.5">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => refreshBackups()}
+                        className="underline hover:text-[#007AFF] cursor-pointer"
+                      >
+                        一覧を再読み込み
+                      </button>
+                      <span>•</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const activeIds = new Set(backupProjects.map(p => p.id));
+                          let removed = 0;
+                          for (let i = localStorage.length - 1; i >= 0; i--) {
+                            const k = localStorage.key(i) || '';
+                            if (k.startsWith('stajet_preview_settings_')) {
+                              const fid = k.replace('stajet_preview_settings_', '');
+                              if (!activeIds.has(fid)) {
+                                localStorage.removeItem(k);
+                                removed++;
+                              }
+                            }
+                          }
+                          refreshBackups();
+                          if (removed > 0) {
+                            alert(`不要なプレビューキャッシュ (${removed}件) を整理しました。`);
+                          }
+                        }}
+                        className="underline hover:text-[#007AFF] cursor-pointer"
+                      >
+                        不要キャッシュを整理
+                      </button>
+                    </div>
+                    <span>※上限(5MB)に達すると自動保存が停止します</span>
                   </div>
                 </div>
               </div>
