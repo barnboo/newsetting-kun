@@ -248,4 +248,4 @@ const TallyTable: React.FC<Props> = ({
   );
 };
 
-export default TallyTable;
+export default React.memo(TallyTable);

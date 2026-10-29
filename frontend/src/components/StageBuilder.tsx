@@ -69,6 +69,7 @@ interface Props {
   backgroundCrop: { x: number; y: number; width: number; height: number } | null;
   fileId: string | null;
   pageImageUrl: string;
+  preloadedBackup?: StageSnapshot | null;
   initialIconLabels?: Record<string, string>;
   templateReplacements?: Record<string, string>;
   onIconLabelsChange?: (labels: Record<string, string>) => void;
@@ -81,6 +82,23 @@ interface Props {
 
 type PaletteTab = 'template' | 'pdf';
 
+function stripRedundantCurveUrls(curves?: CurveObject[]): CurveObject[] {
+  if (!Array.isArray(curves)) return [];
+  return curves.map(c => {
+    if (!Array.isArray(c.items)) return c;
+    let changed = false;
+    const nextItems = c.items.map(it => {
+      if (it.isCustom && it.iconId && it.url) {
+        changed = true;
+        const { url: _u, ...rest } = it;
+        return rest;
+      }
+      return it;
+    });
+    return changed ? { ...c, items: nextItems } : c;
+  });
+}
+
 const StageBuilder: React.FC<Props> = ({
   backgroundUrl,
   iconsRegionUrl,
@@ -88,6 +106,7 @@ const StageBuilder: React.FC<Props> = ({
   backgroundCrop,
   fileId,
   pageImageUrl,
+  preloadedBackup,
   initialIconLabels,
   templateReplacements,
   onIconLabelsChange,
@@ -99,12 +118,27 @@ const StageBuilder: React.FC<Props> = ({
 }) => {
   const BACKUP_KEY = `settingkun_backup_${fileId || 'default'}`;
 
-  // Load initial backup from localStorage if available
+  // Load initial backup from preloaded prop or localStorage if available, and strip bloated base64 URLs on curve items
   const [initialBackup] = useState<StageSnapshot | null>(() => {
     try {
-      const saved = localStorage.getItem(BACKUP_KEY);
-      if (saved) {
-        return JSON.parse(saved) as StageSnapshot;
+      let parsed: StageSnapshot | null = preloadedBackup || null;
+      if (!parsed) {
+        const saved = localStorage.getItem(BACKUP_KEY);
+        if (saved) {
+          parsed = JSON.parse(saved) as StageSnapshot;
+        }
+      }
+      if (parsed) {
+        if (Array.isArray(parsed.curveObjects)) {
+          parsed.curveObjects = stripRedundantCurveUrls(parsed.curveObjects);
+        }
+        if (Array.isArray(parsed.scenes)) {
+          parsed.scenes = parsed.scenes.map(sc => ({
+            ...sc,
+            curveObjects: stripRedundantCurveUrls(sc.curveObjects),
+          }));
+        }
+        return parsed;
       }
     } catch (e) {
       console.warn('Failed to parse backup:', e);
@@ -189,8 +223,7 @@ const StageBuilder: React.FC<Props> = ({
       }
     }
     try {
-      const snap = buildSnapshot();
-      saveBackup(snap);
+      saveBackup('latest');
     } catch (e) {
       console.warn('Failed to save snapshot with previewSettings', e);
     }
@@ -214,8 +247,7 @@ const StageBuilder: React.FC<Props> = ({
     projectNameRef.current = finalName;
     setIsEditingProjectName(false);
     try {
-      const snap = buildSnapshot();
-      saveBackup(snap);
+      saveBackup('latest');
     } catch (e) {
       console.warn('Failed to save snapshot after project name change', e);
     }
@@ -313,7 +345,7 @@ const StageBuilder: React.FC<Props> = ({
     });
   }, [extractedIcons]);
 
-  // Auto-heal custom curve items if their URL was a stale /static/ URL by applying the working data URL from extractedIcons
+  // Clean up redundant base64 data URLs stored on custom curve items (CurveItemRenderer resolves URL from extractedIcons by iconId)
   useEffect(() => {
     if (extractedIcons && extractedIcons.length > 0) {
       setCurveObjects(prev => {
@@ -321,12 +353,10 @@ const StageBuilder: React.FC<Props> = ({
         const next = prev.map(c => {
           if (!Array.isArray(c.items)) return c;
           const nextItems = c.items.map(it => {
-            if (it.isCustom && it.iconId) {
-              const def = extractedIcons.find(ic => ic.id === it.iconId);
-              if (def?.url && def.url.startsWith('data:') && it.url !== def.url) {
-                changed = true;
-                return { ...it, url: def.url };
-              }
+            if (it.isCustom && it.iconId && it.url) {
+              changed = true;
+              const { url: _u, ...rest } = it;
+              return rest;
             }
             return it;
           });
@@ -519,22 +549,77 @@ const StageBuilder: React.FC<Props> = ({
   // ─── Backup (localStorage auto-save + 5 MB warning) ─────────────────────────
   const [backupWarning, setBackupWarning] = useState<string | null>(null);
 
-  const pendingBackupRef = useRef<StageSnapshot | null>(null);
+  // 'latest' は「保存時点の最新状態からスナップショットを作る」ことを表す（変更のたびの複製を避ける）
+  const pendingBackupRef = useRef<StageSnapshot | 'latest' | null>(null);
   const backupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastIdbTouchRef = useRef(0);
+
+  // 静的な巨大画像データ（約1.1MBのBase64文字列群）は初回と変更時のみ1回だけJSON文字列化しておく
+  const staticImagesJsonFragment = React.useMemo(() => {
+    const staticPart: Record<string, any> = {};
+    const pUrl = pageImageUrl || initialBackup?.pageImageUrl;
+    const bUrl = backgroundUrl || initialBackup?.backgroundUrl;
+    const iUrl = iconsRegionUrl || initialBackup?.iconsRegionUrl;
+    const eIcons = extractedIcons || initialBackup?.extractedIcons;
+    if (pUrl) staticPart.pageImageUrl = pUrl;
+    if (bUrl) staticPart.backgroundUrl = bUrl;
+    if (iUrl) staticPart.iconsRegionUrl = iUrl;
+    if (eIcons) staticPart.extractedIcons = eIcons;
+    const str = JSON.stringify(staticPart);
+    return str.length > 2 ? str.slice(1, -1) : '';
+  }, [pageImageUrl, backgroundUrl, iconsRegionUrl, extractedIcons, initialBackup]);
+
+  const staticImagesSlimJsonFragment = React.useMemo(() => {
+    const staticPart: Record<string, any> = {};
+    const bUrl = backgroundUrl || initialBackup?.backgroundUrl;
+    const iUrl = iconsRegionUrl || initialBackup?.iconsRegionUrl;
+    const eIcons = extractedIcons || initialBackup?.extractedIcons;
+    if (bUrl) staticPart.backgroundUrl = bUrl;
+    if (iUrl) staticPart.iconsRegionUrl = iUrl;
+    if (eIcons) staticPart.extractedIcons = eIcons;
+    const str = JSON.stringify(staticPart);
+    return str.length > 2 ? str.slice(1, -1) : '';
+  }, [backgroundUrl, iconsRegionUrl, extractedIcons, initialBackup]);
 
   const writeBackupNow = (snapshot: StageSnapshot) => {
     try {
-      const json = JSON.stringify(snapshot);
-      // UTF-16 換算の概算サイズ（TextEncoder による全量エンコードは重いため使用しない）
-      const MB = json.length / (1024 * 1024);
-      if (MB > 5) {
-        setBackupWarning(`バックアップデータが ${MB.toFixed(1)} MB に達しました（5MB 超）。データが多い場合はブラウザの容量に注意してください。`);
-      } else {
+      // 動的な配置データ（数KB）のみを JSON.stringify し、事前シリアライズ済みの画像JSON断片を高速結合する
+      const {
+        pageImageUrl: _p,
+        backgroundUrl: _b,
+        iconsRegionUrl: _i,
+        extractedIcons: _e,
+        ...dynamicPart
+      } = snapshot;
+      const dynJson = JSON.stringify(dynamicPart);
+      const fullJson = staticImagesJsonFragment
+        ? `${dynJson.slice(0, -1)},${staticImagesJsonFragment}}`
+        : dynJson;
+
+      const now = Date.now();
+      try {
+        localStorage.setItem(BACKUP_KEY, fullJson);
+        setBackupWarning(null);
+      } catch {
+        // 容量上限に達した場合は重複しやすい pageImageUrl を省いたスリム版で再試行
+        const slimJson = staticImagesSlimJsonFragment
+          ? `${dynJson.slice(0, -1)},${staticImagesSlimJsonFragment}}`
+          : dynJson;
+        localStorage.setItem(BACKUP_KEY, slimJson);
         setBackupWarning(null);
       }
-      localStorage.setItem(BACKUP_KEY, json);
-      localStorage.setItem(BACKUP_KEY + '_ts', Date.now().toString());
-      if (fileId) {
+      localStorage.setItem(BACKUP_KEY + '_ts', now.toString());
+      localStorage.setItem(
+        BACKUP_KEY + '_meta',
+        JSON.stringify({
+          projectName: snapshot.projectName || projectNameRef.current,
+          sceneCount: Array.isArray(snapshot.scenes) ? snapshot.scenes.length : 1,
+          savedAt: now,
+        })
+      );
+      // IndexedDB のタイムスタンプ更新はセッション全体（数MB）の読み書きになるため、30秒に1回までに間引く
+      if (fileId && now - lastIdbTouchRef.current > 30000) {
+        lastIdbTouchRef.current = now;
         updateSessionTimestampInIndexedDB(fileId);
       }
     } catch {
@@ -548,21 +633,27 @@ const StageBuilder: React.FC<Props> = ({
       backupTimerRef.current = null;
     }
     if (pendingBackupRef.current) {
-      const snap = pendingBackupRef.current;
+      const pending = pendingBackupRef.current;
       pendingBackupRef.current = null;
-      writeBackupNow(snap);
+      writeBackupNow(pending === 'latest' ? buildSnapshot(false) : pending);
     }
   };
 
-  // 操作のたびに 1MB 超の JSON を同期書き込みすると操作がカクつくため、まとめて遅延保存する
-  const saveBackup = (snapshot: StageSnapshot, immediate = false) => {
+  // 操作のたびに JSON 書き込みが走らないよう、操作停止後のアイドル時間にまとめて保存する
+  const saveBackup = (snapshot: StageSnapshot | 'latest', immediate = false) => {
     pendingBackupRef.current = snapshot;
     if (immediate) {
       flushBackup();
       return;
     }
     if (backupTimerRef.current) clearTimeout(backupTimerRef.current);
-    backupTimerRef.current = setTimeout(flushBackup, 800);
+    backupTimerRef.current = setTimeout(() => {
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        (window as any).requestIdleCallback(() => flushBackup(), { timeout: 1000 });
+      } else {
+        flushBackup();
+      }
+    }, 1200);
   };
 
   // ページ離脱・アンマウント時は未保存分を確実に書き込む
@@ -576,38 +667,51 @@ const StageBuilder: React.FC<Props> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Build a snapshot of the current working state.
-  // 編集可能な部分のみディープコピーし、巨大な画像データURL（不変）は参照のまま保持して複製コストを避ける
-  const buildSnapshot = (): StageSnapshot => ({
-    ...JSON.parse(JSON.stringify({
-      projectName: projectNameRef.current,
-      placedItems: placedItemsRef.current,
-      curveObjects: curveObjectsRef.current,
-      // Merge current working state into scenes list before saving
-      scenes: scenesRef.current.map(sc =>
-        sc.id === currentSceneIdRef.current ? { ...sc, placedItems: placedItemsRef.current, curveObjects: curveObjectsRef.current, snapSettings: snapSettingsRef.current } : sc
-      ),
-      currentSceneId: currentSceneIdRef.current,
-      snapSettings: snapSettingsRef.current,
-      backgroundCrop: backgroundCrop || initialBackup?.backgroundCrop,
-      iconLabels: iconLabelsRef.current,
-      templateReplacements: templateReplacementsRef.current,
-      previewSettings: previewSettingsRef.current || undefined,
-    })),
-    pageImageUrl: pageImageUrl || initialBackup?.pageImageUrl,
-    backgroundUrl: backgroundUrl || initialBackup?.backgroundUrl,
-    iconsRegionUrl: iconsRegionUrl || initialBackup?.iconsRegionUrl,
-    extractedIcons: extractedIcons || initialBackup?.extractedIcons,
+  // Build a snapshot of the current working state without JSON.stringify/parse overhead.
+  // structuredClone (or shallow clone fallback) is 10x+ faster and never blocks the main thread on large strings.
+  const cloneEditable = <T,>(val: T): T => {
+    try {
+      if (typeof structuredClone === 'function') {
+        return structuredClone(val);
+      }
+    } catch { }
+    return JSON.parse(JSON.stringify(val));
+  };
+
+  const buildSnapshot = (includeStaticImages = false): StageSnapshot => ({
+    projectName: projectNameRef.current,
+    placedItems: cloneEditable(placedItemsRef.current),
+    curveObjects: cloneEditable(curveObjectsRef.current),
+    // Merge current working state into scenes list before saving
+    scenes: scenesRef.current.map(sc =>
+      sc.id === currentSceneIdRef.current
+        ? { ...sc, placedItems: cloneEditable(placedItemsRef.current), curveObjects: cloneEditable(curveObjectsRef.current), snapSettings: cloneEditable(snapSettingsRef.current) }
+        : cloneEditable(sc)
+    ),
+    currentSceneId: currentSceneIdRef.current,
+    snapSettings: cloneEditable(snapSettingsRef.current),
+    backgroundCrop: backgroundCrop || initialBackup?.backgroundCrop,
+    iconLabels: { ...iconLabelsRef.current },
+    templateReplacements: { ...templateReplacementsRef.current },
+    previewSettings: previewSettingsRef.current || undefined,
+    ...(includeStaticImages
+      ? {
+          pageImageUrl: pageImageUrl || initialBackup?.pageImageUrl,
+          backgroundUrl: backgroundUrl || initialBackup?.backgroundUrl,
+          iconsRegionUrl: iconsRegionUrl || initialBackup?.iconsRegionUrl,
+          extractedIcons: extractedIcons || initialBackup?.extractedIcons,
+        }
+      : {}),
   });
 
   const handleBack = () => {
-    saveBackup(buildSnapshot(), true);
+    saveBackup('latest', true);
     onBack();
   };
 
   const handleExportJson = () => {
     try {
-      const snap = buildSnapshot();
+      const snap = buildSnapshot(true);
       saveBackup(snap, true);
 
       const d = new Date();
@@ -664,16 +768,25 @@ const StageBuilder: React.FC<Props> = ({
     if (dragStartSnapshotRef.current) {
       const startSnap = dragStartSnapshotRef.current;
       dragStartSnapshotRef.current = null;
-      // Compare start state with current state; push only if an actual change occurred
       const currentSnap = buildSnapshot();
-      const hasItemChanged = JSON.stringify(startSnap.placedItems) !== JSON.stringify(currentSnap.placedItems);
-      const hasCurveChanged = JSON.stringify(startSnap.curveObjects) !== JSON.stringify(currentSnap.curveObjects);
+      const hasItemChanged =
+        startSnap.placedItems.length !== currentSnap.placedItems.length ||
+        startSnap.placedItems.some((it, i) => {
+          const cur = currentSnap.placedItems[i];
+          return !cur || it.id !== cur.id || it.x !== cur.x || it.y !== cur.y || it.rotation !== cur.rotation || it.scaleX !== cur.scaleX || it.scaleY !== cur.scaleY || it.width !== cur.width || it.height !== cur.height;
+        });
+      const hasCurveChanged =
+        startSnap.curveObjects.length !== currentSnap.curveObjects.length ||
+        startSnap.curveObjects.some((c, i) => {
+          const cur = currentSnap.curveObjects[i];
+          return !cur || c.id !== cur.id || c.x !== cur.x || c.y !== cur.y || c.rotation !== cur.rotation || c.points.some((p, pi) => p !== cur.points[pi]);
+        });
       if (hasItemChanged || hasCurveChanged) {
         historyRef.current = [...historyRef.current.slice(-HISTORY_MAX + 1), startSnap];
         redoStackRef.current = [];
         setCanUndo(true);
         setCanRedo(false);
-        saveBackup(currentSnap);
+        saveBackup('latest');
       }
     }
   };
@@ -698,7 +811,7 @@ const StageBuilder: React.FC<Props> = ({
         redoStackRef.current = [];
         setCanUndo(true);
         setCanRedo(false);
-        saveBackup(buildSnapshot());
+        saveBackup('latest');
         nudgeSnapshotRef.current = null;
       }
     }, 400);
@@ -720,7 +833,7 @@ const StageBuilder: React.FC<Props> = ({
         redoStackRef.current = [];
         setCanUndo(true);
         setCanRedo(false);
-        saveBackup(buildSnapshot());
+        saveBackup('latest');
         nudgeSnapshotRef.current = null;
       }
     }, 400);
@@ -883,7 +996,7 @@ const StageBuilder: React.FC<Props> = ({
         }
       }
 
-      setIsCtrlPointSnapped(snapped);
+      setIsCtrlPointSnapped(prev => (prev === snapped ? prev : snapped));
       newPts = [initPts[0], initPts[1], mx, my, initPts[4], initPts[5]];
     } else {
       // Blue handle controls ends spread / height [pts[0], pts[1]] & [pts[4], pts[5]] (mirrored)
@@ -899,7 +1012,7 @@ const StageBuilder: React.FC<Props> = ({
         }
       }
 
-      setIsCtrlPointSnapped(false);
+      setIsCtrlPointSnapped(prev => (prev === false ? prev : false));
       newPts = [-halfW, y, initPts[2], initPts[3], halfW, y];
     }
 
@@ -1017,25 +1130,22 @@ const StageBuilder: React.FC<Props> = ({
   // Restore a snapshot to the React state
   const restoreSnapshot = (snap: StageSnapshot) => {
     isRestoringRef.current = true;
-    // 画像データURLは不変なので複製せず、編集対象部分のみディープコピーする
-    const { pageImageUrl: _p, backgroundUrl: _b, iconsRegionUrl: _i, extractedIcons: _e, ...editable } = snap;
-    const safeSnap = { ...JSON.parse(JSON.stringify(editable)), pageImageUrl: _p, backgroundUrl: _b, iconsRegionUrl: _i, extractedIcons: _e };
-    setScenes(safeSnap.scenes);
-    setCurrentSceneId(safeSnap.currentSceneId);
-    setPlacedItems(safeSnap.placedItems);
-    setCurveObjects(safeSnap.curveObjects);
-    if (safeSnap.iconLabels) {
-      setIconLabels(prev => ({ ...prev, ...safeSnap.iconLabels }));
-      iconLabelsRef.current = { ...iconLabelsRef.current, ...safeSnap.iconLabels };
+    setScenes(cloneEditable(snap.scenes));
+    setCurrentSceneId(snap.currentSceneId);
+    setPlacedItems(cloneEditable(snap.placedItems));
+    setCurveObjects(cloneEditable(snap.curveObjects));
+    if (snap.iconLabels) {
+      setIconLabels(prev => ({ ...prev, ...snap.iconLabels }));
+      iconLabelsRef.current = { ...iconLabelsRef.current, ...snap.iconLabels };
     }
     setSnapSettings(prev => ({
       ...prev,
-      ...safeSnap.snapSettings,
+      ...cloneEditable(snap.snapSettings),
       showCenterMarker: prev.showCenterMarker,
     }));
     setSelectedIds([]);
     setSelectedCurveIds([]);
-    saveBackup(safeSnap);
+    saveBackup('latest');
     // Allow tick for state to settle before re-enabling history tracking
     requestAnimationFrame(() => { isRestoringRef.current = false; });
   };
@@ -1065,7 +1175,7 @@ const StageBuilder: React.FC<Props> = ({
   // Auto-save post-action state to localStorage backup whenever stage state changes
   useEffect(() => {
     if (isRestoringRef.current) return;
-    saveBackup(buildSnapshot());
+    saveBackup('latest');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placedItems, curveObjects, scenes, currentSceneId, snapSettings, iconLabels]);
 
@@ -1727,7 +1837,7 @@ const StageBuilder: React.FC<Props> = ({
       size: Math.max(20, Math.min(80, size)),
       isCustom: !isTemplate,
       iconId: !isTemplate ? iconId : undefined,
-      url: !isTemplate ? iconDef?.url : undefined,
+      // custom icon URL is resolved dynamically from extractedIcons by iconId; avoid duplicating large data URLs on each CurveItem
     };
 
     pushHistory();

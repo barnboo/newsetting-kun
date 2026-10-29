@@ -33,10 +33,23 @@ const DB_VERSION = 1;
 const STORE_NAME = 'sessions';
 const ACTIVE_ID_KEY = '__active_project_id__';
 
+let cachedDbPromise: Promise<IDBDatabase> | null = null;
+let idbUnavailableUntil = 0;
+
 function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    // open がブロック・ハングした場合でもアプリ全体が止まらないようにタイムアウトを設ける
-    const timer = setTimeout(() => reject(new Error('IndexedDB open timeout')), 3000);
+  if (Date.now() < idbUnavailableUntil) {
+    return Promise.reject(new Error('IndexedDB temporarily unavailable'));
+  }
+  if (cachedDbPromise) {
+    return cachedDbPromise;
+  }
+  cachedDbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+    // open がブロック・ハングした場合でも即座にフォールバックできるよう短時間でタイムアウトさせる
+    const timer = setTimeout(() => {
+      cachedDbPromise = null;
+      idbUnavailableUntil = Date.now() + 60000;
+      reject(new Error('IndexedDB open timeout'));
+    }, 350);
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
@@ -46,10 +59,33 @@ function openDatabase(): Promise<IDBDatabase> {
       }
     };
 
-    request.onsuccess = () => { clearTimeout(timer); resolve(request.result); };
-    request.onerror = () => { clearTimeout(timer); reject(request.error); };
-    request.onblocked = () => console.warn('IndexedDB open blocked by another tab');
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        cachedDbPromise = null;
+      };
+      db.onclose = () => {
+        cachedDbPromise = null;
+      };
+      resolve(db);
+    };
+    request.onerror = () => {
+      clearTimeout(timer);
+      cachedDbPromise = null;
+      idbUnavailableUntil = Date.now() + 30000;
+      reject(request.error);
+    };
+    request.onblocked = () => {
+      clearTimeout(timer);
+      cachedDbPromise = null;
+      idbUnavailableUntil = Date.now() + 60000;
+      console.warn('IndexedDB open blocked by another tab');
+      reject(new Error('IndexedDB blocked'));
+    };
   });
+  return cachedDbPromise;
 }
 
 /**

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useLayoutEffect, useState, forwardRef, useImperativeHandle } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Stage, Layer, Image as KonvaImage, Transformer, Path, Circle, Ellipse, Line, Group, Text, Rect } from 'react-konva';
 import useImage from 'use-image';
 import { Ruler, X, Check, Copy, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
@@ -1213,22 +1213,24 @@ const CurveCanvas: React.FC<{
   onOpenPercussionLabelModal,
 }) => {
   const pts = curve.points;
-  const pathData = getBezierPathData(pts);
+  const pathData = useMemo(() => getBezierPathData(pts), [pts]);
   const handleRadius = 8 / scale;
 
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const multiItemDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const multiCurveDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
-  // Determine items distribution
+  // Determine items distribution (memoized so dragging/selecting curves or other items does not re-run 200-step Bezier sampling)
   const hasItemsArray = Array.isArray(curve.items);
   const curveItems = curve.items || [];
-  const placedItems = hasItemsArray
-    ? distributeItemsAlongCurve(pts, curveItems, curve.itemSize, curve.itemGap, curve.align)
-    : null;
-  const fallbackPositions = !hasItemsArray
-    ? distributeAlongCurve(pts, curve.itemCount, curve.itemSize, curve.itemGap, curve.align)
-    : null;
+  const placedItems = useMemo(
+    () => (hasItemsArray ? distributeItemsAlongCurve(pts, curveItems, curve.itemSize, curve.itemGap, curve.align) : null),
+    [hasItemsArray, pts, curveItems, curve.itemSize, curve.itemGap, curve.align]
+  );
+  const fallbackPositions = useMemo(
+    () => (!hasItemsArray ? distributeAlongCurve(pts, curve.itemCount, curve.itemSize, curve.itemGap, curve.align) : null),
+    [hasItemsArray, pts, curve.itemCount, curve.itemSize, curve.itemGap, curve.align]
+  );
 
   // Pre-load fallback template image if needed
   const getFallbackUrl = () => {
@@ -1676,7 +1678,7 @@ const CurveCanvas: React.FC<{
                 e.target.position({ x: mx, y: my });
               }
 
-              setIsSnappedToMid(snapped);
+              setIsSnappedToMid(prev => (prev === snapped ? prev : snapped));
 
               const newPts: [number, number, number, number, number, number] = [
                 pts[0],
@@ -1826,7 +1828,7 @@ const CurveCanvas: React.FC<{
                       }
                     }
 
-                    setRotationAngle(angle);
+                    setRotationAngle(prev => (prev === angle ? prev : angle));
 
                     // ベジェの中心位置を固定したまま回転させるための新しい (curve.x, curve.y)
                     const newRad = (angle * Math.PI) / 180;
@@ -3342,8 +3344,8 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   bgCenter={{ x: bgCenterX, y: bgCenterY }}
                   effectiveCenter={effCenter}
                   onSnapGuideChange={(gx, gy) => {
-                    setActiveGuideX(gx);
-                    setActiveGuideY(gy);
+                    setActiveGuideX(prev => (prev === gx ? prev : gx));
+                    setActiveGuideY(prev => (prev === gy ? prev : gy));
                   }}
                   extractedIcons={extractedIcons}
                   templateReplacements={templateReplacements}
@@ -3400,8 +3402,8 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   onDragStartAction={onDragStartAction}
                   onDragEndAction={onDragEndAction}
                   onSnapGuideChange={(gx, gy) => {
-                    setActiveGuideX(gx);
-                    setActiveGuideY(gy);
+                    setActiveGuideX(prev => (prev === gx ? prev : gx));
+                    setActiveGuideY(prev => (prev === gy ? prev : gy));
                   }}
                   onOpenPercussionLabelModal={onOpenPercussionLabelModal}
                 />

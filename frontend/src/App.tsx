@@ -116,6 +116,7 @@ function App() {
   const [backupProjects, setBackupProjects] = useState<BackupProjectMeta[]>([]);
   const [storageUsage, setStorageUsage] = useState({ mb: '0.00', percent: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const preloadedBackupRef = useRef<any>(null);
 
   // Refresh and load all project backups and storage usage
   const refreshBackups = async () => {
@@ -135,21 +136,34 @@ function App() {
       const metas: BackupProjectMeta[] = [];
 
       // 2. localStorage のバックアップを先に同期的に一覧化して即表示する
-      //    （IndexedDB の open がブロック・ハングしても一覧が空にならないようにする）
+      //    （軽量な _meta キャッシュを優先利用し、毎回8MBのJSON.parseが走るのを防ぐ）
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i) || '';
-        if (k.startsWith('settingkun_backup_') && !k.endsWith('_ts')) {
+        if (k.startsWith('settingkun_backup_') && !k.endsWith('_ts') && !k.endsWith('_meta')) {
           const fid = k.replace('settingkun_backup_', '');
           if (!fid || metas.some(m => m.id === fid)) continue;
           let sceneCount = 1;
           let projectName = `セッティング図 (${fid.slice(0, 8)})`;
           let savedAt = 0;
-          try {
-            const parsed = JSON.parse(localStorage.getItem(k) || '{}');
-            if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
-            if (parsed.projectName || parsed.name) projectName = parsed.projectName || parsed.name;
-            if (parsed.savedAt) savedAt = parsed.savedAt;
-          } catch { }
+          const metaRaw = localStorage.getItem(k + '_meta');
+          if (metaRaw) {
+            try {
+              const m = JSON.parse(metaRaw);
+              if (m.sceneCount) sceneCount = m.sceneCount;
+              if (m.projectName) projectName = m.projectName;
+              if (m.savedAt) savedAt = m.savedAt;
+            } catch { }
+          } else {
+            try {
+              const parsed = JSON.parse(localStorage.getItem(k) || '{}');
+              if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
+              if (parsed.projectName || parsed.name) projectName = parsed.projectName || parsed.name;
+              if (parsed.savedAt) savedAt = parsed.savedAt;
+              try {
+                localStorage.setItem(k + '_meta', JSON.stringify({ projectName, sceneCount, savedAt }));
+              } catch { }
+            } catch { }
+          }
           const ts = parseInt(localStorage.getItem(k + '_ts') || '0', 10);
           if (ts) savedAt = ts;
           metas.push({ id: fid, name: projectName, savedAt: savedAt || Date.now(), sceneCount });
@@ -158,12 +172,13 @@ function App() {
       metas.sort((a, b) => b.savedAt - a.savedAt);
       setBackupProjects([...metas]);
 
-      // 3. IndexedDB セッションをタイムアウト付きで取得してマージ
+      // 3. IndexedDB セッションを短時間タイムアウト付きで取得してマージ
       try {
         const sessions = await Promise.race<SavedSession[]>([
           getAllSessionsFromIndexedDB(),
-          new Promise<SavedSession[]>(resolve => setTimeout(() => resolve([]), 3000)),
+          new Promise<SavedSession[]>(resolve => setTimeout(() => resolve([]), 400)),
         ]);
+        let addedAny = false;
         sessions.forEach(sess => {
           const fid = sess.fileData?.file_id;
           if (!fid) return;
@@ -172,6 +187,7 @@ function App() {
             existing.session = sess;
             return;
           }
+          addedAny = true;
           metas.push({
             id: fid,
             name: `セッティング図 (${fid.slice(0, 8)})`,
@@ -180,19 +196,22 @@ function App() {
             session: sess,
           });
         });
+        if (addedAny) {
+          metas.sort((a, b) => b.savedAt - a.savedAt);
+          setBackupProjects([...metas]);
+        }
       } catch (idbErr) {
         console.warn('IndexedDB fetch error in refreshBackups:', idbErr);
       }
-
-      metas.sort((a, b) => b.savedAt - a.savedAt);
-      setBackupProjects([...metas]);
     } catch (e) {
       console.warn('Error refreshing backups:', e);
     }
   };
 
   useEffect(() => {
-    refreshBackups();
+    if (currentPhase === 1) {
+      refreshBackups();
+    }
   }, [currentPhase]);
 
   const handleResumeProject = async (meta: BackupProjectMeta) => {
@@ -204,12 +223,12 @@ function App() {
     } catch { }
 
     let sess: SavedSession | null | undefined = meta.session;
-    if (!sess) {
-      // localStorage に図面画像が揃っている場合は IndexedDB の応答を長く待たない
-      const waitMs = localBackup?.backgroundUrl ? 500 : 3000;
+    // localStorage に図面画像とパーツ画像が揃っている場合は IndexedDB の応答を待たずに即座に開く
+    const hasCompleteLocalImages = Boolean(localBackup?.backgroundUrl && Array.isArray(localBackup?.extractedIcons) && localBackup.extractedIcons.length > 0);
+    if (!sess && !hasCompleteLocalImages) {
       sess = await Promise.race<SavedSession | null>([
         loadSessionFromIndexedDB(meta.id).catch(() => null),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), waitMs)),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 400)),
       ]);
     }
 
@@ -221,8 +240,9 @@ function App() {
     let rawIconLabels = localBackup?.iconLabels || sess?.iconLabels || {};
     let iconLabels: Record<string, string> = {};
 
-    // Auto-heal extractedIcons if their URLs are missing or point to ephemeral /static/ paths
-    if (iconsRegionUrl && extractedIcons.length > 0) {
+    // Auto-heal extractedIcons ONLY if any URL is missing or points to ephemeral /static/ paths
+    const needsHealing = iconsRegionUrl && extractedIcons.some((ic: ExtractedIcon) => !ic.url || ic.url.startsWith('/static/'));
+    if (needsHealing) {
       try {
         const healedIcons = await Promise.all(
           extractedIcons.map(async (ic: ExtractedIcon) => {
@@ -289,6 +309,7 @@ function App() {
       return;
     }
 
+    preloadedBackupRef.current = localBackup;
     setFileData({
       file_id: meta.id,
       image_url: pageImageUrl || backgroundUrl,
@@ -318,6 +339,7 @@ function App() {
     await clearSessionFromIndexedDB(id);
     localStorage.removeItem(`settingkun_backup_${id}`);
     localStorage.removeItem(`settingkun_backup_${id}_ts`);
+    localStorage.removeItem(`settingkun_backup_${id}_meta`);
     await refreshBackups();
   };
 
@@ -335,6 +357,8 @@ function App() {
         parsed.projectName = trimmed;
         parsed.name = trimmed;
         localStorage.setItem(`settingkun_backup_${id}`, JSON.stringify(parsed));
+        const sceneCount = Array.isArray(parsed.scenes) ? parsed.scenes.length : 1;
+        localStorage.setItem(`settingkun_backup_${id}_meta`, JSON.stringify({ projectName: trimmed, sceneCount }));
       }
       await refreshBackups();
     } catch (err) {
@@ -488,6 +512,7 @@ function App() {
       console.warn('Failed to convert page image to data URL:', e);
     }
     // 新しいPDFを読み込んだ際は前回のセッション状態（ラベルやテンプレ置換設定）を完全にリセット
+    preloadedBackupRef.current = null;
     setExtractedData(null);
     setSelectedRegions([]);
     setIconLabels({});
@@ -1071,6 +1096,7 @@ function App() {
                 backgroundCrop={backgroundCrop}
                 fileId={fileData.file_id}
                 pageImageUrl={fileData.image_url}
+                preloadedBackup={preloadedBackupRef.current}
                 initialIconLabels={iconLabels}
                 onIconLabelsChange={(nextLabels) => {
                   setIconLabels(nextLabels);
