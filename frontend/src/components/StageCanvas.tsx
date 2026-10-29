@@ -71,6 +71,7 @@ interface StageCanvasProps {
   onMoveCurveItemOrder?: (curveId: string, itemId: string, direction: 'left' | 'right') => void;
   isCtrlPointSnapped?: boolean;
   isCurveMoving?: boolean;
+  isPercussionMode?: boolean;
   snapSettings?: SnapSettings;
   zoomMultiplier?: number;
   onZoomChange?: (multiplier: number) => void;
@@ -449,6 +450,7 @@ const CanvasItem: React.FC<{
   templateReplacements?: Record<string, string>;
   bgCenter: { x: number; y: number };
   effectiveCenter: { x: number; y: number };
+  isPercussionMode?: boolean;
   onSelect: (e?: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onChange: (newAttrs: Partial<PlacedItem>) => void;
   onUpdateItems?: (updates: { id: string; attrs: Partial<PlacedItem> }[]) => void;
@@ -457,7 +459,7 @@ const CanvasItem: React.FC<{
   onDragEndAction?: () => void;
   onSnapGuideChange?: (guideX: number | null, guideY: number | null) => void;
   onOpenPercussionLabelModal?: (target: ItemLabelModalTarget) => void;
-}> = ({ item, iconUrl, isSelected, activeItemIds, activeCurveIds, snapSettings, templateReplacements, bgCenter, effectiveCenter, onSelect, onChange, onUpdateItems, onUpdateCurve, onDragStartAction, onDragEndAction, onSnapGuideChange, onOpenPercussionLabelModal }) => {
+}> = ({ item, iconUrl, isSelected, activeItemIds, activeCurveIds, snapSettings, templateReplacements, bgCenter, effectiveCenter, isPercussionMode, onSelect, onChange, onUpdateItems, onUpdateCurve, onDragStartAction, onDragEndAction, onSnapGuideChange, onOpenPercussionLabelModal }) => {
   const [image] = useImage(iconUrl, 'anonymous');
   const groupRef = useRef<Konva.Group>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -582,7 +584,9 @@ const CanvasItem: React.FC<{
       scaleY={item.scaleY}
       offsetX={effectiveWidth / 2}
       offsetY={effectiveHeight / 2}
-      draggable={!item.isPinned}
+      opacity={isPercussionMode ? (isPerc ? 1.0 : 0.22) : 1.0}
+      listening={!isPercussionMode || isPerc}
+      draggable={!item.isPinned && (!isPercussionMode || isPerc)}
       onClick={(e) => { e.cancelBubble = true; onSelect(e); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(e); }}
       onDblClick={(e) => {
@@ -1186,12 +1190,14 @@ const CurveCanvas: React.FC<{
   extractedIcons?: ExtractedIcon[];
   isCtrlPointSnapped?: boolean;
   isCurveMoving?: boolean;
+  isPercussionMode?: boolean;
   onOpenPercussionLabelModal?: (target: ItemLabelModalTarget) => void;
 }> = ({
   curve,
   isSelected,
   isCtrlPointSnapped = false,
   isCurveMoving: _isCurveMoving = false,
+  isPercussionMode,
   activeItemIds,
   activeCurveIds,
   selectedCurveItemId,
@@ -1251,6 +1257,7 @@ const CurveCanvas: React.FC<{
   const rotateCenterRef = useRef<{ x: number; y: number }>({ x: curve.x, y: curve.y });
 
   const isEmptyCurve = hasItemsArray ? curveItems.length === 0 : curve.itemCount === 0;
+  const isPercCurve = curve.itemType === 'percussion' || Boolean(curve.percussionType);
 
   return (
     <Group
@@ -1258,7 +1265,9 @@ const CurveCanvas: React.FC<{
       x={curve.x}
       y={curve.y}
       rotation={curve.rotation || 0}
-      draggable={!curve.isPinned}
+      opacity={isPercussionMode ? (isPercCurve ? 1.0 : 0.22) : 1.0}
+      listening={!isPercussionMode || isPercCurve}
+      draggable={!curve.isPinned && (!isPercussionMode || isPercCurve)}
       onClick={(e) => { e.cancelBubble = true; onSelect(e); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(e); }}
       onDragStart={(e) => {
@@ -1910,6 +1919,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
     onMoveCurveItemOrder,
     isCtrlPointSnapped = false,
     isCurveMoving = false,
+    isPercussionMode = false,
     snapSettings,
     zoomMultiplier = 1.0,
     onZoomChange,
@@ -2497,7 +2507,9 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
   // HTML5 drag & drop from palette
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const iconId = e.dataTransfer.getData('iconId');
+    const percName = e.dataTransfer.getData('percussionName');
+    const rawIconId = e.dataTransfer.getData('iconId');
+    const iconId = rawIconId || (percName ? `tmpl_percussion_${percName}` : null);
     if (!iconId || !stageRef.current) return;
     const stage = stageRef.current;
     const stageBox = stage.container().getBoundingClientRect();
@@ -3068,6 +3080,17 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
         </div>
       )}
 
+      {/* ── Percussion Addition Mode Floating Banner ── */}
+      {isPercussionMode && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-4 py-2 bg-gradient-to-r from-purple-700 via-indigo-700 to-purple-800 text-white rounded-full shadow-xl border border-purple-400/60 backdrop-blur-md pointer-events-none select-none animate-fadeIn">
+          <span className="text-base animate-bounce">🥁</span>
+          <div className="flex items-center gap-1.5 text-xs font-bold tracking-wide">
+            <span>打楽器追加モード</span>
+            <span className="opacity-80 text-[11px] font-normal">（Spaceキー長押し、またはEscで解除）</span>
+          </div>
+        </div>
+      )}
+
       {/* ── Scrollable Workspace Container ── */}
       <div
         ref={containerRef}
@@ -3108,6 +3131,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                 x={0} y={0}
                 width={baseWidth}
                 height={baseHeight}
+                opacity={isPercussionMode ? 0.35 : 1.0}
                 listening={true}
               />
             )}
@@ -3349,6 +3373,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   }}
                   extractedIcons={extractedIcons}
                   templateReplacements={templateReplacements}
+                  isPercussionMode={isPercussionMode}
                   onOpenPercussionLabelModal={onOpenPercussionLabelModal}
                 />
               );
@@ -3374,6 +3399,7 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                   isSelected={activeItemIds.includes(item.id)}
                   activeItemIds={activeItemIds}
                   activeCurveIds={activeCurveIds}
+                  isPercussionMode={isPercussionMode}
                   snapSettings={snapSettings}
                   templateReplacements={templateReplacements}
                   bgCenter={{ x: bgCenterX, y: bgCenterY }}

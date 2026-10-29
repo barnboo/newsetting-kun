@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import axios from 'axios';
 import { 
@@ -29,7 +29,7 @@ import StageCanvas, { type PlacedItem, type StageCanvasRef, type SnapSettings } 
 import TallyTable from './TallyTable';
 import { ItemInspector } from './ItemInspector';
 import { FullPageEditor, type SceneExportData, type PreviewSettings } from './FullPageEditor';
-import { TEMPLATE_SHAPES, getTemplateDataUrl, getPercussionInfo, inferTemplateReplacements } from '../utils/templateShapes';
+import { TEMPLATE_SHAPES, PERCUSSION_DATA, PERCUSSION_CATEGORIES, getTemplateDataUrl, getPercussionDataUrl, getPercussionInfo, inferTemplateReplacements } from '../utils/templateShapes';
 import { createDefaultCurveObject, distributeAlongCurve, distributeItemsAlongCurve, type CurveObject, type CurveItem } from '../utils/bezierUtils';
 import { ContextMenu } from './ContextMenu';
 import { copyStageObjects, pasteStageObjects, duplicateStageObjects, hasStageObjectsInClipboard } from '../utils/clipboard';
@@ -263,6 +263,16 @@ const StageBuilder: React.FC<Props> = ({
   }, [selectedCurveId]);
 
   const [paletteTab, setPaletteTab] = useState<PaletteTab>('pdf');
+  const [isSpaceHeld, setIsSpaceHeld] = useState(false);
+  const [isPercussionModePinned, setIsPercussionModePinned] = useState(false);
+  const isPercussionMode = isSpaceHeld || isPercussionModePinned;
+  const [percussionCategory, setPercussionCategory] = useState<string>('すべて');
+  const percussionScrollRef = useRef<HTMLDivElement>(null);
+
+  const filteredPercussionList = useMemo(() => {
+    if (percussionCategory === 'すべて') return PERCUSSION_DATA;
+    return PERCUSSION_DATA.filter(p => p.category === percussionCategory);
+  }, [percussionCategory]);
 
   // Template replacements state: merge props, backup, and auto-inference from placed objects
   const [effectiveTemplateReplacements, setEffectiveTemplateReplacements] = useState<Record<string, string>>(() => {
@@ -1249,9 +1259,62 @@ const StageBuilder: React.FC<Props> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isExportModalOpen, isAdjusting, isMeasuringScale, canUndo, canRedo, placedItems, curveObjects, scenes, currentSceneId, snapSettings, selectedIds, selectedCurveIds, selectedCurveId, selectedCurveItemId]);
 
+  // Percussion Addition Mode keyboard listener: Space key held or Esc to cancel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if inside text inputs or contentEditable
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable
+      );
+      if (isInput) return;
+
+      if (e.code === 'Space') {
+        if (!e.repeat) {
+          e.preventDefault();
+          setIsSpaceHeld(true);
+        }
+      } else if (e.code === 'Escape') {
+        setIsPercussionModePinned(false);
+        setIsSpaceHeld(false);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpaceHeld(false);
+      }
+    };
+
+    const handleBlur = () => {
+      setIsSpaceHeld(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
+
   const scrollPalette = (direction: 'left' | 'right') => {
     if (paletteScrollRef.current) {
       paletteScrollRef.current.scrollBy({
+        left: direction === 'left' ? -260 : 260,
+        behavior: 'smooth',
+      });
+    }
+  };
+
+  const scrollPercussionPalette = (direction: 'left' | 'right') => {
+    if (percussionScrollRef.current) {
+      percussionScrollRef.current.scrollBy({
         left: direction === 'left' ? -260 : 260,
         behavior: 'smooth',
       });
@@ -1262,21 +1325,32 @@ const StageBuilder: React.FC<Props> = ({
   // ─── Placed Item Handlers ───────────────────────────────────────────────────
 
   const handleAddItem = (iconId: string, x?: number, y?: number) => {
-    // Check if iconId refers to a template (prefixed with 'tmpl_')
+    // Check if iconId refers to a percussion or template
+    const isPercussionId = iconId.startsWith('tmpl_percussion_');
     const isTemplate = iconId.startsWith('tmpl_');
-    const tmpl = isTemplate ? TEMPLATE_SHAPES.find(t => t.id === iconId || t.type === iconId.slice(5)) : undefined;
-    const templateType = tmpl?.type ?? (isTemplate ? iconId.slice(5) : undefined);
+    let templateType: string | undefined = undefined;
+    let percussionType: string | undefined = undefined;
+
+    if (isPercussionId) {
+      templateType = 'percussion';
+      percussionType = iconId.replace('tmpl_percussion_', '');
+    } else {
+      const tmpl = isTemplate ? TEMPLATE_SHAPES.find(t => t.id === iconId || t.type === iconId.slice(5)) : undefined;
+      templateType = tmpl?.type ?? (isTemplate ? iconId.slice(5) : undefined);
+      percussionType = tmpl?.percussionType || (templateType === 'percussion' ? 'ティンパニ' : undefined);
+    }
+
+    const tmpl = isTemplate && !isPercussionId ? TEMPLATE_SHAPES.find(t => t.id === iconId || t.type === iconId.slice(5)) : undefined;
     const iconDef = !isTemplate ? extractedIcons.find(ic => ic.id === iconId) : undefined;
 
     const defaultSize = 50;
-    const percussionType = tmpl?.percussionType || (templateType === 'percussion' ? 'ティンパニ' : undefined);
     const pData = percussionType ? getPercussionInfo(percussionType) : undefined;
 
     let defaultWidth = isTemplate ? (tmpl?.defaultW ?? defaultSize) : (iconDef?.rect?.width ?? defaultSize) / 2.0;
     let defaultHeight = isTemplate ? (tmpl?.defaultH ?? defaultSize) : (iconDef?.rect?.height ?? defaultSize) / 2.0;
     if (pData) {
-      defaultWidth = Math.round((pData.defaultW || 1.34) * 30);
-      defaultHeight = Math.round((pData.defaultH || 1.34) * 30);
+      defaultWidth = Math.round((pData.defaultW || 1.34) * 36);
+      defaultHeight = Math.round((pData.defaultH || 1.34) * 36);
     }
 
     const effCenter = stageCanvasRef.current?.getEffectiveCenter();
@@ -1308,7 +1382,7 @@ const StageBuilder: React.FC<Props> = ({
     setSelectedIds([newItem.id]);
     setSelectedCurveIds([]);
     setSelectedCurveItemId(null);
-    const itemLabel = isTemplate ? (tmpl?.label || 'テンプレ') : (iconLabels[iconId] || iconDef?.label || 'パーツ');
+    const itemLabel = isPercussionId ? (percussionType || '打楽器') : isTemplate ? (tmpl?.label || 'テンプレ') : (iconLabels[iconId] || iconDef?.label || 'パーツ');
     triggerAddToast(itemLabel);
   };
 
@@ -1822,21 +1896,32 @@ const StageBuilder: React.FC<Props> = ({
 
   const addItemToSelectedCurve = (iconId: string) => {
     if (!selectedCurveId) return;
+    const isPercussionId = iconId.startsWith('tmpl_percussion_');
     const isTemplate = iconId.startsWith('tmpl_');
-    const tmpl = isTemplate ? TEMPLATE_SHAPES.find(t => t.id === iconId || t.type === iconId.slice(5)) : undefined;
-    const templateType = tmpl?.type ?? (isTemplate ? iconId.slice(5) : undefined);
+    let templateType: string | undefined = undefined;
+    let percussionType: string | undefined = undefined;
+
+    if (isPercussionId) {
+      templateType = 'percussion';
+      percussionType = iconId.replace('tmpl_percussion_', '');
+    } else {
+      const tmpl = isTemplate ? TEMPLATE_SHAPES.find(t => t.id === iconId || t.type === iconId.slice(5)) : undefined;
+      templateType = tmpl?.type ?? (isTemplate ? iconId.slice(5) : undefined);
+      percussionType = tmpl?.percussionType || (templateType === 'percussion' ? 'ティンパニ' : undefined);
+    }
+
+    const tmpl = isTemplate && !isPercussionId ? TEMPLATE_SHAPES.find(t => t.id === iconId || t.type === iconId.slice(5)) : undefined;
     const iconDef = !isTemplate ? extractedIcons.find(ic => ic.id === iconId) : undefined;
 
     const defaultSize = 32;
     const size = isTemplate ? (tmpl?.defaultW ?? defaultSize) : (iconDef?.rect?.width ?? defaultSize) / 2.0;
-    const percussionType = tmpl?.percussionType || (templateType === 'percussion' ? 'ティンパニ' : undefined);
 
     const newItem: CurveItem = {
       id: `ci_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       type: isTemplate ? (templateType || 'chorusChair') : iconId,
       percussionType,
       showPercussionName: true,
-      label: isTemplate ? tmpl?.label : (iconLabels[iconId] || 'パーツ'),
+      label: isPercussionId ? (percussionType || '打楽器') : isTemplate ? tmpl?.label : (iconLabels[iconId] || 'パーツ'),
       size: Math.max(20, Math.min(80, size)),
       isCustom: !isTemplate,
       iconId: !isTemplate ? iconId : undefined,
@@ -2637,222 +2722,264 @@ const StageBuilder: React.FC<Props> = ({
       )}
 
       {/* Horizontal Palette (Liquid Glass) */}
-      <div className="h-[104px] liquid-glass border-b flex items-center shrink-0 z-10 px-3 relative select-none transition-colors">
-        {/* Active Bezier Floating Tag */}
-        {selectedCurveId && (
-          <div
-            className="absolute left-36 top-full z-30 flex items-center gap-2 px-3.5 py-1 bg-gradient-to-r from-indigo-500/90 via-purple-500/90 to-fuchsia-500/90 backdrop-blur-xl text-white rounded-b-2xl shadow-[0_8px_20px_rgba(168,85,247,0.35),inset_0_1px_0.5px_rgba(255,255,255,0.4)] text-[10px] font-bold border border-t-0 border-white/30 select-none animate-in fade-in slide-in-from-top-1"
-            title="選択中のベジェ曲線にアイテムを追加するモードです"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-            <span>ベジェ上に追加中</span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedCurveId(null);
-              }}
-              className="ml-1 bg-white/20 hover:bg-white/35 active:bg-white/40 text-white px-2 py-0.5 rounded-full text-[9px] font-semibold transition-colors flex items-center gap-0.5 cursor-pointer"
-              title="通常配置モードに戻る"
-            >
-              <span>解除</span>
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        )}
-
-        {/* Tab Switcher (Segmented Glass Track) */}
-        <div className={`flex flex-col h-[82px] w-25 shrink-0 p-1 rounded-2xl liquid-segment-track gap-1 mr-2`}>
-          <button
-            onClick={() => setPaletteTab('pdf')}
-            className={`flex-1 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer ${
-              paletteTab === 'pdf'
-                ? 'bg-white/95 dark:bg-slate-800/95 text-[#007AFF] dark:text-sky-400 shadow-[0_2px_8px_rgba(15,23,42,0.08),inset_0_1px_0.5px_rgba(255,255,255,0.9)]'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5 inline mr-0.5" /> PDF抽出
-          </button>
-          <button
-            onClick={() => setPaletteTab('template')}
-            className={`flex-1 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer ${
-              paletteTab === 'template'
-                ? 'bg-white/95 dark:bg-slate-800/95 text-[#007AFF] dark:text-sky-400 shadow-[0_2px_8px_rgba(15,23,42,0.08),inset_0_1px_0.5px_rgba(255,255,255,0.9)]'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <Shapes className="w-3.5 h-3.5 inline mr-0.5" /> テンプレ
-          </button>
-        </div>
-
-        {/* Scroll Left Button */}
-        <button
-          type="button"
-          onClick={() => scrollPalette('left')}
-          className="h-14 w-7 rounded-full liquid-btn flex items-center justify-center transition-all shrink-0 text-slate-500 dark:text-slate-300 hover:text-[#007AFF] cursor-pointer"
-          title="左へスクロール"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-
-        {/* Scrollable Container */}
-        <div
-          ref={paletteScrollRef}
-          onWheel={(e) => {
-            if (e.deltaY !== 0) {
-              e.currentTarget.scrollLeft += e.deltaY;
-            }
-          }}
-          className={`flex-1 h-full overflow-x-auto overflow-y-hidden flex items-center gap-2 px-2.5 py-1.5 scroll-smooth transition-all rounded-2xl mx-1 ${
-            selectedCurveId
-              ? (isDarkMode ? 'bg-purple-950/35 ring-1 ring-inset ring-purple-500/60' : 'bg-purple-500/10 ring-1 ring-inset ring-purple-300/80')
-              : ''
-          }`}
-        >
-          {/* Bezier Curve Creator Button */}
-          <div className={`flex items-center gap-1 border-r pr-2.5 mr-1 shrink-0 h-15 ${isDarkMode ? 'border-white/12' : 'border-slate-300/60'}`}>
-            <button
-              type="button"
-              onClick={() => handleAddEmptyCurve()}
-              className={`w-15 h-[72px] py-1.5 px-1 rounded-2xl transition-all duration-200 flex flex-col items-center justify-between shrink-0 group cursor-pointer ${
-                selectedCurveId
-                  ? (isDarkMode ? 'bg-purple-900/70 border border-purple-400 text-purple-200 shadow-md' : 'bg-purple-100/90 border border-purple-400 text-purple-900 shadow-md')
-                  : 'liquid-card hover:bg-white/90 dark:hover:bg-slate-700/80 hover:border-purple-400/60 hover:-translate-y-0.5 text-slate-700 dark:text-slate-200'
-              }`}
-              title="新しいベジェ曲線（何も置かれていない空の曲線）を追加します"
-            >
-              <div className={`w-8.5 h-8.5 flex items-center justify-center rounded-xl transition-all group-hover:scale-105 ${
-                isDarkMode ? 'bg-white text-purple-600 shadow-xs p-1' : 'text-purple-600 dark:text-purple-400'
-              }`}>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 18 C 7 6, 17 6, 20 18" />
-                  <circle cx="4" cy="18" r="2.2" fill="#a855f7" />
-                  <circle cx="20" cy="18" r="2.2" fill="#a855f7" />
-                  <circle cx="12" cy="9" r="1.8" fill="#ef4444" stroke="#ef4444" />
-                </svg>
+      <div className={`h-[104px] border-b flex items-center shrink-0 z-10 px-3 relative select-none transition-all duration-200 ${
+        isPercussionMode
+          ? 'bg-purple-950/20 dark:bg-purple-950/40 border-purple-500/40 backdrop-blur-xl ring-1 ring-purple-500/30'
+          : 'liquid-glass'
+      }`}>
+        {isPercussionMode ? (
+          /* ── Dedicated Percussion Palette ── */
+          <div className="flex items-center w-full h-full gap-2 animate-fadeIn">
+            {/* Left Header / Category Filter */}
+            <div className="flex flex-col h-[84px] shrink-0 justify-between py-0.5 border-r pr-3 border-purple-400/30">
+              <div className="flex items-center gap-1.5 px-1 text-purple-900 dark:text-purple-200">
+                <span className="text-base leading-none animate-bounce">🥁</span>
+                <span className="text-xs font-black tracking-tight whitespace-nowrap">打楽器メニュー</span>
               </div>
-              <span className="text-[10px] font-bold text-center leading-tight whitespace-nowrap">
-                ベジェ曲線
+              <div className="flex items-center gap-1 overflow-x-auto max-w-[320px] p-0.5 rounded-xl bg-purple-900/10 dark:bg-purple-950/60">
+                {['すべて', ...PERCUSSION_CATEGORIES].map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setPercussionCategory(cat)}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all cursor-pointer ${
+                      percussionCategory === cat
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'text-purple-700 dark:text-purple-300 hover:bg-purple-500/15'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Scroll Left Button */}
+            <button
+              type="button"
+              onClick={() => scrollPercussionPalette('left')}
+              className="h-14 w-7 rounded-full liquid-btn flex items-center justify-center transition-all shrink-0 text-purple-600 dark:text-purple-300 hover:text-purple-900 dark:hover:text-white cursor-pointer"
+              title="左へスクロール"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            {/* Percussion Items Scrollable Container */}
+            <div
+              ref={percussionScrollRef}
+              onWheel={(e) => {
+                if (e.deltaY !== 0) {
+                  e.currentTarget.scrollLeft += e.deltaY;
+                }
+              }}
+              className="flex-1 h-full overflow-x-auto overflow-y-hidden flex items-center gap-2 px-2 py-1.5 scroll-smooth rounded-2xl mx-1"
+            >
+              {filteredPercussionList.map((p: (typeof PERCUSSION_DATA)[number]) => {
+                const iconId = `tmpl_percussion_${p.dropdownName}`;
+                return (
+                  <div
+                    key={p.dropdownName}
+                    draggable={true}
+                    onDragStart={e => {
+                      e.dataTransfer.setData('iconId', iconId);
+                      e.dataTransfer.setData('percussionName', p.dropdownName);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    onClick={() => {
+                      if (selectedCurveId) {
+                        addItemToSelectedCurve(iconId);
+                      } else {
+                        handleAddItem(iconId);
+                      }
+                    }}
+                    className="flex flex-col items-center justify-between w-18 h-[76px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-grab active:cursor-grabbing hover:-translate-y-0.5 active:scale-95 bg-white/90 dark:bg-slate-800/90 border border-purple-200/80 dark:border-purple-500/40 hover:border-purple-500 hover:shadow-md"
+                    title={`「${p.dropdownName}」をドラッグして舞台に配置、またはクリックで追加`}
+                  >
+                    {p.canvasName && (
+                      <span className="absolute -top-1.5 right-1 bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-[7.5px] font-bold px-1.5 py-0.2 rounded-full shadow-xs leading-none">
+                        {p.canvasName}
+                      </span>
+                    )}
+                    <div className="w-9 h-9 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl bg-purple-50 dark:bg-purple-950/40 p-1 group-hover:scale-105 transition-transform">
+                      <img
+                        src={getPercussionDataUrl(p.dropdownName, isDarkMode ? '#e2e8f0' : '#1e293b')}
+                        alt={p.dropdownName}
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    </div>
+                    <span className="text-[10px] w-full text-center leading-tight line-clamp-1 px-0.5 font-bold text-slate-800 dark:text-purple-100 group-hover:text-purple-600 dark:group-hover:text-purple-300">
+                      {p.dropdownName}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Scroll Right Button */}
+            <button
+              type="button"
+              onClick={() => scrollPercussionPalette('right')}
+              className="h-14 w-7 rounded-full liquid-btn flex items-center justify-center transition-all shrink-0 text-purple-600 dark:text-purple-300 hover:text-purple-900 dark:hover:text-white cursor-pointer"
+              title="右へスクロール"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+
+            {/* Exit Percussion Mode Button */}
+            <div className="border-l pl-2.5 ml-1 shrink-0 h-12 flex items-center border-purple-400/30">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPercussionModePinned(false);
+                  setIsSpaceHeld(false);
+                }}
+                className="liquid-btn text-xs font-bold px-3 py-2 rounded-full transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 hover:bg-rose-100 dark:hover:bg-rose-950/70 hover:text-rose-700"
+                title="打楽器追加モードを終了します (Escキー)"
+              >
+                <X className="w-4 h-4" />
+                <span>終了 (Esc)</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ── Normal Palette ── */
+          <>
+            {/* Active Bezier Floating Tag */}
+            {selectedCurveId && (
+              <div
+                className="absolute left-36 top-full z-30 flex items-center gap-2 px-3.5 py-1 bg-gradient-to-r from-indigo-500/90 via-purple-500/90 to-fuchsia-500/90 backdrop-blur-xl text-white rounded-b-2xl shadow-[0_8px_20px_rgba(168,85,247,0.35),inset_0_1px_0.5px_rgba(255,255,255,0.4)] text-[10px] font-bold border border-t-0 border-white/30 select-none animate-in fade-in slide-in-from-top-1"
+                title="選択中のベジェ曲線にアイテムを追加するモードです"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                <span>ベジェ上に追加中</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedCurveId(null);
+                  }}
+                  className="ml-1 bg-white/20 hover:bg-white/35 active:bg-white/40 text-white px-2 py-0.5 rounded-full text-[9px] font-semibold transition-colors flex items-center gap-0.5 cursor-pointer"
+                  title="通常配置モードに戻る"
+                >
+                  <span>解除</span>
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+
+            {/* Tab Switcher (Segmented Glass Track) */}
+            <div className={`flex flex-col h-[82px] w-25 shrink-0 p-1 rounded-2xl liquid-segment-track gap-1 mr-2`}>
+              <button
+                onClick={() => setPaletteTab('pdf')}
+                className={`flex-1 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer ${
+                  paletteTab === 'pdf'
+                    ? 'bg-white/95 dark:bg-slate-800/95 text-[#007AFF] dark:text-sky-400 shadow-[0_2px_8px_rgba(15,23,42,0.08),inset_0_1px_0.5px_rgba(255,255,255,0.9)]'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5 inline mr-0.5" /> PDF抽出
+              </button>
+              <button
+                onClick={() => setPaletteTab('template')}
+                className={`flex-1 text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer ${
+                  paletteTab === 'template'
+                    ? 'bg-white/95 dark:bg-slate-800/95 text-[#007AFF] dark:text-sky-400 shadow-[0_2px_8px_rgba(15,23,42,0.08),inset_0_1px_0.5px_rgba(255,255,255,0.9)]'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <Shapes className="w-3.5 h-3.5 inline mr-0.5" /> テンプレ
+              </button>
+            </div>
+
+            {/* Percussion Addition Mode Trigger Button */}
+            <button
+              type="button"
+              onClick={() => setIsPercussionModePinned(true)}
+              className={`flex flex-col items-center justify-between w-16 h-[82px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 border mr-2 ${
+                isDarkMode
+                  ? 'bg-purple-950/40 hover:bg-purple-900/60 border-purple-500/40 text-purple-200 hover:border-purple-400'
+                  : 'bg-purple-50 hover:bg-purple-100 border-purple-300 text-purple-900 hover:border-purple-400'
+              }`}
+              title="打楽器（パーカッション）追加モードを開きます [Spaceキー長押しでも可能]"
+            >
+              <span className="text-xl leading-none mt-1 group-hover:scale-110 transition-transform">🥁</span>
+              <span className="text-[10px] font-bold tracking-tight text-center leading-tight">打楽器</span>
+              <span className={`text-[8.5px] px-1.5 py-0.5 rounded-full font-bold leading-none ${
+                isDarkMode ? 'bg-purple-800 text-purple-200' : 'bg-purple-200 text-purple-800'
+              }`}>
+                Space
               </span>
             </button>
-          </div>
 
-          {paletteTab === 'template' ? (
-            <>
-              {visibleTemplates.map(tmpl => (
-                <div
-                  key={tmpl.id || tmpl.type}
-                  draggable={!selectedCurveId}
-                  onDragStart={e => {
-                    e.dataTransfer.setData('iconId', tmpl.id || `tmpl_${tmpl.type}`);
-                    e.dataTransfer.effectAllowed = 'copy';
-                  }}
-                  onClick={() => handlePaletteItemClick(tmpl.id || `tmpl_${tmpl.type}`)}
-                  className={`flex flex-col items-center justify-between w-16 h-[74px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 ${
+            {/* Scroll Left Button */}
+            <button
+              type="button"
+              onClick={() => scrollPalette('left')}
+              className="h-14 w-7 rounded-full liquid-btn flex items-center justify-center transition-all shrink-0 text-slate-500 dark:text-slate-300 hover:text-[#007AFF] cursor-pointer"
+              title="左へスクロール"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            {/* Scrollable Container */}
+            <div
+              ref={paletteScrollRef}
+              onWheel={(e) => {
+                if (e.deltaY !== 0) {
+                  e.currentTarget.scrollLeft += e.deltaY;
+                }
+              }}
+              className={`flex-1 h-full overflow-x-auto overflow-y-hidden flex items-center gap-2 px-2.5 py-1.5 scroll-smooth transition-all rounded-2xl mx-1 ${
+                selectedCurveId
+                  ? (isDarkMode ? 'bg-purple-950/35 ring-1 ring-inset ring-purple-500/60' : 'bg-purple-500/10 ring-1 ring-inset ring-purple-300/80')
+                  : ''
+              }`}
+            >
+              {/* Bezier Curve Creator Button */}
+              <div className={`flex items-center gap-1 border-r pr-2.5 mr-1 shrink-0 h-15 ${isDarkMode ? 'border-white/12' : 'border-slate-300/60'}`}>
+                <button
+                  type="button"
+                  onClick={() => handleAddEmptyCurve()}
+                  className={`w-15 h-[72px] py-1.5 px-1 rounded-2xl transition-all duration-200 flex flex-col items-center justify-between shrink-0 group cursor-pointer ${
                     selectedCurveId
-                      ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/70' : 'bg-purple-50/70 hover:bg-purple-100/90 border border-purple-300/80 hover:border-purple-400')
-                      : 'liquid-card hover:bg-white/90 dark:hover:bg-slate-700/80 hover:border-blue-400/60 hover:-translate-y-0.5 cursor-grab active:cursor-grabbing'
+                      ? (isDarkMode ? 'bg-purple-900/70 border border-purple-400 text-purple-200 shadow-md' : 'bg-purple-100/90 border border-purple-400 text-purple-900 shadow-md')
+                      : 'liquid-card hover:bg-white/90 dark:hover:bg-slate-700/80 hover:border-purple-400/60 hover:-translate-y-0.5 text-slate-700 dark:text-slate-200'
                   }`}
-                  title={selectedCurveId ? `「${tmpl.label}」をベジェ曲線に追加` : tmpl.label}
+                  title="新しいベジェ曲線（何も置かれていない空の曲線）を追加します"
                 >
-                  {selectedCurveId && (
-                    <span className="absolute -top-1.5 right-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[8px] font-bold px-1.5 rounded-full shadow-xs">
-                      +追加
-                    </span>
-                  )}
-                  <div className={`w-8.5 h-8.5 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl transition-all ${
-                    isDarkMode ? 'bg-white shadow-xs p-1' : ''
+                  <div className={`w-8.5 h-8.5 flex items-center justify-center rounded-xl transition-all group-hover:scale-105 ${
+                    isDarkMode ? 'bg-white text-purple-600 shadow-xs p-1' : 'text-purple-600 dark:text-purple-400'
                   }`}>
-                    <img src={getTemplateDataUrl(tmpl)} alt={tmpl.label} className="max-w-full max-h-full object-contain" />
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 18 C 7 6, 17 6, 20 18" />
+                      <circle cx="4" cy="18" r="2.2" fill="#a855f7" />
+                      <circle cx="20" cy="18" r="2.2" fill="#a855f7" />
+                      <circle cx="12" cy="9" r="1.8" fill="#ef4444" stroke="#ef4444" />
+                    </svg>
                   </div>
-                  <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
-                    selectedCurveId
-                      ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
-                      : (isDarkMode ? 'text-slate-200 group-hover:text-sky-400' : 'text-slate-700 group-hover:text-[#007AFF]')
-                  }`}>
-                    {tmpl.label}
+                  <span className="text-[10px] font-bold text-center leading-tight whitespace-nowrap">
+                    ベジェ曲線
                   </span>
-                </div>
-              ))}
-            </>
-          ) : (
-            <>
-              {extractedIcons.length === 0 ? (
-                <p className="text-xs text-slate-400 w-full text-center">PDFから切り出されたアイコンがありません</p>
-              ) : (
-                extractedIcons.map((icon) => {
-                  const tmplId = effectiveTemplateReplacements?.[icon.id];
-                  const matchedTmpl = tmplId
-                    ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
-                    : null;
+                </button>
+              </div>
 
-                  if (matchedTmpl) {
-                    // テンプレに置き換えた場合: 元の抽出画像は非表示にし、代わりにテンプレをPDF抽出欄に表示
-                    const effectiveTmplId = matchedTmpl.id || `tmpl_${matchedTmpl.type}`;
-                    const label = matchedTmpl.label;
-                    return (
-                      <div
-                        key={icon.id}
-                        draggable={!selectedCurveId}
-                        onDragStart={e => {
-                          e.dataTransfer.setData('iconId', effectiveTmplId);
-                          e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                        onClick={() => handlePaletteItemClick(effectiveTmplId)}
-                        className={`flex flex-col items-center justify-between w-16 h-[74px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 ${
-                          selectedCurveId
-                            ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 ring-1 ring-purple-500/50' : 'bg-purple-50/70 hover:bg-purple-100/90 ring-1 ring-purple-300/60')
-                            : 'liquid-glass-card-accent cursor-grab active:cursor-grabbing'
-                        }`}
-                        title={selectedCurveId ? `「${label}」をベジェ曲線に追加` : `[テンプレ置換済] ${label}`}
-                      >
-                        {/* Top Badges: Merged Capsule when both Template & +Add exist, or Single Pill */}
-                        {selectedCurveId ? (
-                          <div className="absolute -top-2 left-1/2 -translate-x-1/2 flex items-center shadow-xs rounded-full overflow-hidden whitespace-nowrap z-10">
-                            <span className="bg-gradient-to-r from-lime-500 to-lime-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 leading-none">
-                              テンプレ
-                            </span>
-                            <span className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 border-l border-white/40 leading-none">
-                              +追加
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="absolute -top-1.5 -left-1 bg-gradient-to-r from-lime-500 to-lime-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 rounded-full shadow-xs z-10 leading-none">
-                            テンプレ
-                          </span>
-                        )}
-                        <div className={`w-8.5 h-8.5 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl transition-all ${
-                          isDarkMode ? 'bg-white shadow-xs p-1' : ''
-                        }`}>
-                          <img
-                            src={getTemplateDataUrl(matchedTmpl)}
-                            alt={label}
-                            className="max-w-full max-h-full object-contain"
-                          />
-                        </div>
-                        <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
-                          selectedCurveId
-                            ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
-                            : (isDarkMode ? 'text-lime-300 group-hover:text-lime-200' : 'text-lime-900 group-hover:text-lime-950')
-                        }`}>
-                          {label}
-                        </span>
-                      </div>
-                    );
-                  }
-
-                  return (
+              {paletteTab === 'template' ? (
+                <>
+                  {visibleTemplates.map(tmpl => (
                     <div
-                      key={icon.id}
+                      key={tmpl.id || tmpl.type}
                       draggable={!selectedCurveId}
-                      onDragStart={e => { e.dataTransfer.setData('iconId', icon.id); e.dataTransfer.effectAllowed = 'copy'; }}
-                      onClick={() => handlePaletteItemClick(icon.id)}
+                      onDragStart={e => {
+                        e.dataTransfer.setData('iconId', tmpl.id || `tmpl_${tmpl.type}`);
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      onClick={() => handlePaletteItemClick(tmpl.id || `tmpl_${tmpl.type}`)}
                       className={`flex flex-col items-center justify-between w-16 h-[74px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 ${
                         selectedCurveId
                           ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/70' : 'bg-purple-50/70 hover:bg-purple-100/90 border border-purple-300/80 hover:border-purple-400')
-                          : 'liquid-card hover:bg-white/95 dark:hover:bg-slate-700/85 hover:border-blue-400/60 hover:-translate-y-0.5 cursor-grab active:cursor-grabbing'
+                          : 'liquid-card hover:bg-white/90 dark:hover:bg-slate-700/80 hover:border-blue-400/60 hover:-translate-y-0.5 cursor-grab active:cursor-grabbing'
                       }`}
-                      title={selectedCurveId ? `「${iconLabels[icon.id] || icon.label || 'パーツ'}」をベジェ曲線に追加` : (iconLabels[icon.id] || icon.label || 'パーツ')}
+                      title={selectedCurveId ? `「${tmpl.label}」をベジェ曲線に追加` : tmpl.label}
                     >
                       {selectedCurveId && (
                         <span className="absolute -top-1.5 right-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[8px] font-bold px-1.5 rounded-full shadow-xs">
@@ -2862,66 +2989,167 @@ const StageBuilder: React.FC<Props> = ({
                       <div className={`w-8.5 h-8.5 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl transition-all ${
                         isDarkMode ? 'bg-white shadow-xs p-1' : ''
                       }`}>
-                        <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain" />
+                        <img src={getTemplateDataUrl(tmpl)} alt={tmpl.label} className="max-w-full max-h-full object-contain" />
                       </div>
                       <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
                         selectedCurveId
                           ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
                           : (isDarkMode ? 'text-slate-200 group-hover:text-sky-400' : 'text-slate-700 group-hover:text-[#007AFF]')
                       }`}>
-                        {iconLabels[icon.id] || icon.label || 'パーツ'}
+                        {tmpl.label}
                       </span>
                     </div>
-                  );
-                })
-              )}
-              <div className={`border-l pl-2.5 ml-1 shrink-0 h-12 flex items-center gap-2 ${isDarkMode ? 'border-white/12' : 'border-slate-300/60'}`}>
-                {onOpenTemplateModal && (
-                  <button
-                    onClick={onOpenTemplateModal}
-                    className="liquid-btn text-[11px] font-bold px-3 py-2 rounded-full transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer text-emerald-700 dark:text-emerald-300"
-                    title="標準テンプレートへの置き換え設定を開きます"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" /> テンプレ置換
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    if (onOpenIconAdjustModal) {
-                      onOpenIconAdjustModal();
-                    } else {
-                      setIsAdjusting(true);
-                    }
-                  }}
-                  className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-slate-700 dark:text-slate-200 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
-                  title="パーツアイコンの切り抜き枠を手動調整します"
-                >
-                  <Settings className="w-3.5 h-3.5" /> パーツ枠調整
-                </button>
-                {onReAdjustBackground && (
-                  <button
-                    type="button"
-                    onClick={onReAdjustBackground}
-                    className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-blue-600 dark:text-sky-300 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
-                    title="ステージ図面の切り出し枠を再設定します"
-                  >
-                    <Crop className="w-3.5 h-3.5" /> 図面枠調整
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {extractedIcons.length === 0 ? (
+                    <p className="text-xs text-slate-400 w-full text-center">PDFから切り出されたアイコンがありません</p>
+                  ) : (
+                    extractedIcons.map((icon) => {
+                      const tmplId = effectiveTemplateReplacements?.[icon.id];
+                      const matchedTmpl = tmplId
+                        ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
+                        : null;
 
-        {/* Scroll Right Button */}
-        <button
-          type="button"
-          onClick={() => scrollPalette('right')}
-          className="h-14 w-7 rounded-full liquid-btn flex items-center justify-center transition-all shrink-0 text-slate-500 dark:text-slate-300 hover:text-[#007AFF] cursor-pointer"
-          title="右へスクロール"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
+                      if (matchedTmpl) {
+                        // テンプレに置き換えた場合: 元の抽出画像は非表示にし、代わりにテンプレをPDF抽出欄に表示
+                        const effectiveTmplId = matchedTmpl.id || `tmpl_${matchedTmpl.type}`;
+                        const label = matchedTmpl.label;
+                        return (
+                          <div
+                            key={icon.id}
+                            draggable={!selectedCurveId}
+                            onDragStart={e => {
+                              e.dataTransfer.setData('iconId', effectiveTmplId);
+                              e.dataTransfer.effectAllowed = 'copy';
+                            }}
+                            onClick={() => handlePaletteItemClick(effectiveTmplId)}
+                            className={`flex flex-col items-center justify-between w-16 h-[74px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 ${
+                              selectedCurveId
+                                ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 ring-1 ring-purple-500/50' : 'bg-purple-50/70 hover:bg-purple-100/90 ring-1 ring-purple-300/60')
+                                : 'liquid-glass-card-accent cursor-grab active:cursor-grabbing'
+                            }`}
+                            title={selectedCurveId ? `「${label}」をベジェ曲線に追加` : `[テンプレ置換済] ${label}`}
+                          >
+                            {/* Top Badges: Merged Capsule when both Template & +Add exist, or Single Pill */}
+                            {selectedCurveId ? (
+                              <div className="absolute -top-2 left-1/2 -translate-x-1/2 flex items-center shadow-xs rounded-full overflow-hidden whitespace-nowrap z-10">
+                                <span className="bg-gradient-to-r from-lime-500 to-lime-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 leading-none">
+                                  テンプレ
+                                </span>
+                                <span className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 border-l border-white/40 leading-none">
+                                  +追加
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="absolute -top-1.5 -left-1 bg-gradient-to-r from-lime-500 to-lime-600 text-white text-[7.5px] font-bold px-1.5 py-0.5 rounded-full shadow-xs z-10 leading-none">
+                                テンプレ
+                              </span>
+                            )}
+                            <div className={`w-8.5 h-8.5 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl transition-all ${
+                              isDarkMode ? 'bg-white shadow-xs p-1' : ''
+                            }`}>
+                              <img
+                                src={getTemplateDataUrl(matchedTmpl)}
+                                alt={label}
+                                className="max-w-full max-h-full object-contain"
+                              />
+                            </div>
+                            <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
+                              selectedCurveId
+                                ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
+                                : (isDarkMode ? 'text-lime-300 group-hover:text-lime-200' : 'text-lime-900 group-hover:text-lime-950')
+                            }`}>
+                              {label}
+                            </span>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={icon.id}
+                          draggable={!selectedCurveId}
+                          onDragStart={e => { e.dataTransfer.setData('iconId', icon.id); e.dataTransfer.effectAllowed = 'copy'; }}
+                          onClick={() => handlePaletteItemClick(icon.id)}
+                          className={`flex flex-col items-center justify-between w-16 h-[74px] py-1.5 px-1 rounded-2xl shrink-0 transition-all duration-200 group relative cursor-pointer active:scale-95 ${
+                            selectedCurveId
+                              ? (isDarkMode ? 'bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/70' : 'bg-purple-50/70 hover:bg-purple-100/90 border border-purple-300/80 hover:border-purple-400')
+                              : 'liquid-card hover:bg-white/95 dark:hover:bg-slate-700/85 hover:border-blue-400/60 hover:-translate-y-0.5 cursor-grab active:cursor-grabbing'
+                          }`}
+                          title={selectedCurveId ? `「${iconLabels[icon.id] || icon.label || 'パーツ'}」をベジェ曲線に追加` : (iconLabels[icon.id] || icon.label || 'パーツ')}
+                        >
+                          {selectedCurveId && (
+                            <span className="absolute -top-1.5 right-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[8px] font-bold px-1.5 rounded-full shadow-xs">
+                              +追加
+                            </span>
+                          )}
+                          <div className={`w-8.5 h-8.5 flex items-center justify-center pointer-events-none mt-0.5 rounded-xl transition-all ${
+                            isDarkMode ? 'bg-white shadow-xs p-1' : ''
+                          }`}>
+                            <img src={icon.url} alt={icon.id} className="max-w-full max-h-full object-contain" />
+                          </div>
+                          <span className={`text-[10px] w-full text-center leading-tight line-clamp-2 px-0.5 font-medium ${
+                            selectedCurveId
+                              ? (isDarkMode ? 'text-purple-300 group-hover:font-bold' : 'text-purple-900 group-hover:font-bold')
+                              : (isDarkMode ? 'text-slate-200 group-hover:text-sky-400' : 'text-slate-700 group-hover:text-[#007AFF]')
+                          }`}>
+                            {iconLabels[icon.id] || icon.label || 'パーツ'}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div className={`border-l pl-2.5 ml-1 shrink-0 h-12 flex items-center gap-2 ${isDarkMode ? 'border-white/12' : 'border-slate-300/60'}`}>
+                    {onOpenTemplateModal && (
+                      <button
+                        onClick={onOpenTemplateModal}
+                        className="liquid-btn text-[11px] font-bold px-3 py-2 rounded-full transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer text-emerald-700 dark:text-emerald-300"
+                        title="標準テンプレートへの置き換え設定を開きます"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> テンプレ置換
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (onOpenIconAdjustModal) {
+                          onOpenIconAdjustModal();
+                        } else {
+                          setIsAdjusting(true);
+                        }
+                      }}
+                      className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-slate-700 dark:text-slate-200 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
+                      title="パーツアイコンの切り抜き枠を手動調整します"
+                    >
+                      <Settings className="w-3.5 h-3.5" /> パーツ枠調整
+                    </button>
+                    {onReAdjustBackground && (
+                      <button
+                        type="button"
+                        onClick={onReAdjustBackground}
+                        className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-blue-600 dark:text-sky-300 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
+                        title="ステージ図面の切り出し枠を再設定します"
+                      >
+                        <Crop className="w-3.5 h-3.5" /> 図面枠調整
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Scroll Right Button */}
+            <button
+              type="button"
+              onClick={() => scrollPalette('right')}
+              className="h-14 w-7 rounded-full liquid-btn flex items-center justify-center transition-all shrink-0 text-slate-500 dark:text-slate-300 hover:text-[#007AFF] cursor-pointer"
+              title="右へスクロール"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </>
+        )}
       </div>
 
       {isAdjusting && iconsRegionUrl && (
@@ -3402,6 +3630,7 @@ const StageBuilder: React.FC<Props> = ({
             selectedIds={selectedIds}
             selectedCurveIds={selectedCurveIds}
             selectedCurveItemId={selectedCurveItemId}
+            isPercussionMode={isPercussionMode}
             onSelectCurveItem={(curveId, itemId) => {
               setSelectedCurveId(curveId);
               setSelectedId(null);
