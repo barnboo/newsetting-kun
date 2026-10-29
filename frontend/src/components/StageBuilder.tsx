@@ -519,11 +519,14 @@ const StageBuilder: React.FC<Props> = ({
   // ─── Backup (localStorage auto-save + 5 MB warning) ─────────────────────────
   const [backupWarning, setBackupWarning] = useState<string | null>(null);
 
-  const saveBackup = (snapshot: StageSnapshot) => {
+  const pendingBackupRef = useRef<StageSnapshot | null>(null);
+  const backupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const writeBackupNow = (snapshot: StageSnapshot) => {
     try {
       const json = JSON.stringify(snapshot);
-      const bytes = new TextEncoder().encode(json).length;
-      const MB = bytes / (1024 * 1024);
+      // UTF-16 換算の概算サイズ（TextEncoder による全量エンコードは重いため使用しない）
+      const MB = json.length / (1024 * 1024);
       if (MB > 5) {
         setBackupWarning(`バックアップデータが ${MB.toFixed(1)} MB に達しました（5MB 超）。データが多い場合はブラウザの容量に注意してください。`);
       } else {
@@ -539,36 +542,73 @@ const StageBuilder: React.FC<Props> = ({
     }
   };
 
-  // Build a snapshot of the current working state (deep copy to prevent mutations)
-  const buildSnapshot = (): StageSnapshot => JSON.parse(JSON.stringify({
-    projectName: projectNameRef.current,
-    placedItems: placedItemsRef.current,
-    curveObjects: curveObjectsRef.current,
-    // Merge current working state into scenes list before saving
-    scenes: scenesRef.current.map(sc =>
-      sc.id === currentSceneIdRef.current ? { ...sc, placedItems: placedItemsRef.current, curveObjects: curveObjectsRef.current, snapSettings: snapSettingsRef.current } : sc
-    ),
-    currentSceneId: currentSceneIdRef.current,
-    snapSettings: snapSettingsRef.current,
-    backgroundCrop: backgroundCrop || initialBackup?.backgroundCrop,
+  const flushBackup = () => {
+    if (backupTimerRef.current) {
+      clearTimeout(backupTimerRef.current);
+      backupTimerRef.current = null;
+    }
+    if (pendingBackupRef.current) {
+      const snap = pendingBackupRef.current;
+      pendingBackupRef.current = null;
+      writeBackupNow(snap);
+    }
+  };
+
+  // 操作のたびに 1MB 超の JSON を同期書き込みすると操作がカクつくため、まとめて遅延保存する
+  const saveBackup = (snapshot: StageSnapshot, immediate = false) => {
+    pendingBackupRef.current = snapshot;
+    if (immediate) {
+      flushBackup();
+      return;
+    }
+    if (backupTimerRef.current) clearTimeout(backupTimerRef.current);
+    backupTimerRef.current = setTimeout(flushBackup, 800);
+  };
+
+  // ページ離脱・アンマウント時は未保存分を確実に書き込む
+  useEffect(() => {
+    const onUnload = () => flushBackup();
+    window.addEventListener('beforeunload', onUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onUnload);
+      flushBackup();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Build a snapshot of the current working state.
+  // 編集可能な部分のみディープコピーし、巨大な画像データURL（不変）は参照のまま保持して複製コストを避ける
+  const buildSnapshot = (): StageSnapshot => ({
+    ...JSON.parse(JSON.stringify({
+      projectName: projectNameRef.current,
+      placedItems: placedItemsRef.current,
+      curveObjects: curveObjectsRef.current,
+      // Merge current working state into scenes list before saving
+      scenes: scenesRef.current.map(sc =>
+        sc.id === currentSceneIdRef.current ? { ...sc, placedItems: placedItemsRef.current, curveObjects: curveObjectsRef.current, snapSettings: snapSettingsRef.current } : sc
+      ),
+      currentSceneId: currentSceneIdRef.current,
+      snapSettings: snapSettingsRef.current,
+      backgroundCrop: backgroundCrop || initialBackup?.backgroundCrop,
+      iconLabels: iconLabelsRef.current,
+      templateReplacements: templateReplacementsRef.current,
+      previewSettings: previewSettingsRef.current || undefined,
+    })),
     pageImageUrl: pageImageUrl || initialBackup?.pageImageUrl,
     backgroundUrl: backgroundUrl || initialBackup?.backgroundUrl,
     iconsRegionUrl: iconsRegionUrl || initialBackup?.iconsRegionUrl,
     extractedIcons: extractedIcons || initialBackup?.extractedIcons,
-    iconLabels: iconLabelsRef.current,
-    templateReplacements: templateReplacementsRef.current,
-    previewSettings: previewSettingsRef.current || undefined,
-  }));
+  });
 
   const handleBack = () => {
-    saveBackup(buildSnapshot());
+    saveBackup(buildSnapshot(), true);
     onBack();
   };
 
   const handleExportJson = () => {
     try {
       const snap = buildSnapshot();
-      saveBackup(snap);
+      saveBackup(snap, true);
 
       const d = new Date();
       const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
@@ -977,7 +1017,9 @@ const StageBuilder: React.FC<Props> = ({
   // Restore a snapshot to the React state
   const restoreSnapshot = (snap: StageSnapshot) => {
     isRestoringRef.current = true;
-    const safeSnap = JSON.parse(JSON.stringify(snap));
+    // 画像データURLは不変なので複製せず、編集対象部分のみディープコピーする
+    const { pageImageUrl: _p, backgroundUrl: _b, iconsRegionUrl: _i, extractedIcons: _e, ...editable } = snap;
+    const safeSnap = { ...JSON.parse(JSON.stringify(editable)), pageImageUrl: _p, backgroundUrl: _b, iconsRegionUrl: _i, extractedIcons: _e };
     setScenes(safeSnap.scenes);
     setCurrentSceneId(safeSnap.currentSceneId);
     setPlacedItems(safeSnap.placedItems);

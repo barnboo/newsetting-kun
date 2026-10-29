@@ -196,17 +196,22 @@ function App() {
   }, [currentPhase]);
 
   const handleResumeProject = async (meta: BackupProjectMeta) => {
-    let sess: SavedSession | null | undefined = meta.session;
-    if (!sess) {
-      sess = await loadSessionFromIndexedDB(meta.id);
-    }
-
     // Check localStorage snapshot for this fileId
     let localBackup: any = null;
     try {
       const raw = localStorage.getItem(`settingkun_backup_${meta.id}`);
       if (raw) localBackup = JSON.parse(raw);
     } catch { }
+
+    let sess: SavedSession | null | undefined = meta.session;
+    if (!sess) {
+      // localStorage に図面画像が揃っている場合は IndexedDB の応答を長く待たない
+      const waitMs = localBackup?.backgroundUrl ? 500 : 3000;
+      sess = await Promise.race<SavedSession | null>([
+        loadSessionFromIndexedDB(meta.id).catch(() => null),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), waitMs)),
+      ]);
+    }
 
     let backgroundUrl = sess?.extractedData?.backgroundUrl || localBackup?.backgroundUrl || '';
     let iconsRegionUrl = sess?.extractedData?.iconsRegionUrl || localBackup?.iconsRegionUrl || '';
