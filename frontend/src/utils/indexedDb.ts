@@ -247,8 +247,29 @@ export async function getAllSessionsFromIndexedDB(): Promise<SavedSession[]> {
       allReq.onsuccess = (e) => {
         const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
         if (cursor) {
-          if (cursor.key !== ACTIVE_ID_KEY && cursor.value?.fileData) {
-            sessions.push(cursor.value);
+          const keyStr = String(cursor.key);
+          if (cursor.key !== ACTIVE_ID_KEY && cursor.value) {
+            const val = cursor.value;
+            // fileData があるか、もしくは key が session_<file_id> の形式であれば救済
+            if (val.fileData?.file_id) {
+              sessions.push(val);
+            } else if (keyStr.startsWith('session_')) {
+              const fallbackFid = keyStr.replace('session_', '');
+              const fallbackFileData = val.fileData || {
+                file_id: fallbackFid,
+                image_url: val.extractedData?.backgroundUrl || '',
+                width: 1200,
+                height: 800,
+              };
+              if (!fallbackFileData.file_id) {
+                fallbackFileData.file_id = fallbackFid;
+              }
+              const patchedVal: SavedSession = {
+                ...val,
+                fileData: fallbackFileData,
+              };
+              sessions.push(patchedVal);
+            }
           }
           cursor.continue();
         } else {

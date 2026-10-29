@@ -137,8 +137,8 @@ function App() {
       const metas: BackupProjectMeta[] = [];
 
       sessions.forEach(sess => {
-        if (!sess.fileData?.file_id) return;
-        const fid = sess.fileData.file_id;
+        const fid = sess.fileData?.file_id;
+        if (!fid) return;
         let sceneCount = 1;
         let projectName = `セッティング図 (${fid.slice(0, 8)})`;
         try {
@@ -161,7 +161,7 @@ function App() {
         });
       });
 
-      // Also check any localStorage-only backups or orphaned preview caches
+      // Also check any localStorage-only backups or orphaned settingkun_backup_ / stajet_preview_settings_
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i) || '';
         if (k.startsWith('settingkun_backup_') && !k.endsWith('_ts')) {
@@ -181,6 +181,16 @@ function App() {
                 });
               }
             } catch { }
+          }
+        } else if (k.startsWith('stajet_preview_settings_')) {
+          const fid = k.replace('stajet_preview_settings_', '');
+          if (fid && !metas.some(m => m.id === fid)) {
+            metas.push({
+              id: fid,
+              name: `プレビュー保存データ (${fid.slice(0, 8)})`,
+              savedAt: Date.now(),
+              sceneCount: 1,
+            });
           }
         }
       }
@@ -1015,11 +1025,33 @@ function App() {
                           refreshBackups();
                           if (removed > 0) {
                             alert(`不要なプレビューキャッシュ (${removed}件) を整理しました。`);
+                          } else {
+                            alert('不要な孤立キャッシュはありませんでした。');
                           }
                         }}
                         className="underline hover:text-[#007AFF] cursor-pointer"
                       >
                         不要キャッシュを整理
+                      </button>
+                      <span>•</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // localStorage のキー一覧とサイズ内訳をダイアログ表示
+                          const items: { key: string; sizeKb: number }[] = [];
+                          for (let i = 0; i < localStorage.length; i++) {
+                            const k = localStorage.key(i) || '';
+                            const v = localStorage.getItem(k) || '';
+                            const bytes = (k.length + v.length) * 2;
+                            items.push({ key: k, sizeKb: Math.round(bytes / 1024) });
+                          }
+                          items.sort((a, b) => b.sizeKb - a.sizeKb);
+                          const report = items.slice(0, 10).map(it => `・${it.key}: ${it.sizeKb} KB`).join('\n');
+                          alert(`【ストレージ内訳 (上位10件)】\n${report || 'データなし'}\n\n※このデータからバックアップを復旧するか、不要なキーをクリアできます。`);
+                        }}
+                        className="underline hover:text-[#007AFF] cursor-pointer"
+                      >
+                        内訳を確認
                       </button>
                     </div>
                     <span>※上限(5MB)に達すると自動保存が停止します</span>
