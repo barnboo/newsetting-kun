@@ -35,6 +35,8 @@ const ACTIVE_ID_KEY = '__active_project_id__';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    // open がブロック・ハングした場合でもアプリ全体が止まらないようにタイムアウトを設ける
+    const timer = setTimeout(() => reject(new Error('IndexedDB open timeout')), 3000);
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
@@ -44,8 +46,9 @@ function openDatabase(): Promise<IDBDatabase> {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => { clearTimeout(timer); resolve(request.result); };
+    request.onerror = () => { clearTimeout(timer); reject(request.error); };
+    request.onblocked = () => console.warn('IndexedDB open blocked by another tab');
   });
 }
 

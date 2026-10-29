@@ -134,30 +134,49 @@ function App() {
 
       const metas: BackupProjectMeta[] = [];
 
-      // 2. Fetch all IndexedDB sessions safely
+      // 2. localStorage のバックアップを先に同期的に一覧化して即表示する
+      //    （IndexedDB の open がブロック・ハングしても一覧が空にならないようにする）
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        if (k.startsWith('settingkun_backup_') && !k.endsWith('_ts')) {
+          const fid = k.replace('settingkun_backup_', '');
+          if (!fid || metas.some(m => m.id === fid)) continue;
+          let sceneCount = 1;
+          let projectName = `セッティング図 (${fid.slice(0, 8)})`;
+          let savedAt = 0;
+          try {
+            const parsed = JSON.parse(localStorage.getItem(k) || '{}');
+            if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
+            if (parsed.projectName || parsed.name) projectName = parsed.projectName || parsed.name;
+            if (parsed.savedAt) savedAt = parsed.savedAt;
+          } catch { }
+          const ts = parseInt(localStorage.getItem(k + '_ts') || '0', 10);
+          if (ts) savedAt = ts;
+          metas.push({ id: fid, name: projectName, savedAt: savedAt || Date.now(), sceneCount });
+        }
+      }
+      metas.sort((a, b) => b.savedAt - a.savedAt);
+      setBackupProjects([...metas]);
+
+      // 3. IndexedDB セッションをタイムアウト付きで取得してマージ
       try {
-        const sessions = await getAllSessionsFromIndexedDB();
+        const sessions = await Promise.race<SavedSession[]>([
+          getAllSessionsFromIndexedDB(),
+          new Promise<SavedSession[]>(resolve => setTimeout(() => resolve([]), 3000)),
+        ]);
         sessions.forEach(sess => {
           const fid = sess.fileData?.file_id;
           if (!fid) return;
-          let sceneCount = 1;
-          let projectName = `セッティング図 (${fid.slice(0, 8)})`;
-          try {
-            const raw = localStorage.getItem(`settingkun_backup_${fid}`);
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
-              if (parsed.projectName || parsed.name) {
-                projectName = parsed.projectName || parsed.name;
-              }
-            }
-          } catch { }
-
+          const existing = metas.find(m => m.id === fid);
+          if (existing) {
+            existing.session = sess;
+            return;
+          }
           metas.push({
             id: fid,
-            name: projectName,
+            name: `セッティング図 (${fid.slice(0, 8)})`,
             savedAt: sess.updatedAt || Date.now(),
-            sceneCount,
+            sceneCount: 1,
             session: sess,
           });
         });
@@ -165,55 +184,8 @@ function App() {
         console.warn('IndexedDB fetch error in refreshBackups:', idbErr);
       }
 
-      // 3. Scan all localStorage backups (settingkun_backup_*, etc.)
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i) || '';
-        if (k.startsWith('settingkun_backup_') && !k.endsWith('_ts')) {
-          const fid = k.replace('settingkun_backup_', '');
-          if (!metas.some(m => m.id === fid)) {
-            try {
-              const raw = localStorage.getItem(k);
-              let sceneCount = 1;
-              let projectName = `セッティング図 (${fid.slice(0, 8)})`;
-              let savedAt = Date.now();
-              if (raw) {
-                try {
-                  const parsed = JSON.parse(raw);
-                  if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
-                  if (parsed.projectName || parsed.name) {
-                    projectName = parsed.projectName || parsed.name;
-                  }
-                  if (parsed.savedAt) savedAt = parsed.savedAt;
-                } catch { }
-              }
-              const ts = parseInt(localStorage.getItem(k + '_ts') || '0', 10);
-              if (ts) savedAt = ts;
-
-              metas.push({
-                id: fid,
-                name: projectName,
-                savedAt: savedAt,
-                sceneCount: sceneCount,
-              });
-            } catch (itemErr) {
-              console.warn('Error reading localStorage item', k, itemErr);
-            }
-          }
-        } else if (k.startsWith('stajet_preview_settings_')) {
-          const fid = k.replace('stajet_preview_settings_', '');
-          if (fid && !metas.some(m => m.id === fid)) {
-            metas.push({
-              id: fid,
-              name: `プレビュー保存データ (${fid.slice(0, 8)})`,
-              savedAt: Date.now(),
-              sceneCount: 1,
-            });
-          }
-        }
-      }
-
       metas.sort((a, b) => b.savedAt - a.savedAt);
-      setBackupProjects(metas);
+      setBackupProjects([...metas]);
     } catch (e) {
       console.warn('Error refreshing backups:', e);
     }
