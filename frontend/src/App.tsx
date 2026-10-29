@@ -108,9 +108,7 @@ function App() {
   const [selectedRegions, setSelectedRegions] = useState<any[]>([]);
   const [currentPhase, setCurrentPhase] = useState<1 | 2 | 3 | 4>(1);
   const [showIconAdjustModal, setShowIconAdjustModal] = useState(false);
-  const [showTemplateModalAfterAdjust, setShowTemplateModalAfterAdjust] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [modalFlowOrigin, setModalFlowOrigin] = useState<'initial' | 'palette'>('initial');
   const [iconLabels, setIconLabels] = useState<Record<string, string>>({});
   const [templateReplacements, setTemplateReplacements] = useState<Record<string, string>>({});
   const [backupProjects, setBackupProjects] = useState<BackupProjectMeta[]>([]);
@@ -569,30 +567,34 @@ function App() {
       
       const data = response.data as ExtractResponse;
       
-      setExtractedData({
+      const hasExistingIcons = Boolean(extractedData?.extractedIcons && extractedData.extractedIcons.length > 0);
+      setExtractedData(prev => ({
         backgroundUrl: data.background_url,
-        iconsRegionUrl: data.icons_region_url,
-        extractedIcons: data.extracted_icons
-      });
+        iconsRegionUrl: hasExistingIcons ? (prev?.iconsRegionUrl || data.icons_region_url) : data.icons_region_url,
+        extractedIcons: hasExistingIcons ? (prev?.extractedIcons || data.extracted_icons) : data.extracted_icons,
+      }));
 
-      // Populate auto-detected iconLabels from backend (do NOT merge stale prev labels from previous files)
-      const detectedLabels: Record<string, string> = {};
-      if (data.icon_labels) {
-        Object.assign(detectedLabels, data.icon_labels);
-      }
-      data.extracted_icons.forEach((ic, idx) => {
-        if (!detectedLabels[ic.id]) {
-          detectedLabels[ic.id] = ic.label || `パーツ ${idx + 1}`;
+      // 新規アップロード時のみ自動検出ラベルを設定（図面枠調整時は既存ラベル・置換設定を維持）
+      let effectiveLabels = iconLabels;
+      if (!hasExistingIcons) {
+        const detectedLabels: Record<string, string> = {};
+        if (data.icon_labels) {
+          Object.assign(detectedLabels, data.icon_labels);
         }
-        ic.label = detectedLabels[ic.id];
-      });
-      setIconLabels(detectedLabels);
-      setTemplateReplacements({});
+        data.extracted_icons.forEach((ic, idx) => {
+          if (!detectedLabels[ic.id]) {
+            detectedLabels[ic.id] = ic.label || `パーツ ${idx + 1}`;
+          }
+          ic.label = detectedLabels[ic.id];
+        });
+        setIconLabels(detectedLabels);
+        setTemplateReplacements({});
+        effectiveLabels = detectedLabels;
+      }
 
-      // 1. 初めに枠調整モーダルを表示し、その後にテンプレ置換モーダルを表示する
-      setModalFlowOrigin('initial');
-      setShowIconAdjustModal(true);
-      setShowTemplateModalAfterAdjust(true);
+      // 各モーダル（テンプレ置換・パーツ枠調整・図面枠調整）は勝手に連鎖表示させず、直接ステージ配置へ進む
+      setShowIconAdjustModal(false);
+      setShowTemplateModal(false);
       setCurrentPhase(3);
 
       // Asynchronously cache session in IndexedDB with standalone DataURLs
@@ -622,7 +624,7 @@ function App() {
               iconsRegionUrl: iconsRegionDataUrl,
               extractedIcons: iconsWithDataUrls,
             },
-            iconLabels: detectedLabels,
+            iconLabels: effectiveLabels,
             selectedRegions: regions,
             currentPhase: 3,
             updatedAt: Date.now(),
@@ -739,20 +741,10 @@ function App() {
 
   const handleIconAdjustBack = () => {
     setShowIconAdjustModal(false);
-    if (modalFlowOrigin === 'initial') {
-      // 抽出直後の場合は、一つ前の「領域選択（Phase 2）」画面に戻る
-      setShowTemplateModalAfterAdjust(false);
-      setCurrentPhase(2);
-    }
   };
 
   const handleTemplateModalBack = () => {
     setShowTemplateModal(false);
-    if (modalFlowOrigin === 'initial') {
-      // 抽出直後の場合は、一つ前の「画像手動切り抜き（IconAdjustModal）」画面に戻る
-      setShowIconAdjustModal(true);
-      setShowTemplateModalAfterAdjust(true);
-    }
   };
 
 
@@ -764,7 +756,6 @@ function App() {
       setIconLabels({});
       setTemplateReplacements({});
       setShowIconAdjustModal(false);
-      setShowTemplateModalAfterAdjust(false);
       setShowTemplateModal(false);
       setCurrentPhase(1);
     }
@@ -777,7 +768,6 @@ function App() {
     setIconLabels({});
     setTemplateReplacements({});
     setShowIconAdjustModal(false);
-    setShowTemplateModalAfterAdjust(false);
     setShowTemplateModal(false);
     setCurrentPhase(1);
   };
@@ -1136,12 +1126,9 @@ function App() {
                 onIconsUpdated={handleIconsUpdated}
                 templateReplacements={templateReplacements}
                 onOpenTemplateModal={() => {
-                  setModalFlowOrigin('palette');
                   setShowTemplateModal(true);
                 }}
                 onOpenIconAdjustModal={() => {
-                  setModalFlowOrigin('palette');
-                  setShowTemplateModalAfterAdjust(false);
                   setShowIconAdjustModal(true);
                 }}
                 onReAdjustBackground={() => {
@@ -1150,7 +1137,7 @@ function App() {
                 onBack={handleBackToHome}
                 onPhaseChange={(p) => setCurrentPhase(p)}
               />
-              {/* Icon adjustment modal (shown first after extraction or on request from palette) */}
+              {/* Icon adjustment modal (opened independently from toolbar) */}
               {showIconAdjustModal && extractedData && fileData && (
                 <IconAdjustModal
                   iconsRegionUrl={extractedData.iconsRegionUrl}
@@ -1160,22 +1147,14 @@ function App() {
                   onBack={handleIconAdjustBack}
                   onClose={() => {
                     setShowIconAdjustModal(false);
-                    if (showTemplateModalAfterAdjust) {
-                      setShowTemplateModalAfterAdjust(false);
-                      setShowTemplateModal(true);
-                    }
                   }}
                   onSave={async (newIcons, newLabels) => {
                     await handleIconsUpdated(newIcons, newLabels);
                     setShowIconAdjustModal(false);
-                    if (showTemplateModalAfterAdjust) {
-                      setShowTemplateModalAfterAdjust(false);
-                      setShowTemplateModal(true);
-                    }
                   }}
                 />
               )}
-              {/* Template replacement modal (shown after icon adjust or on request) */}
+              {/* Template replacement modal (opened independently from toolbar) */}
               {showTemplateModal && extractedData && (
                 <TemplateMatchModal
                   extractedIcons={extractedData.extractedIcons}
