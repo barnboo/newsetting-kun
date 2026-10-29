@@ -55,6 +55,108 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 def startup_cleanup():
     cleanup_old_files()
 
+def detect_stage_region(page: fitz.Page, zoom: float = 2.0) -> dict:
+    """Automatically detect the stage diagram bounding box on a competition setting sheet.
+    
+    Uses PyMuPDF table analysis, drawing path inspection, and OpenCV contour analysis.
+    Returns pixel coordinates scaled by zoom (ready for cropping the visual pixmap).
+    """
+    page_w = page.rect.width
+    page_h = page.rect.height
+    page_area = page_w * page_h
+
+    # 1. Try PyMuPDF find_tables()
+    best_table = None
+    best_table_area = 0
+    try:
+        tables = page.find_tables()
+        for t in tables.tables:
+            bx0, by0, bx1, by1 = t.bbox
+            w = bx1 - bx0
+            h = by1 - by0
+            area = w * h
+            if 0.15 * page_area <= area <= 0.85 * page_area and w >= 0.30 * page_w and h >= 0.25 * page_h:
+                if by0 > 0.05 * page_h or h > 0.40 * page_h:
+                    if area > best_table_area:
+                        best_table_area = area
+                        best_table = (bx0, by0, w, h)
+    except Exception as e:
+        print(f"Table detection error: {e}")
+
+    # 2. Try drawing path analysis (union of stage risers / boundary lines / centerline)
+    union_rect = None
+    try:
+        drawings = page.get_drawings()
+        stage_drawing_rects = []
+        for d in drawings:
+            r = d["rect"]
+            w, h = r.width, r.height
+            if (w >= 0.25 * page_w and h >= 0.15 * page_h) or (w >= 0.35 * page_w and h >= 2):
+                if r.y0 > 0.10 * page_h:  # below header
+                    stage_drawing_rects.append(r)
+        if stage_drawing_rects:
+            ux0 = min(r.x0 for r in stage_drawing_rects)
+            uy0 = min(r.y0 for r in stage_drawing_rects)
+            ux1 = max(r.x1 for r in stage_drawing_rects)
+            uy1 = max(r.y1 for r in stage_drawing_rects)
+            uw = ux1 - ux0
+            uh = uy1 - uy0
+            if uw >= 0.35 * page_w and uh >= 0.20 * page_h:
+                pad = 12.0
+                union_rect = (
+                    max(0.0, ux0 - pad),
+                    max(0.0, uy0 - pad),
+                    min(page_w - max(0.0, ux0 - pad), uw + pad * 2),
+                    min(page_h - max(0.0, uy0 - pad), uh + pad * 2)
+                )
+    except Exception as e:
+        print(f"Drawing analysis error: {e}")
+
+    # 3. OpenCV contour detection on rendered page
+    best_cv_box = None
+    try:
+        pix = page.get_pixmap(dpi=150)
+        img_data = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+        img_gray = cv2.cvtColor(img_data, cv2.COLOR_RGBA2GRAY if pix.n == 4 else cv2.COLOR_RGB2GRAY)
+        h_top = int(pix.height * 0.12)
+        h_bot = int(pix.height * 0.94)
+        mask = np.zeros_like(img_gray)
+        mask[h_top:h_bot, :] = 255
+        _, thresh = cv2.threshold(img_gray, 225, 255, cv2.THRESH_BINARY_INV)
+        thresh = cv2.bitwise_and(thresh, mask)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+        closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best_cv_area = 0
+        scale_x = page_w / pix.width
+        scale_y = page_h / pix.height
+        for c in contours:
+            cx, cy, cw, ch = cv2.boundingRect(c)
+            area = cw * ch
+            if area > best_cv_area and cw >= pix.width * 0.30 and ch >= pix.height * 0.20:
+                best_cv_area = area
+                best_cv_box = (cx * scale_x, cy * scale_y, cw * scale_x, ch * scale_y)
+    except Exception as e:
+        print(f"OpenCV detection error: {e}")
+
+    # Priority: best_table > union_rect > best_cv_box > fallback
+    if best_table:
+        chosen = best_table
+    elif union_rect:
+        chosen = union_rect
+    elif best_cv_box:
+        chosen = best_cv_box
+    else:
+        chosen = (page_w * 0.08, page_h * 0.18, page_w * 0.84, page_h * 0.68)
+
+    x, y, w, h = chosen
+    return {
+        "x": round(x * zoom, 1),
+        "y": round(y * zoom, 1),
+        "width": round(w * zoom, 1),
+        "height": round(h * zoom, 1)
+    }
+
 @app.post("/api/upload-pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
     cleanup_old_files()
@@ -93,13 +195,15 @@ async def upload_pdf(file: UploadFile = File(...)):
         image_path = os.path.join(STATIC_DIR, image_filename)
         pix.save(image_path)
         
+        auto_stage_region = detect_stage_region(page, zoom=zoom)
         doc.close()
         
         return {
             "file_id": file_id,
             "image_url": f"/static/{image_filename}",
             "width": pix.width,
-            "height": pix.height
+            "height": pix.height,
+            "auto_stage_region": auto_stage_region
         }
         
     except HTTPException:
@@ -556,6 +660,22 @@ async def extract_regions(req: ExtractRequest):
                 pix.save(bg_path)
                 background_url = f"/static/{bg_filename}"
                 break
+
+        if bg_rect_points is None:
+            auto_reg = detect_stage_region(page, zoom=1.0)
+            bg_rect_points = fitz.Rect(
+                auto_reg["x"],
+                auto_reg["y"],
+                auto_reg["x"] + auto_reg["width"],
+                auto_reg["y"] + auto_reg["height"]
+            )
+            bg_zoom = 2.0
+            mat = fitz.Matrix(bg_zoom, bg_zoom)
+            pix = page.get_pixmap(matrix=mat, clip=bg_rect_points)
+            bg_filename = f"{req.file_id}_bg.png"
+            bg_path = os.path.join(STATIC_DIR, bg_filename)
+            pix.save(bg_path)
+            background_url = f"/static/{bg_filename}"
 
         # Use explicit 'icons' region if provided, otherwise automatically scan outside the stage diagram
         icons_region_item = next((r for r in req.regions if r.type == "icons"), None)

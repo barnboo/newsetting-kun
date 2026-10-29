@@ -20,7 +20,8 @@ import {
   ArrowUp, 
   ArrowDown,
   ClipboardList,
-  Edit3
+  Edit3,
+  Crop
 } from 'lucide-react';
 import type { ExtractedIcon } from '../App';
 import IconAdjustModal from './IconAdjustModal';
@@ -76,6 +77,7 @@ interface Props {
   onIconsUpdated: (icons: ExtractedIcon[], newLabels?: Record<string, string>) => void;
   onOpenTemplateModal?: () => void;
   onOpenIconAdjustModal?: () => void;
+  onReAdjustBackground?: () => void;
   onBack: () => void;
   onPhaseChange?: (phase: 3 | 4) => void;
 }
@@ -113,6 +115,7 @@ const StageBuilder: React.FC<Props> = ({
   onIconsUpdated,
   onOpenTemplateModal,
   onOpenIconAdjustModal,
+  onReAdjustBackground,
   onBack,
   onPhaseChange,
 }) => {
@@ -2891,9 +2894,20 @@ const StageBuilder: React.FC<Props> = ({
                     }
                   }}
                   className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-slate-700 dark:text-slate-200 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
+                  title="パーツアイコンの切り抜き枠を手動調整します"
                 >
-                  <Settings className="w-3.5 h-3.5" /> 枠調整
+                  <Settings className="w-3.5 h-3.5" /> パーツ枠調整
                 </button>
+                {onReAdjustBackground && (
+                  <button
+                    type="button"
+                    onClick={onReAdjustBackground}
+                    className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-blue-600 dark:text-sky-300 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
+                    title="ステージ図面の切り出し枠を再設定します"
+                  >
+                    <Crop className="w-3.5 h-3.5" /> 図面枠調整
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -3352,6 +3366,23 @@ const StageBuilder: React.FC<Props> = ({
                     />
                   </label>
                 </div>
+
+                {/* Stage Background Crop Re-adjust */}
+                {onReAdjustBackground && (
+                  <div className={`pt-3 border-t ${isDarkMode ? 'border-white/10' : 'border-slate-200/50'}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDrawerSubmenu(null);
+                        onReAdjustBackground();
+                      }}
+                      className="liquid-btn w-full text-xs font-semibold py-2 px-3 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer text-blue-600 dark:text-sky-400"
+                    >
+                      <Crop className="w-4 h-4" />
+                      <span>ステージ図面枠を手動で再調整</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -504,7 +504,13 @@ function App() {
   };
 
 
-  const handleUploadSuccess = async (data: { file_id: string; image_url: string; width: number; height: number }) => {
+  const handleUploadSuccess = async (data: {
+    file_id: string;
+    image_url: string;
+    width: number;
+    height: number;
+    auto_stage_region?: { x: number; y: number; width: number; height: number };
+  }) => {
     let permanentImageUrl = data.image_url;
     try {
       permanentImageUrl = await urlToDataUrl(data.image_url);
@@ -518,21 +524,46 @@ function App() {
     setIconLabels({});
     setTemplateReplacements({});
     setShowTemplateModal(false);
-    setFileData({
+    const activeFileData = {
       ...data,
       image_url: permanentImageUrl,
-    });
-    setCurrentPhase(2);
+    };
+    setFileData(activeFileData);
+
+    // アルゴリズムによりステージ領域が自動検出された場合は、領域選択ステップ（Phase 2）をスキップして即座に抽出を開始
+    if (data.auto_stage_region && data.auto_stage_region.width > 20 && data.auto_stage_region.height > 20) {
+      const autoCrop = data.auto_stage_region;
+      const autoRegions = [
+        {
+          type: 'background',
+          crop: autoCrop,
+          percentCrop: {
+            x: (autoCrop.x / data.width) * 100,
+            y: (autoCrop.y / data.height) * 100,
+            width: (autoCrop.width / data.width) * 100,
+            height: (autoCrop.height / data.height) * 100,
+          },
+        },
+      ];
+      setSelectedRegions(autoRegions);
+      void handleRegionsComplete(autoRegions, activeFileData);
+    } else {
+      setCurrentPhase(2);
+    }
   };
 
-  const handleRegionsComplete = async (regions: any[]) => {
-    if (!fileData) return;
+  const handleRegionsComplete = async (
+    regions: any[],
+    targetFileData?: { file_id: string; image_url: string; width: number; height: number }
+  ) => {
+    const activeFile = targetFileData || fileData;
+    if (!activeFile) return;
     setSelectedRegions(regions);
     
     setIsExtracting(true);
     try {
       const response = await axios.post('/api/extract/', {
-        file_id: fileData.file_id,
+        file_id: activeFile.file_id,
         regions: regions
       });
       
@@ -580,10 +611,10 @@ function App() {
             iconsRegionUrl: iconsRegionDataUrl,
             extractedIcons: iconsWithDataUrls,
           });
-          const pageImageDataUrl = await urlToDataUrl(fileData.image_url);
+          const pageImageDataUrl = await urlToDataUrl(activeFile.image_url);
           const newSession: SavedSession = {
             fileData: {
-              ...fileData,
+              ...activeFile,
               image_url: pageImageDataUrl,
             },
             extractedData: {
@@ -1084,6 +1115,7 @@ function App() {
                 imageUrl={fileData.image_url}
                 initialRegions={selectedRegions}
                 onComplete={handleRegionsComplete}
+                onCancel={extractedData ? () => setCurrentPhase(3) : undefined}
               />
             </div>
           ) : (
@@ -1111,6 +1143,9 @@ function App() {
                   setModalFlowOrigin('palette');
                   setShowTemplateModalAfterAdjust(false);
                   setShowIconAdjustModal(true);
+                }}
+                onReAdjustBackground={() => {
+                  setCurrentPhase(2);
                 }}
                 onBack={handleBackToHome}
                 onPhaseChange={(p) => setCurrentPhase(p)}
