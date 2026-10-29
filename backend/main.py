@@ -1938,8 +1938,16 @@ async def preview_bg(req: PreviewRequest):
 
         # Step 4: 団体名・指揮者氏名・番号などのテキスト入力欄を自動検出し、係記入欄（「係が記入」「記入しないで」等）を除外して配置
         STAFF_ONLY_KEYWORDS = (
-            "係が", "係で", "係員", "係記入", "事務局", "本部記入", "主催者記入",
-            "記入しない", "書かない", "入力しない", "記入不要", "空欄のまま", "受付で記入", "未記入",
+            "係が記入", "係で記入", "係員記入", "係記入", "係専用", "係のみ", "係の記入",
+            "係が", "係で", "係員", "係の方", "係欄", "係用", "係",
+            "※係", "（係", "(係", "【係", "［係", "[係",
+            "事務局記入", "事務局", "本部記入", "本部", "主催者記入", "主催者",
+            "受付記入", "受付で記入", "受付用",
+            "審査員記入", "審査員", "審査欄", "講評欄", "審査", "講評", "採点", "点数",
+            "計時", "タイム", "演奏時間",
+            "記入しない", "書かない", "入力しない", "記入不要", "記入はしない",
+            "空欄のまま", "未記入のまま", "未記入", "空欄",
+            "記入禁止", "記入不可", "記入ご遠慮", "ここには記入",
         )
         FORM_FIELD_PATTERNS = [
             {
@@ -1958,10 +1966,15 @@ async def preview_bg(req: PreviewRequest):
             },
             {
                 "key": "furigana",
-                "labels": ["ふりがな", "フリガナ"],
+                "labels": [
+                    "ふりがな", "フリガナ", "ふり・がな", "フリ・ガナ",
+                    "（ふりがな）", "(ふりがな)", "（フリガナ）", "(フリガナ)",
+                    "（ふり・がな）", "(ふり・がな)", "（フリ・ガナ）", "(フリ・ガナ)",
+                    "ルビ", "（ルビ）", "(ルビ)", "かな", "カナ",
+                ],
                 "placeholder": "ふりがなを入力",
-                "font_size": 14,
-                "min_blank_pt": 30.0,
+                "font_size": 13,
+                "min_blank_pt": 20.0,
             },
             {
                 "key": "program_no",
@@ -1987,6 +2000,19 @@ async def preview_bg(req: PreviewRequest):
             },
         ]
 
+        # ページ内の全「係記入・記入禁止」キーワードの領域を事前に収集（セル上下の注釈も捕捉可能にする）
+        staff_only_regions = []
+        for ln in tokenized_lines:
+            for tok in ln["tokens"]:
+                clean_tok = tok["text"].replace(" ", "").replace("　", "")
+                if any(kw in clean_tok for kw in STAFF_ONLY_KEYWORDS):
+                    staff_only_regions.append((tok["rect"], clean_tok))
+            full_ln = "".join(c["ch"] for c in ln["chars"]).replace(" ", "").replace("　", "")
+            if any(kw in full_ln for kw in STAFF_ONLY_KEYWORDS):
+                ln_rect = fitz.Rect(ln["chars"][0]["rect"].x0, ln["chars"][0]["rect"].y0,
+                                    ln["chars"][-1]["rect"].x1, ln["chars"][-1]["rect"].y1)
+                staff_only_regions.append((ln_rect, full_ln))
+
         # 垂直罫線リスト（セル境界の判定用）
         form_v_lines = []
         for d in drawings:
@@ -1996,12 +2022,28 @@ async def preview_bg(req: PreviewRequest):
         form_v_lines.sort(key=lambda v: v[0])
 
         def is_staff_only_region(anchor_r: fitz.Rect, blank_x0: float, blank_x1: float, line_text: str) -> bool:
-            # 1) 自身の空欄範囲〜直後（最大+35pt）またはラベル直前に係記入キーワードがあるかチェック
+            # 1) ラベル行そのものに係記入キーワードが含まれているかチェック
+            clean_line = line_text.replace(" ", "").replace("　", "")
+            if any(kw in clean_line for kw in ("※係", "（係", "(係", "係記入", "係専用", "係のみ", "係が記入", "記入しないで")):
+                return True
+
             y_mid = (anchor_r.y0 + anchor_r.y1) / 2.0
+            field_x0 = anchor_r.x0 - 25.0
+            field_x1 = max(blank_x1 + 30.0, anchor_r.x1 + 40.0)
+
+            # 2) 事前収集した係記入領域（直上・直下・同セル内の注釈: 上下50pt以内かつ水平重なり）をチェック
+            for s_rect, _ in staff_only_regions:
+                # 水平方向に重なりまたは至近
+                if not (s_rect.x1 < field_x0 or s_rect.x0 > field_x1):
+                    # 垂直方向に近いか（同じ行、または直上・直下の注釈）
+                    if abs((s_rect.y0 + s_rect.y1) / 2.0 - y_mid) <= 50.0:
+                        return True
+
+            # 3) 自身の空欄範囲〜直後（最大+35pt）またはラベル直前に係記入キーワードがあるかチェック
             check_x0 = max(0.0, anchor_r.x0 - 25.0)
             check_x1 = min(blank_x1 + 35.0, blank_x0 + 180.0)
             for ln in tokenized_lines:
-                if abs(ln["y_mid"] - y_mid) <= 22.0:
+                if abs(ln["y_mid"] - y_mid) <= 28.0:
                     sub_txt = "".join(
                         c["ch"] for c in ln["chars"]
                         if check_x0 <= c["rect"].x0 <= check_x1
@@ -2066,8 +2108,10 @@ async def preview_bg(req: PreviewRequest):
                                         emitted_field_coords.append((cx_pt, cy_pt))
                         continue
 
+                    clean_t = re.sub(r"[（）()【】\[\]:：・\s]", "", t_text)
                     for lbl in fp["labels"]:
-                        if t_text == lbl or (len(lbl) >= 3 and t_text.startswith(lbl) and len(t_text) <= len(lbl) + 2):
+                        clean_lbl = re.sub(r"[（）()【】\[\]:：・\s]", "", lbl)
+                        if t_text == lbl or clean_t == clean_lbl or (len(clean_lbl) >= 3 and clean_t.startswith(clean_lbl) and len(clean_t) <= len(clean_lbl) + 2):
                             matched_lbl = lbl
                             break
                     if not matched_lbl:
@@ -2137,12 +2181,17 @@ async def preview_bg(req: PreviewRequest):
                     if any(abs(ex - target_x_pt) < 25.0 and abs(ey - target_y_pt) < 12.0 for ex, ey in emitted_field_coords):
                         continue
 
-                    # 出演者名などのラベルの場合はプレースホルダー名をラベルに合わせる
+                    # 出演者名やふりがななどのプレースホルダー名を適切に決定
                     placeholder_txt = fp["placeholder"]
                     if f_key == "conductor" and "出演者" in matched_lbl:
                         placeholder_txt = "出演者名を入力"
                     elif f_key == "conductor" and "代表者" in matched_lbl:
                         placeholder_txt = "代表者名を入力"
+                    elif f_key == "furigana":
+                        if "フリガナ" in t_text or "フリ・ガナ" in t_text or "カナ" in t_text:
+                            placeholder_txt = "フリガナを入力"
+                        else:
+                            placeholder_txt = "ふりがなを入力"
 
                     field_seq += 1
                     auto_nodes.append({
@@ -2155,6 +2204,26 @@ async def preview_bg(req: PreviewRequest):
                         "radius": 15,
                     })
                     emitted_field_coords.append((target_x_pt, target_y_pt))
+
+                    # 団体名や指揮者の枠内に「ふりがな」「フリガナ」の併記がある場合、上部にふりがな用テキストボックスも生成
+                    has_inline_furi = ("ふりがな" in t_text or "フリガナ" in t_text or "ふりがな" in full_line_text or "フリガナ" in full_line_text)
+                    if has_inline_furi and f_key in ("org_name", "conductor"):
+                        furi_is_katakana = ("フリガナ" in t_text or "フリガナ" in full_line_text)
+                        furi_placeholder = "フリガナを入力" if furi_is_katakana else "ふりがなを入力"
+                        furi_y_pt = target_y_pt - 18.0
+                        furi_x_pt = target_x_pt
+                        if not any(abs(ex - furi_x_pt) < 20.0 and abs(ey - furi_y_pt) < 10.0 for ex, ey in emitted_field_coords):
+                            field_seq += 1
+                            auto_nodes.append({
+                                "id": f"field_furigana_{field_seq}",
+                                "type": "text",
+                                "text": furi_placeholder,
+                                "x": round(furi_x_pt * 2.0),
+                                "y": round(furi_y_pt * 2.0),
+                                "fontSize": 13,
+                                "radius": 15,
+                            })
+                            emitted_field_coords.append((furi_x_pt, furi_y_pt))
 
         # Render clean page image without baked-in text/circles
         mat = fitz.Matrix(2.0, 2.0)

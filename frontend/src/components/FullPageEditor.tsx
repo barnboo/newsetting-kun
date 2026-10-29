@@ -1072,8 +1072,15 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   // Toggle Bezier curves in output
   const [showCurveLines, setShowCurveLines] = useState<boolean>(initialPreviewSettings?.showCurveLines ?? true);
 
-  // Highlight user-added objects mode (distinguish from background elements)
-  const [highlightUserObjects, setHighlightUserObjects] = useState<boolean>(false);
+  // Highlight user-added objects mode (distinguish from background elements; default ON so textboxes are clearly visible)
+  const [highlightUserObjects, setHighlightUserObjects] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('stajet_preview_highlight_user_objects');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
 
   // First-time export feedback prompt modal
   const [showFeedbackModal, setShowFeedbackModal] = useState<boolean>(false);
@@ -2245,6 +2252,9 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             onClick={() => {
               setHighlightUserObjects(prev => {
                 const next = !prev;
+                try {
+                  localStorage.setItem('stajet_preview_highlight_user_objects', String(next));
+                } catch {}
                 showToast(next ? '追加要素の強調モードをONにしました（元データと区別しやすく表示中）' : '追加要素の強調モードをOFFにしました');
                 return next;
               });
@@ -2928,6 +2938,9 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           onToggleHighlightUserObjects={() => {
             setHighlightUserObjects(prev => {
               const next = !prev;
+              try {
+                localStorage.setItem('stajet_preview_highlight_user_objects', String(next));
+              } catch {}
               showToast(next ? '追加要素の強調モードをONにしました' : '追加要素の強調モードをOFFにしました');
               return next;
             });
