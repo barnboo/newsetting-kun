@@ -132,36 +132,40 @@ function App() {
       const percent = Math.min(100, Math.round((totalBytes / maxBytes) * 100));
       setStorageUsage({ mb, percent });
 
-      // 2. Fetch all IndexedDB sessions
-      const sessions = await getAllSessionsFromIndexedDB();
       const metas: BackupProjectMeta[] = [];
 
-      sessions.forEach(sess => {
-        const fid = sess.fileData?.file_id;
-        if (!fid) return;
-        let sceneCount = 1;
-        let projectName = `セッティング図 (${fid.slice(0, 8)})`;
-        try {
-          const raw = localStorage.getItem(`settingkun_backup_${fid}`);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
-            if (parsed.projectName || parsed.name) {
-              projectName = parsed.projectName || parsed.name;
+      // 2. Fetch all IndexedDB sessions safely
+      try {
+        const sessions = await getAllSessionsFromIndexedDB();
+        sessions.forEach(sess => {
+          const fid = sess.fileData?.file_id;
+          if (!fid) return;
+          let sceneCount = 1;
+          let projectName = `セッティング図 (${fid.slice(0, 8)})`;
+          try {
+            const raw = localStorage.getItem(`settingkun_backup_${fid}`);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
+              if (parsed.projectName || parsed.name) {
+                projectName = parsed.projectName || parsed.name;
+              }
             }
-          }
-        } catch { }
+          } catch { }
 
-        metas.push({
-          id: fid,
-          name: projectName,
-          savedAt: sess.updatedAt || Date.now(),
-          sceneCount,
-          session: sess,
+          metas.push({
+            id: fid,
+            name: projectName,
+            savedAt: sess.updatedAt || Date.now(),
+            sceneCount,
+            session: sess,
+          });
         });
-      });
+      } catch (idbErr) {
+        console.warn('IndexedDB fetch error in refreshBackups:', idbErr);
+      }
 
-      // Also check any localStorage-only backups or orphaned settingkun_backup_ / stajet_preview_settings_
+      // 3. Scan all localStorage backups (settingkun_backup_*, etc.)
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i) || '';
         if (k.startsWith('settingkun_backup_') && !k.endsWith('_ts')) {
@@ -169,18 +173,31 @@ function App() {
           if (!metas.some(m => m.id === fid)) {
             try {
               const raw = localStorage.getItem(k);
+              let sceneCount = 1;
+              let projectName = `セッティング図 (${fid.slice(0, 8)})`;
+              let savedAt = Date.now();
               if (raw) {
-                const parsed = JSON.parse(raw);
-                const ts = parseInt(localStorage.getItem(k + '_ts') || '0', 10) || parsed.savedAt || Date.now();
-                const projectName = parsed.projectName || parsed.name || `セッティング図 (${fid.slice(0, 8)})`;
-                metas.push({
-                  id: fid,
-                  name: projectName,
-                  savedAt: ts,
-                  sceneCount: Array.isArray(parsed.scenes) ? parsed.scenes.length : 1,
-                });
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (Array.isArray(parsed.scenes)) sceneCount = parsed.scenes.length;
+                  if (parsed.projectName || parsed.name) {
+                    projectName = parsed.projectName || parsed.name;
+                  }
+                  if (parsed.savedAt) savedAt = parsed.savedAt;
+                } catch { }
               }
-            } catch { }
+              const ts = parseInt(localStorage.getItem(k + '_ts') || '0', 10);
+              if (ts) savedAt = ts;
+
+              metas.push({
+                id: fid,
+                name: projectName,
+                savedAt: savedAt,
+                sceneCount: sceneCount,
+              });
+            } catch (itemErr) {
+              console.warn('Error reading localStorage item', k, itemErr);
+            }
           }
         } else if (k.startsWith('stajet_preview_settings_')) {
           const fid = k.replace('stajet_preview_settings_', '');
