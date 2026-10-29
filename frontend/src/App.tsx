@@ -115,6 +115,7 @@ function App() {
   const [storageUsage, setStorageUsage] = useState({ mb: '0.00', percent: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const preloadedBackupRef = useRef<any>(null);
+  const hasUserAdjustedIconsRef = useRef<boolean>(false);
 
   // Refresh and load all project backups and storage usage
   const refreshBackups = async () => {
@@ -517,6 +518,7 @@ function App() {
     }
     // 新しいPDFを読み込んだ際は前回のセッション状態（ラベルやテンプレ置換設定）を完全にリセット
     preloadedBackupRef.current = null;
+    hasUserAdjustedIconsRef.current = false;
     setExtractedData(null);
     setSelectedRegions([]);
     setIconLabels({});
@@ -567,16 +569,26 @@ function App() {
       
       const data = response.data as ExtractResponse;
       
-      const hasExistingIcons = Boolean(extractedData?.extractedIcons && extractedData.extractedIcons.length > 0);
-      setExtractedData(prev => ({
-        backgroundUrl: data.background_url,
-        iconsRegionUrl: hasExistingIcons ? (prev?.iconsRegionUrl || data.icons_region_url) : data.icons_region_url,
-        extractedIcons: hasExistingIcons ? (prev?.extractedIcons || data.extracted_icons) : data.extracted_icons,
-      }));
+      const keepCustomIcons = Boolean(
+        hasUserAdjustedIconsRef.current &&
+        extractedData?.extractedIcons &&
+        extractedData.extractedIcons.length > 0
+      );
+      const nextIconsRegionUrl = keepCustomIcons
+        ? (extractedData?.iconsRegionUrl || data.icons_region_url)
+        : data.icons_region_url;
+      const nextExtractedIcons = keepCustomIcons
+        ? (extractedData?.extractedIcons || data.extracted_icons)
+        : data.extracted_icons;
 
-      // 新規アップロード時のみ自動検出ラベルを設定（図面枠調整時は既存ラベル・置換設定を維持）
+      setExtractedData({
+        backgroundUrl: data.background_url,
+        iconsRegionUrl: nextIconsRegionUrl,
+        extractedIcons: nextExtractedIcons,
+      });
+
       let effectiveLabels = iconLabels;
-      if (!hasExistingIcons) {
+      if (!keepCustomIcons) {
         const detectedLabels: Record<string, string> = {};
         if (data.icon_labels) {
           Object.assign(detectedLabels, data.icon_labels);
@@ -601,11 +613,13 @@ function App() {
       (async () => {
         try {
           const bgDataUrl = await urlToDataUrl(data.background_url);
-          const iconsRegionDataUrl = await urlToDataUrl(data.icons_region_url);
+          const iconsRegionDataUrl = nextIconsRegionUrl.startsWith('data:')
+            ? nextIconsRegionUrl
+            : await urlToDataUrl(nextIconsRegionUrl);
           const iconsWithDataUrls = await Promise.all(
-            data.extracted_icons.map(async (ic) => ({
+            nextExtractedIcons.map(async (ic) => ({
               ...ic,
-              url: await urlToDataUrl(ic.url),
+              url: ic.url.startsWith('data:') ? ic.url : await urlToDataUrl(ic.url),
             }))
           );
           setExtractedData({
@@ -613,7 +627,9 @@ function App() {
             iconsRegionUrl: iconsRegionDataUrl,
             extractedIcons: iconsWithDataUrls,
           });
-          const pageImageDataUrl = await urlToDataUrl(activeFile.image_url);
+          const pageImageDataUrl = activeFile.image_url.startsWith('data:')
+            ? activeFile.image_url
+            : await urlToDataUrl(activeFile.image_url);
           const newSession: SavedSession = {
             fileData: {
               ...activeFile,
@@ -643,6 +659,7 @@ function App() {
   };
 
   const handleIconsUpdated = async (icons: ExtractedIcon[], newLabels?: Record<string, string>) => {
+    hasUserAdjustedIconsRef.current = true;
     // 新しいアイコン配列に対応するクリーンなラベルマップを構築（古いキーの残留を防止）
     const cleanLabels: Record<string, string> = {};
     icons.forEach((ic, idx) => {

@@ -1,4 +1,5 @@
 import time
+import re
 import unicodedata
 import os
 import uuid
@@ -10,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from PIL import Image
-from pydantic import BaseModel
 from typing import List, Optional
 
 app = FastAPI()
@@ -57,97 +57,217 @@ def startup_cleanup():
 
 def detect_stage_region(page: fitz.Page, zoom: float = 2.0) -> dict:
     """Automatically detect the stage diagram bounding box on a competition setting sheet.
-    
-    Uses PyMuPDF table analysis, drawing path inspection, and OpenCV contour analysis.
+
+    Uses structural stage geometry (symmetric acoustic reflector wings, back reflector wall,
+    stage risers, stage front line/apron, and stage direction markers) while strictly
+    excluding peripheral headers, footers, equipment tables, and inline symbol legends.
     Returns pixel coordinates scaled by zoom (ready for cropping the visual pixmap).
     """
     page_w = page.rect.width
     page_h = page.rect.height
     page_area = page_w * page_h
 
-    # 1. Try PyMuPDF find_tables()
-    best_table = None
-    best_table_area = 0
+    def _union_bounds(boxes):
+        return (
+            min(b[0] for b in boxes),
+            min(b[1] for b in boxes),
+            max(b[2] for b in boxes),
+            max(b[3] for b in boxes),
+        )
+
+    draws = []
     try:
-        tables = page.find_tables()
-        for t in tables.tables:
-            bx0, by0, bx1, by1 = t.bbox
-            w = bx1 - bx0
-            h = by1 - by0
-            area = w * h
-            if 0.15 * page_area <= area <= 0.85 * page_area and w >= 0.30 * page_w and h >= 0.25 * page_h:
-                if by0 > 0.05 * page_h or h > 0.40 * page_h:
+        for d in page.get_drawings():
+            r = d["rect"]
+            if r.width > 0 or r.height > 0:
+                draws.append(fitz.Rect(r.x0, r.y0, max(r.x0 + 0.5, r.x1), max(r.y0 + 0.5, r.y1)))
+    except Exception as e:
+        print(f"Drawing extraction error: {e}")
+
+    words = []
+    try:
+        words = page.get_text("words")
+    except Exception as e:
+        print(f"Word extraction error: {e}")
+
+    # 1. Detect symmetric left & right acoustic reflector wings (側面反響板)
+    wing_cands = [
+        r for r in draws
+        if 25.0 <= r.width <= 0.16 * page_w
+        and 0.12 * page_h <= r.height <= 0.65 * page_h
+        and r.y0 >= 0.12 * page_h
+        and r.y1 <= 0.90 * page_h
+    ]
+    sym_wings = []
+    for i, l_cand in enumerate(wing_cands):
+        for r_cand in wing_cands[i + 1:]:
+            left, right = (l_cand, r_cand) if l_cand.x0 < r_cand.x0 else (r_cand, l_cand)
+            if (
+                right.x0 - left.x1 >= 0.25 * page_w
+                and abs(left.y0 - right.y0) <= 15.0
+                and abs(left.y1 - right.y1) <= 15.0
+                and abs(left.width - right.width) <= 15.0
+                and abs(left.height - right.height) <= 15.0
+            ):
+                sym_wings.append(left)
+                sym_wings.append(right)
+
+    chosen = None
+    if sym_wings:
+        sx0, sy0, sx1, sy1 = _union_bounds([(w.x0, w.y0, w.x1, w.y1) for w in sym_wings])
+        cx = (sx0 + sx1) / 2.0
+
+        # Include back reflector bar (正面反響板) immediately above/connecting the wings
+        for r in draws:
+            if (
+                0.25 * page_w <= r.width <= 0.75 * page_w
+                and r.height <= 25.0
+                and sy0 - 45.0 <= r.y0 <= sy0 + 20.0
+                and abs(((r.x0 + r.x1) / 2.0) - cx) <= 45.0
+            ):
+                sx0, sy0, sx1, sy1 = _union_bounds([(sx0, sy0, sx1, sy1), (r.x0, r.y0, r.x1, r.y1)])
+
+        # Peripheral header boundary (horizontally overlapping the stage shell)
+        header_y1 = 0.08 * page_h
+        for w in words:
+            wr = fitz.Rect(w[:4])
+            txt = w[4]
+            if wr.y1 < sy0 - 2.0 and wr.x0 < sx1 and wr.x1 > sx0:
+                if any(k in txt for k in (
+                    "プログラム", "部門", "団体名", "出演順", "出演番号", "配置図",
+                    "セッティング表", "重奏", "立奏", "座奏", "をつける", "記入して"
+                )):
+                    header_y1 = max(header_y1, wr.y1 + 5.0)
+        for r in draws:
+            if r.y1 < sy0 - 2.0 and r.x0 < sx1 and r.x1 > sx0:
+                if r.width >= 0.30 * page_w and r.height <= 50.0 and r.y1 <= 150.0:
+                    header_y1 = max(header_y1, r.y1 + 5.0)
+
+        # Peripheral footer boundary (horizontally overlapping the stage shell)
+        footer_y0 = 0.96 * page_h
+        for r in draws:
+            if r.y0 > sy1 + 5.0 and r.x0 < sx1 - 20.0 and r.x1 > sx0 + 20.0:
+                if r.width >= 0.25 * page_w and (r.height >= 18.0 or r.y0 > sy1 + 35.0):
+                    has_footer_word = any(
+                        w[1] >= r.y0 - 4.0 and w[3] <= r.y0 + 35.0 and w[0] < sx1 and w[2] > sx0
+                        and any(k in w[4] for k in ("伝達事項", "備考", "マイク", "前団体", "打楽器は"))
+                        for w in words
+                    )
+                    if has_footer_word or r.y0 > 0.86 * page_h:
+                        footer_y0 = min(footer_y0, r.y0 - 4.0)
+        for w in words:
+            wr = fitz.Rect(w[:4])
+            txt = w[4]
+            if wr.y0 > sy1 + 15.0 and wr.x0 < sx1 and wr.x1 > sx0:
+                if any(k in txt for k in ("伝達事項", "備考", "打楽器はできるかぎり", "マイク・マイクスタンド", "前団体と共通")):
+                    footer_y0 = min(footer_y0, wr.y0 - 5.0)
+
+        # Peripheral left/right boxes (equipment tables, tally boxes, rental boxes, legends)
+        periph_side_rects = []
+        for r in draws:
+            if r.width >= 38.0 and r.height >= 16.0:
+                if (r.x1 <= sx0 + 40.0 and r.x0 < sx0 - 25.0) or (r.x0 >= sx1 - 35.0 and r.x1 > sx1 + 35.0):
+                    if not any(abs(r.x0 - sw.x0) < 5.0 and abs(r.y0 - sw.y0) < 5.0 for sw in sym_wings):
+                        periph_side_rects.append(r)
+
+        stage_boxes = [(sx0, sy0, sx1, sy1)]
+
+        # First pass: include wide centered stage lines / risers / stage front line
+        for r in draws:
+            if r.y0 < header_y1 or r.y1 > footer_y0:
+                continue
+            if any(r.intersects(ps) and r.x0 >= ps.x0 - 5.0 and r.x1 <= ps.x1 + 5.0 for ps in periph_side_rects):
+                continue
+            rcx = (r.x0 + r.x1) / 2.0
+            if r.width >= 0.25 * page_w and r.height <= 0.30 * page_h and abs(rcx - cx) <= 65.0:
+                if r.x0 >= sx0 - 40.0 and r.x1 <= sx1 + 40.0:
+                    stage_boxes.append((r.x0, r.y0, r.x1, r.y1))
+
+        cur_x0, cur_y0, cur_x1, cur_y1 = _union_bounds(stage_boxes)
+
+        # Second pass: include connected stage drawings (apron, podium, stage house, stairs)
+        for r in draws:
+            if r.y0 < header_y1 or r.y1 > footer_y0:
+                continue
+            if r.x0 < 0 or r.x1 > page_w:
+                continue
+            if any(r.intersects(ps) and (r.x0 >= sx1 - 30.0 or r.x1 <= sx0 + 30.0) for ps in periph_side_rects):
+                continue
+            if r.x0 >= cur_x0 - 15.0 and r.x1 <= cur_x1 + 28.0:
+                if r.y0 >= header_y1 + 2.0 and r.y1 <= footer_y0 - 2.0:
+                    if r.width <= (cur_x1 - cur_x0) + 40.0 and r.height <= 0.45 * page_h:
+                        stage_boxes.append((r.x0, r.y0, r.x1, r.y1))
+
+        cur_x0, cur_y0, cur_x1, cur_y1 = _union_bounds(stage_boxes)
+
+        # Include stage direction labels (下手側, 上手側, 客席) immediately adjacent to stage
+        for w in words:
+            wr = fitz.Rect(w[:4])
+            txt = w[4]
+            if any(k in txt for k in ("下手", "上手", "客席")) and header_y1 <= wr.y0 and wr.y1 <= footer_y0:
+                if cur_x0 - 25.0 <= wr.x0 and wr.x1 <= cur_x1 + 25.0:
+                    stage_boxes.append((wr.x0, wr.y0, wr.x1, wr.y1))
+
+        cur_x0, cur_y0, cur_x1, cur_y1 = _union_bounds(stage_boxes)
+
+        # Include non-white raster stage graphics (e.g. architectural stage house wall) between header_y1 and cur_y0
+        try:
+            pix_72 = page.get_pixmap(dpi=72)
+            img_72 = np.frombuffer(pix_72.samples, dtype=np.uint8).reshape((pix_72.height, pix_72.width, pix_72.n))
+            gray_72 = cv2.cvtColor(img_72, cv2.COLOR_RGBA2GRAY if pix_72.n == 4 else cv2.COLOR_RGB2GRAY)
+            sx0_i, sx1_i = max(0, int(cur_x0)), min(pix_72.width, int(cur_x1))
+            hy_i, cy0_i = max(0, int(header_y1 + 6)), min(pix_72.height, int(cur_y0))
+            if cy0_i > hy_i and sx1_i > sx0_i:
+                roi = gray_72[hy_i:cy0_i, sx0_i:sx1_i]
+                dark_rows = np.where(np.sum(roi < 220, axis=1) > 15)[0]
+                if len(dark_rows) > 0:
+                    cur_y0 = min(cur_y0, float(hy_i + dark_rows[0]))
+        except Exception as e:
+            print(f"Raster stage top check error: {e}")
+
+        pad = 6.0
+        x0 = max(4.0, cur_x0 - pad)
+        y0 = max(header_y1, cur_y0 - pad)
+        x1 = min(page_w - 4.0, cur_x1 + pad)
+        y1 = min(footer_y0, cur_y1 + pad)
+        chosen = (x0, y0, x1 - x0, y1 - y0)
+
+    # 2. Fallback for sheets without symmetric angled wings
+    if chosen is None:
+        # Determine peripheral equipment table bound if present
+        right_limit = page_w * 0.96
+        for w in words:
+            if w[4] in ("品名", "記号") and w[0] > 0.55 * page_w:
+                right_limit = min(right_limit, w[0] - 16.0)
+
+        best_table = None
+        best_table_area = 0
+        try:
+            tables = page.find_tables()
+            for t in tables.tables:
+                bx0, by0, bx1, by1 = t.bbox
+                w = bx1 - bx0
+                h = by1 - by0
+                area = w * h
+                # Reject page-spanning outer frames or tables overlapping header/equipment columns
+                if (
+                    0.15 * page_area <= area <= 0.65 * page_area
+                    and 0.30 * page_w <= w <= 0.82 * page_w
+                    and 0.25 * page_h <= h <= 0.72 * page_h
+                    and by0 >= 0.14 * page_h
+                    and by1 <= 0.88 * page_h
+                    and bx1 <= right_limit + 10.0
+                ):
                     if area > best_table_area:
                         best_table_area = area
                         best_table = (bx0, by0, w, h)
-    except Exception as e:
-        print(f"Table detection error: {e}")
+        except Exception as e:
+            print(f"Table detection error: {e}")
 
-    # 2. Try drawing path analysis (union of stage risers / boundary lines / centerline)
-    union_rect = None
-    try:
-        drawings = page.get_drawings()
-        stage_drawing_rects = []
-        for d in drawings:
-            r = d["rect"]
-            w, h = r.width, r.height
-            if (w >= 0.25 * page_w and h >= 0.15 * page_h) or (w >= 0.35 * page_w and h >= 2):
-                if r.y0 > 0.10 * page_h:  # below header
-                    stage_drawing_rects.append(r)
-        if stage_drawing_rects:
-            ux0 = min(r.x0 for r in stage_drawing_rects)
-            uy0 = min(r.y0 for r in stage_drawing_rects)
-            ux1 = max(r.x1 for r in stage_drawing_rects)
-            uy1 = max(r.y1 for r in stage_drawing_rects)
-            uw = ux1 - ux0
-            uh = uy1 - uy0
-            if uw >= 0.35 * page_w and uh >= 0.20 * page_h:
-                pad = 12.0
-                union_rect = (
-                    max(0.0, ux0 - pad),
-                    max(0.0, uy0 - pad),
-                    min(page_w - max(0.0, ux0 - pad), uw + pad * 2),
-                    min(page_h - max(0.0, uy0 - pad), uh + pad * 2)
-                )
-    except Exception as e:
-        print(f"Drawing analysis error: {e}")
-
-    # 3. OpenCV contour detection on rendered page
-    best_cv_box = None
-    try:
-        pix = page.get_pixmap(dpi=150)
-        img_data = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
-        img_gray = cv2.cvtColor(img_data, cv2.COLOR_RGBA2GRAY if pix.n == 4 else cv2.COLOR_RGB2GRAY)
-        h_top = int(pix.height * 0.12)
-        h_bot = int(pix.height * 0.94)
-        mask = np.zeros_like(img_gray)
-        mask[h_top:h_bot, :] = 255
-        _, thresh = cv2.threshold(img_gray, 225, 255, cv2.THRESH_BINARY_INV)
-        thresh = cv2.bitwise_and(thresh, mask)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
-        closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        best_cv_area = 0
-        scale_x = page_w / pix.width
-        scale_y = page_h / pix.height
-        for c in contours:
-            cx, cy, cw, ch = cv2.boundingRect(c)
-            area = cw * ch
-            if area > best_cv_area and cw >= pix.width * 0.30 and ch >= pix.height * 0.20:
-                best_cv_area = area
-                best_cv_box = (cx * scale_x, cy * scale_y, cw * scale_x, ch * scale_y)
-    except Exception as e:
-        print(f"OpenCV detection error: {e}")
-
-    # Priority: best_table > union_rect > best_cv_box > fallback
-    if best_table:
-        chosen = best_table
-    elif union_rect:
-        chosen = union_rect
-    elif best_cv_box:
-        chosen = best_cv_box
-    else:
-        chosen = (page_w * 0.08, page_h * 0.18, page_w * 0.84, page_h * 0.68)
+        if best_table:
+            chosen = best_table
+        else:
+            chosen = (page_w * 0.08, page_h * 0.18, min(page_w * 0.84, right_limit - page_w * 0.08), page_h * 0.68)
 
     x, y, w, h = chosen
     return {
@@ -714,6 +834,30 @@ async def extract_regions(req: ExtractRequest):
                 page_words = page.get_text("words")
                 tokenized_lines = tokenize_pdf_region(page, rect_points)
 
+                # Detect '記号' and '品名' column headers BEFORE masking so an explicit equipment table
+                # is never accidentally suppressed even if the stage crop box slightly overlaps it
+                sym_col_bounds = None
+                label_col_bounds = None
+                equip_header_rects = []
+                for line in tokenized_lines:
+                    for tok in line["tokens"]:
+                        if tok["text"] in ("記号", "図"):
+                            sym_col_bounds = (tok["rect"].x0 - 18.0, tok["rect"].x1 + 18.0)
+                            equip_header_rects.append(tok["rect"])
+                        elif tok["text"] in ("品名", "備品", "備品名", "使用備品"):
+                            label_col_bounds = (tok["rect"].x0 - 25.0, tok["rect"].x1 + 25.0)
+                            equip_header_rects.append(tok["rect"])
+                    if sym_col_bounds:
+                        break
+
+                def is_in_equip_table(r: fitz.Rect) -> bool:
+                    if sym_col_bounds is None:
+                        return False
+                    x0_lim = (label_col_bounds[0] - 15.0) if label_col_bounds else (sym_col_bounds[0] - 95.0)
+                    x1_lim = sym_col_bounds[1] + 20.0
+                    cx = (r.x0 + r.x1) / 2.0
+                    return x0_lim <= cx <= x1_lim
+
                 icon_zoom = 4.0
                 mat = fitz.Matrix(icon_zoom, icon_zoom)
                 
@@ -743,17 +887,27 @@ async def extract_regions(req: ExtractRequest):
                 lines_grid = cv2.add(cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_k), cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_k))
                 no_grid = cv2.subtract(thresh, lines_grid)
 
-                # In auto-scan mode, mask out the user-selected stage diagram region so stage graphics are never picked up
+                # In auto-scan mode, mask out the stage diagram region so stage graphics are never picked up,
+                # while preserving any explicit '記号' column if bg_rect_points slightly overlaps it
                 if bg_rect_points is not None and is_auto_icons:
+                    saved_sym_col = None
+                    if sym_col_bounds is not None:
+                        sx0_p = max(0, int((sym_col_bounds[0] - rect_points.x0) * icon_zoom))
+                        sx1_p = min(pix_region.width, int((sym_col_bounds[1] - rect_points.x0) * icon_zoom))
+                        if sx1_p > sx0_p:
+                            saved_sym_col = (sx0_p, sx1_p, no_grid[:, sx0_p:sx1_p].copy())
                     bx0 = max(0, int((bg_rect_points.x0 - rect_points.x0) * icon_zoom))
                     bx1 = min(pix_region.width, int((bg_rect_points.x1 - rect_points.x0) * icon_zoom))
                     by0 = max(0, int((bg_rect_points.y0 - rect_points.y0) * icon_zoom))
                     by1 = min(pix_region.height, int((bg_rect_points.y1 - rect_points.y0) * icon_zoom))
                     if bx1 > bx0 and by1 > by0:
                         no_grid[by0:by1, bx0:bx1] = 0
+                    if saved_sym_col is not None:
+                        no_grid[:, saved_sym_col[0]:saved_sym_col[1]] = saved_sym_col[2]
 
                 candidate_boxes = []
                 inline_sym_rects = []
+                associated_label_rects = []
                 consumed_tokens = set()  # (line_idx, tok_idx)
 
                 def is_valid_symbol_token(tok):
@@ -764,11 +918,13 @@ async def extract_regions(req: ExtractRequest):
                     return False
 
                 # Mode A: Inline Key-Value / Delimiter / Parenthesized Legend (e.g. '椅子=○', '椅子→○', '○：椅子', '椅子(○)')
+                # Explicit [Label][Delim][Symbol] pairs (A1, A2, A3) are never stage-interior placed symbols,
+                # so they are exempt from is_inside_bg in case the stage box overlapped the legend
                 for l_idx, line in enumerate(tokenized_lines):
                     toks = line["tokens"]
                     n_toks = len(toks)
                     for t_idx in range(n_toks):
-                        if (l_idx, t_idx) in consumed_tokens or is_inside_bg(toks[t_idx]["rect"]):
+                        if (l_idx, t_idx) in consumed_tokens:
                             continue
 
                         # Pattern A1: [WORD(label)] [DELIM in PAIR_DELIMS] [SYMBOL]
@@ -790,6 +946,7 @@ async def extract_regions(req: ExtractRequest):
                                 sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
                                 candidate_boxes.append((sym_box, eq[0], "inline_sym"))
                                 inline_sym_rects.append(sym_box)
+                                associated_label_rects.append(toks[t_idx]["rect"] | dr | sym_box)
                                 consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
                                 continue
 
@@ -812,6 +969,7 @@ async def extract_regions(req: ExtractRequest):
                                 sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
                                 candidate_boxes.append((sym_box, eq[0], "inline_sym"))
                                 inline_sym_rects.append(sym_box)
+                                associated_label_rects.append(sym_box | dr | toks[t_idx + 2]["rect"])
                                 consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
                                 continue
 
@@ -832,11 +990,12 @@ async def extract_regions(req: ExtractRequest):
                                 sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
                                 candidate_boxes.append((sym_box, eq[0], "inline_sym"))
                                 inline_sym_rects.append(sym_box)
+                                associated_label_rects.append(toks[t_idx]["rect"] | toks[t_idx + 3]["rect"])
                                 consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2), (l_idx, t_idx + 3)})
                                 continue
 
-                # Pattern A4 fallback (only if no explicit legend pairs A1/A2/A3 were found): [SYMBOL] [WORD(label)] '(' ')'
-                if not inline_sym_rects:
+                # Pattern A4 fallback (only if no explicit legend pairs A1/A2/A3 were found and no '記号' table exists): [SYMBOL] [WORD(label)] '(' ')'
+                if not inline_sym_rects and sym_col_bounds is None:
                     for l_idx, line in enumerate(tokenized_lines):
                         toks = line["tokens"]
                         n_toks = len(toks)
@@ -863,6 +1022,7 @@ async def extract_regions(req: ExtractRequest):
                                     sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
                                     candidate_boxes.append((sym_box, eq[0], "inline_sym"))
                                     inline_sym_rects.append(sym_box)
+                                    associated_label_rects.append(sym_box | lr)
                                     consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1)})
 
                 # Create text-masked binary image (no_grid_no_text) so text words never contaminate icon crops
@@ -901,44 +1061,42 @@ async def extract_regions(req: ExtractRequest):
                     ):
                         no_grid_no_text[cc_labels == lbl_i] = 0
 
-                # Detect '記号' column header if present
-                sym_col_bounds = None
-                for line in tokenized_lines:
-                    for tok in line["tokens"]:
-                        if not is_inside_bg(tok["rect"]) and tok["text"] in ("記号", "図"):
-                            sym_col_bounds = (tok["rect"].x0 - 18.0, tok["rect"].x1 + 18.0)
-                            break
-                    if sym_col_bounds:
-                        break
-
-                # Mode B: Raster Images in rect_points
-                raw_images = page.get_image_info(xrefs=True)
-                for img in raw_images:
-                    b = fitz.Rect(img['bbox'])
-                    if b.intersects(rect_points) and not is_inside_bg(b):
-                        if 6 <= b.width <= 160 and 6 <= b.height <= 160:
-                            # Skip raster images that are actually text-boxes (contain selectable words of len >= 2 inside bbox)
-                            has_word_inside = any(
-                                tok["type"] == "WORD" and len(tok["text"]) >= 2 and b.intersects(tok["rect"])
-                                for line in tokenized_lines
-                                for tok in line["tokens"]
-                            )
-                            if has_word_inside:
-                                continue
-                            lbl = extract_label_for_icon(b, page_words, tokenized_lines)
-                            if lbl or not is_auto_icons:
-                                candidate_boxes.append((b, lbl, 'raster'))
-
-                # Mode C & Mode D: Table row-based & vector drawing search
+                # Mode B, Mode C & Mode D: Raster images, Table row-based & vector drawing search
                 # Skip when auto-detect already found an explicit inline symbol legend (e.g. '椅子=○', '譜面台=×') and there is no '記号' table column
                 if not (is_auto_icons and len(inline_sym_rects) >= 2 and sym_col_bounds is None):
+                    # Mode B: Raster Images in rect_points
+                    raw_images = page.get_image_info(xrefs=True)
+                    for img in raw_images:
+                        b = fitz.Rect(img['bbox'])
+                        if b.intersects(rect_points) and (not is_inside_bg(b) or is_in_equip_table(b)):
+                            if 6 <= b.width <= 160 and 6 <= b.height <= 160:
+                                # If '記号' column is present in auto mode, only accept raster icons aligned with '記号' column
+                                if is_auto_icons and sym_col_bounds is not None:
+                                    bcx = (b.x0 + b.x1) / 2.0
+                                    if not (sym_col_bounds[0] - 12.0 <= bcx <= sym_col_bounds[1] + 12.0):
+                                        continue
+                                # Skip raster images that are actually text-boxes (contain selectable words of len >= 2 inside bbox)
+                                has_word_inside = any(
+                                    tok["type"] == "WORD" and len(tok["text"]) >= 2 and b.intersects(tok["rect"])
+                                    for line in tokenized_lines
+                                    for tok in line["tokens"]
+                                )
+                                if has_word_inside:
+                                    continue
+                                lbl = extract_label_for_icon(b, page_words, tokenized_lines)
+                                if lbl or not is_auto_icons:
+                                    candidate_boxes.append((b, lbl, 'raster'))
+
+                    # Mode C: Table row-based search
                     for l_idx, line in enumerate(tokenized_lines):
                         toks = line["tokens"]
                         line_txt = "".join(t["text"] for t in toks)
                         if sym_col_bounds is None and any(kw in line_txt for kw in ("借用する", "借用しない", "使う", "使わない")):
                             continue
                         for t_idx, tok in enumerate(toks):
-                            if (l_idx, t_idx) in consumed_tokens or tok["type"] != "WORD" or is_inside_bg(tok["rect"]):
+                            if (l_idx, t_idx) in consumed_tokens or tok["type"] != "WORD":
+                                continue
+                            if is_inside_bg(tok["rect"]) and not is_in_equip_table(tok["rect"]):
                                 continue
                             eq = classify_equipment_label(tok["text"])
                             if not eq:
@@ -996,6 +1154,7 @@ async def extract_regions(req: ExtractRequest):
                                             rect_points.y0 + max_y / icon_zoom
                                         )
                                         candidate_boxes.append((box_pt, canonical_lbl, 'row_cell'))
+                                        associated_label_rects.append(r)
                                         break
 
                     # Mode D: Vector drawings fallback / supplement (filtering out cell border segments)
@@ -1005,7 +1164,9 @@ async def extract_regions(req: ExtractRequest):
                         r = fitz.Rect(d['rect'])
                         if not r.intersects(rect_points):
                             continue
-                        if bg_excl is not None and r.intersects(bg_excl):
+                        if bg_excl is not None and r.intersects(bg_excl) and not is_in_equip_table(r):
+                            continue
+                        if is_auto_icons and sym_col_bounds is not None and not is_in_equip_table(r):
                             continue
                         if r.width > 120 or r.height > 120:
                             continue
@@ -1064,21 +1225,40 @@ async def extract_regions(req: ExtractRequest):
                         u_rect = fitz.Rect(unique_candidates[0][0])
                         for b, _, _ in unique_candidates[1:]:
                             u_rect = u_rect | b
-                        # Include associated equipment label tokens and nearby table headers ('品名', '記号')
+                        for lr in associated_label_rects:
+                            u_rect = u_rect | lr
+                        for hr in equip_header_rects:
+                            u_rect = u_rect | hr
+                        # Include same-row equipment label tokens directly adjacent to candidate icons
                         for line in tokenized_lines:
                             for tok in line["tokens"]:
                                 tr = tok["rect"]
-                                if is_inside_bg(tr):
+                                if is_inside_bg(tr) and not is_in_equip_table(tr):
                                     continue
-                                if classify_equipment_label(tok["text"]) or tok["text"] in ("品名", "記号", "備品"):
+                                if classify_equipment_label(tok["text"]):
                                     near_cand = any(
-                                        abs(((tr.y0 + tr.y1) - (b.y0 + b.y1)) / 2.0) < 28.0
-                                        and min(abs(tr.x1 - b.x0), abs(tr.x0 - b.x1), abs(tr.x0 - b.x0)) < 140.0
+                                        abs(((tr.y0 + tr.y1) - (b.y0 + b.y1)) / 2.0) < 12.0
+                                        and min(abs(tr.x1 - b.x0), abs(tr.x0 - b.x1), abs(tr.x0 - b.x0)) < 90.0
                                         for b, _, _ in unique_candidates
                                     )
                                     if near_cand:
                                         u_rect = u_rect | tr
-                        pad_x, pad_y = 24.0, 18.0
+                        # If the legend/table is enclosed by a tight border box, expand to include the box frame
+                        try:
+                            for d in page.get_drawings():
+                                dr = fitz.Rect(d["rect"])
+                                if (
+                                    dr.x0 <= u_rect.x0 + 4.0
+                                    and dr.y0 <= u_rect.y0 + 4.0
+                                    and dr.x1 >= u_rect.x1 - 4.0
+                                    and dr.y1 >= u_rect.y1 - 4.0
+                                    and dr.width <= u_rect.width + 150.0
+                                    and dr.height <= u_rect.height + 32.0
+                                ):
+                                    u_rect = u_rect | dr
+                        except Exception:
+                            pass
+                        pad_x, pad_y = 14.0, 10.0
                         rect_points = fitz.Rect(
                             max(page.rect.x0, u_rect.x0 - pad_x),
                             max(page.rect.y0, u_rect.y0 - pad_y),
