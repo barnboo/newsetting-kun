@@ -1377,7 +1377,7 @@ async def extract_regions(req: ExtractRequest):
                             }
                         })
                     
-        piano_lid_options = extract_piano_lid_options(page, page_tokenized_lines)
+        piano_lid_options = extract_piano_lid_options(page)
         doc.close()
         
         icon_labels = {icon["id"]: icon["label"] for icon in extracted_icons if icon.get("label")}
