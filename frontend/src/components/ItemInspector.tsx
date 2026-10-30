@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   AlignJustify, 
   Lock, 
@@ -11,7 +11,9 @@ import {
   ArrowLeft,
   ArrowRight,
   RotateCw,
-  Move
+  Move,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import type { PlacedItem } from './StageCanvas';
 import type { CurveObject, CurveItem } from '../utils/bezierUtils';
@@ -67,6 +69,15 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
   onOpenPercussionLabelModal,
   templateReplacements,
 }) => {
+  const [openCurveItemSections, setOpenCurveItemSections] = useState<Record<string, boolean>>({});
+
+  const toggleCurveItemSection = (key: string) => {
+    setOpenCurveItemSections(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
   if (selectedCount > 1) {
     return (
       <div key="multi-selection-inspector" className="flex flex-col gap-4 p-4 text-sm liquid-glass border-l text-slate-800 dark:text-slate-100 w-64 flex-shrink-0 h-full overflow-y-auto transition-colors">
@@ -1222,67 +1233,90 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-1.5 pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                          {activeItemIndex === curveItems.length - 1 ? '右の間隔（曲線の終点側）' : '右隣との間隔'}
-                        </span>
-                        {activeItem.gap !== undefined && (
-                          <button
-                            onClick={() => handleUpdateItemGap(activeItem.id, undefined)}
-                            className="text-[10px] text-slate-500 hover:text-blue-700 dark:text-slate-400 dark:hover:text-blue-300 underline cursor-pointer"
-                            title="曲線全体の標準間隔に戻す"
-                          >
-                            標準 ({Math.round(selectedCurve.itemGap)}px) に戻す
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="0"
-                          max="500"
-                          value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val) && val >= 0) {
-                              handleUpdateItemGap(activeItem.id, val);
-                            }
-                          }}
-                          className="w-20 px-2 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono"
-                        />
-                        <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
-                        <div className="flex items-center gap-1 ml-auto">
-                          {[-5, -1, 1, 5].map((delta) => (
-                            <button
-                              key={delta}
-                              type="button"
-                              onClick={() => {
-                                const cur = activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap;
-                                handleUpdateItemGap(activeItem.id, Math.max(0, cur + delta));
-                              }}
-                              className="px-1.5 py-0.5 text-[11px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
-                            >
-                              {delta > 0 ? `+${delta}` : delta}
-                            </button>
-                          ))}
+                    {/* 右隣との間隔 */}
+                    <div className="pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
+                      <button
+                        type="button"
+                        onClick={() => toggleCurveItemSection('gap')}
+                        className="w-full flex items-center justify-between text-left py-1 px-1 rounded-lg hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-colors cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-blue-500 group-hover:text-blue-600 transition-colors">
+                            {openCurveItemSections['gap'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                            {activeItemIndex === curveItems.length - 1 ? '右の間隔（曲線の終点側）' : '右隣との間隔'}
+                          </span>
                         </div>
-                      </div>
+                        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-800/80 border border-blue-200/60 dark:border-blue-700/60 text-blue-800 dark:text-blue-200 font-semibold shadow-2xs">
+                          {Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}px
+                        </span>
+                      </button>
 
-                      <input
-                        type="range"
-                        min="0"
-                        max="200"
-                        value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
-                        onChange={(e) => handleUpdateItemGap(activeItem.id, parseFloat(e.target.value))}
-                        className="w-full accent-blue-600 mt-0.5 cursor-pointer"
-                      />
+                      {openCurveItemSections['gap'] && (
+                        <div className="mt-2 space-y-2 pl-1 pr-1 pb-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              個別間隔の微調整
+                            </span>
+                            {activeItem.gap !== undefined && (
+                              <button
+                                onClick={() => handleUpdateItemGap(activeItem.id, undefined)}
+                                className="text-[10px] text-slate-500 hover:text-blue-700 dark:text-slate-400 dark:hover:text-blue-300 underline cursor-pointer"
+                                title="曲線全体の標準間隔に戻す"
+                              >
+                                標準 ({Math.round(selectedCurve.itemGap)}px) に戻す
+                              </button>
+                            )}
+                          </div>
 
-                      {activeItemIndex === curveItems.length - 1 && (
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                          ※ 右端のオブジェクトの右側に空ける間隔（余白）としてキャンバス上に直接反映されます
-                        </p>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="0"
+                              max="500"
+                              value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                if (!isNaN(val) && val >= 0) {
+                                  handleUpdateItemGap(activeItem.id, val);
+                                }
+                              }}
+                              className="w-20 px-2 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono"
+                            />
+                            <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
+                            <div className="flex items-center gap-1 ml-auto">
+                              {[-5, -1, 1, 5].map((delta) => (
+                                <button
+                                  key={delta}
+                                  type="button"
+                                  onClick={() => {
+                                    const cur = activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap;
+                                    handleUpdateItemGap(activeItem.id, Math.max(0, cur + delta));
+                                  }}
+                                  className="px-1.5 py-0.5 text-[11px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
+                                >
+                                  {delta > 0 ? `+${delta}` : delta}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <input
+                            type="range"
+                            min="0"
+                            max="200"
+                            value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
+                            onChange={(e) => handleUpdateItemGap(activeItem.id, parseFloat(e.target.value))}
+                            className="w-full accent-blue-600 mt-0.5 cursor-pointer"
+                          />
+
+                          {activeItemIndex === curveItems.length - 1 && (
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                              ※ 右端のオブジェクトの右側に空ける間隔（余白）としてキャンバス上に直接反映されます
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -1318,13 +1352,22 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       };
 
                       return (
-                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
-                              <Square className="w-3.5 h-3.5 text-[#007AFF]" />
-                              椅子の種類設定
-                            </span>
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                        <div className="pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
+                          <button
+                            type="button"
+                            onClick={() => toggleCurveItemSection('chairType')}
+                            className="w-full flex items-center justify-between text-left py-1 px-1 rounded-lg hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-colors cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-blue-500 group-hover:text-blue-600 transition-colors">
+                                {openCurveItemSections['chairType'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </span>
+                              <Square className="w-3.5 h-3.5 text-[#007AFF] shrink-0" />
+                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                                椅子の種類設定
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal shrink-0">
                               {activeChairType === 'pianoChairSvg'
                                 ? 'ピアノ椅子 (画像)'
                                 : activeChairType === 'pianoChair'
@@ -1333,121 +1376,125 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                 ? 'ピアノ椅子 (ピ)'
                                 : '合奏用椅子 (○)'}
                             </span>
-                          </div>
-
-                          {/* 1. 椅子の分類選択 (合奏用椅子 vs ピアノ椅子) */}
-                          <div>
-                            <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">
-                              1. 椅子の種類
-                            </span>
-                            <div className="grid grid-cols-2 gap-1 p-0.5 bg-white/70 dark:bg-slate-800/70 border border-blue-200/60 dark:border-blue-800/60 rounded-xl">
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateActiveChairType('normal')}
-                                className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                                  activeChairType === 'normal'
-                                    ? 'liquid-btn-primary shadow-xs'
-                                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                                }`}
-                              >
-                                <span className="text-xs">○</span>
-                                <span>合奏用椅子</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const isPiano = activeChairType === 'pianoChair' || activeChairType === 'pianoChairSvg' || activeChairType === 'pianoChairPi';
-                                  const targetType = isPiano ? activeChairType : 'pianoChairSvg';
-                                  handleUpdateActiveChairType(targetType);
-                                }}
-                                className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                                  activeChairType === 'pianoChair' || activeChairType === 'pianoChairSvg' || activeChairType === 'pianoChairPi'
-                                    ? 'liquid-btn-primary shadow-xs'
-                                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                                }`}
-                              >
-                                <Square className="w-3.5 h-3.5" />
-                                <span>ピアノ椅子</span>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* 2. それに連続して表示スタイルの選択 */}
-                          <div>
-                            <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">
-                              2. 表示スタイル
-                            </span>
-                            {activeChairType === 'normal' ? (
-                              <div className="p-2 liquid-card rounded-xl flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="w-6 h-6 rounded-lg bg-[#007AFF]/15 text-[#007AFF] font-bold flex items-center justify-center text-xs shadow-2xs">
-                                    ○
-                                  </span>
-                                  <div className="flex flex-col">
-                                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">丸 (○)</span>
-                                    <span className="text-[10px] text-slate-500 dark:text-slate-400">通常の合奏用丸椅子として表示・集計</span>
-                                  </div>
-                                </div>
-                                <span className="text-[11px] font-bold text-[#007AFF] bg-[#007AFF]/10 px-2 py-0.5 rounded-full">選択中</span>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-3 gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateActiveChairType('pianoChairSvg')}
-                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                                    activeChairType === 'pianoChairSvg'
-                                      ? 'liquid-btn-primary shadow-xs'
-                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
-                                  }`}
-                                >
-                                  <Square className="w-3.5 h-3.5" />
-                                  <span className="text-[10px]">画像</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateActiveChairType('pianoChair')}
-                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                                    activeChairType === 'pianoChair'
-                                      ? 'liquid-btn-primary shadow-xs'
-                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
-                                  }`}
-                                >
-                                  <span className={`font-black text-xs leading-none ${activeChairType === 'pianoChair' ? 'text-white' : 'text-emerald-600'}`}>◎</span>
-                                  <span className="text-[10px]">二重丸 (◎)</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateActiveChairType('pianoChairPi')}
-                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                                    activeChairType === 'pianoChairPi'
-                                      ? 'liquid-btn-primary shadow-xs'
-                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
-                                  }`}
-                                >
-                                  <span className={`w-4 h-4 rounded-full border border-current flex items-center justify-center font-bold text-[10px] leading-none ${activeChairType === 'pianoChairPi' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`}>ピ</span>
-                                  <span className="text-[10px]">丸ピ (ピ)</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* 全てに適応ボタン (ベジェ上のみ) */}
-                          <button
-                            type="button"
-                            onClick={handleApplyToAllCurveChairs}
-                            className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
-                            title="このベジェ曲線上のすべての合奏用椅子・譜面台をこの設定に一括適用します"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>この曲線のすべての合奏用椅子・譜面台に適用</span>
                           </button>
 
-                          <p className="text-[9.5px] text-slate-500 dark:text-slate-400 leading-tight">
-                            {activeChairType === 'normal'
-                              ? '※ この椅子は「合奏用椅子」として自動カウントされます。'
-                              : '※ この椅子は「ピアノ椅子」として自動カウントされます。'}
-                          </p>
+                          {openCurveItemSections['chairType'] && (
+                            <div className="mt-2 space-y-2.5 pl-1 pr-1 pb-1">
+                              {/* 1. 椅子の分類選択 (合奏用椅子 vs ピアノ椅子) */}
+                              <div>
+                                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">
+                                  1. 椅子の種類
+                                </span>
+                                <div className="grid grid-cols-2 gap-1 p-0.5 bg-white/70 dark:bg-slate-800/70 border border-blue-200/60 dark:border-blue-800/60 rounded-xl">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateActiveChairType('normal')}
+                                    className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                      activeChairType === 'normal'
+                                        ? 'liquid-btn-primary shadow-xs'
+                                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                                    }`}
+                                  >
+                                    <span className="text-xs">○</span>
+                                    <span>合奏用椅子</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const isPiano = activeChairType === 'pianoChair' || activeChairType === 'pianoChairSvg' || activeChairType === 'pianoChairPi';
+                                      const targetType = isPiano ? activeChairType : 'pianoChairSvg';
+                                      handleUpdateActiveChairType(targetType);
+                                    }}
+                                    className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                      activeChairType === 'pianoChair' || activeChairType === 'pianoChairSvg' || activeChairType === 'pianoChairPi'
+                                        ? 'liquid-btn-primary shadow-xs'
+                                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                                    }`}
+                                  >
+                                    <Square className="w-3.5 h-3.5" />
+                                    <span>ピアノ椅子</span>
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* 2. それに連続して表示スタイルの選択 */}
+                              <div>
+                                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">
+                                  2. 表示スタイル
+                                </span>
+                                {activeChairType === 'normal' ? (
+                                  <div className="p-2 liquid-card rounded-xl flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-6 h-6 rounded-lg bg-[#007AFF]/15 text-[#007AFF] font-bold flex items-center justify-center text-xs shadow-2xs">
+                                        ○
+                                      </span>
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">丸 (○)</span>
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">通常の合奏用丸椅子として表示・集計</span>
+                                      </div>
+                                    </div>
+                                    <span className="text-[11px] font-bold text-[#007AFF] bg-[#007AFF]/10 px-2 py-0.5 rounded-full">選択中</span>
+                                  </div>
+                                ) : (
+                                  <div className="grid grid-cols-3 gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateActiveChairType('pianoChairSvg')}
+                                      className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                                        activeChairType === 'pianoChairSvg'
+                                          ? 'liquid-btn-primary shadow-xs'
+                                          : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                      }`}
+                                    >
+                                      <Square className="w-3.5 h-3.5" />
+                                      <span className="text-[10px]">画像</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateActiveChairType('pianoChair')}
+                                      className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                                        activeChairType === 'pianoChair'
+                                          ? 'liquid-btn-primary shadow-xs'
+                                          : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                      }`}
+                                    >
+                                      <span className={`font-black text-xs leading-none ${activeChairType === 'pianoChair' ? 'text-white' : 'text-emerald-600'}`}>◎</span>
+                                      <span className="text-[10px]">二重丸 (◎)</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateActiveChairType('pianoChairPi')}
+                                      className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                                        activeChairType === 'pianoChairPi'
+                                          ? 'liquid-btn-primary shadow-xs'
+                                          : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                      }`}
+                                    >
+                                      <span className={`w-4 h-4 rounded-full border border-current flex items-center justify-center font-bold text-[10px] leading-none ${activeChairType === 'pianoChairPi' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`}>ピ</span>
+                                      <span className="text-[10px]">丸ピ (ピ)</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 全てに適応ボタン (ベジェ上のみ) */}
+                              <button
+                                type="button"
+                                onClick={handleApplyToAllCurveChairs}
+                                className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                                title="このベジェ曲線上のすべての合奏用椅子・譜面台をこの設定に一括適用します"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>この曲線のすべての合奏用椅子・譜面台に適用</span>
+                              </button>
+
+                              <p className="text-[9.5px] text-slate-500 dark:text-slate-400 leading-tight">
+                                {activeChairType === 'normal'
+                                  ? '※ この椅子は「合奏用椅子」として自動カウントされます。'
+                                  : '※ この椅子は「ピアノ椅子」として自動カウントされます。'}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -1493,70 +1540,83 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       };
 
                       return (
-                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
-                              <Square className="w-3.5 h-3.5 text-[#007AFF]" />
-                              ピアノ椅子表示
-                            </span>
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                        <div className="pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
+                          <button
+                            type="button"
+                            onClick={() => toggleCurveItemSection('pianoChairStyle')}
+                            className="w-full flex items-center justify-between text-left py-1 px-1 rounded-lg hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-colors cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-blue-500 group-hover:text-blue-600 transition-colors">
+                                {openCurveItemSections['pianoChairStyle'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </span>
+                              <Square className="w-3.5 h-3.5 text-[#007AFF] shrink-0" />
+                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                                ピアノ椅子表示
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal shrink-0">
                               {activeIconStyle === 'doubleCircle'
                                 ? '二重丸 (◎)'
                                 : activeIconStyle === 'circlePi'
                                 ? '丸ピ (ピ)'
                                 : '通常'}
                             </span>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateActivePianoChairStyle('default')}
-                              className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                                activeIconStyle === 'default'
-                                  ? 'liquid-btn-primary shadow-xs'
-                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
-                              }`}
-                            >
-                              <Square className="w-3.5 h-3.5" />
-                              <span className="text-[10px]">通常椅子</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateActivePianoChairStyle('doubleCircle')}
-                              className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                                activeIconStyle === 'doubleCircle'
-                                  ? 'liquid-btn-primary shadow-xs'
-                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
-                              }`}
-                            >
-                              <span className={`text-sm font-black leading-none ${activeIconStyle === 'doubleCircle' ? 'text-white' : 'text-emerald-600'}`}>◎</span>
-                              <span className="text-[10px]">二重丸 (◎)</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateActivePianoChairStyle('circlePi')}
-                              className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                                activeIconStyle === 'circlePi'
-                                  ? 'liquid-btn-primary shadow-xs'
-                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
-                              }`}
-                            >
-                              <span className={`w-4 h-4 rounded-full border border-current flex items-center justify-center font-bold text-[10px] leading-none ${activeIconStyle === 'circlePi' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`}>ピ</span>
-                              <span className="text-[10px]">丸ピ (ピ)</span>
-                            </button>
-                          </div>
-
-                          {/* すべてのピアノ椅子に適用ボタン (ベジェ上のみ) */}
-                          <button
-                            type="button"
-                            onClick={handleApplyToAllCurvePianoChairs}
-                            className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
-                            title="このベジェ曲線上のすべてのピアノ椅子をこの表示スタイルに一括適用します"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>この曲線のすべてのピアノ椅子に適用</span>
                           </button>
+
+                          {openCurveItemSections['pianoChairStyle'] && (
+                            <div className="mt-2 space-y-2 pl-1 pr-1 pb-1">
+                              <div className="grid grid-cols-3 gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateActivePianoChairStyle('default')}
+                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                                    activeIconStyle === 'default'
+                                      ? 'liquid-btn-primary shadow-xs'
+                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <Square className="w-3.5 h-3.5" />
+                                  <span className="text-[10px]">通常椅子</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateActivePianoChairStyle('doubleCircle')}
+                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                                    activeIconStyle === 'doubleCircle'
+                                      ? 'liquid-btn-primary shadow-xs'
+                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <span className={`text-sm font-black leading-none ${activeIconStyle === 'doubleCircle' ? 'text-white' : 'text-emerald-600'}`}>◎</span>
+                                  <span className="text-[10px]">二重丸 (◎)</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateActivePianoChairStyle('circlePi')}
+                                  className={`py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                                    activeIconStyle === 'circlePi'
+                                      ? 'liquid-btn-primary shadow-xs'
+                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <span className={`w-4 h-4 rounded-full border border-current flex items-center justify-center font-bold text-[10px] leading-none ${activeIconStyle === 'circlePi' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`}>ピ</span>
+                                  <span className="text-[10px]">丸ピ (ピ)</span>
+                                </button>
+                              </div>
+
+                              {/* すべてのピアノ椅子に適用ボタン (ベジェ上のみ) */}
+                              <button
+                                type="button"
+                                onClick={handleApplyToAllCurvePianoChairs}
+                                className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                                title="このベジェ曲線上のすべてのピアノ椅子をこの表示スタイルに一括適用します"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>この曲線のすべてのピアノ椅子に適用</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -1599,54 +1659,67 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       };
 
                       return (
-                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
-                              <Music className="w-3.5 h-3.5 text-[#007AFF]" />
-                              譜面台の表示スタイル
-                            </span>
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
-                              {activeStandStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateActiveStandStyle('default')}
-                              className={`py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                                activeStandStyle === 'default'
-                                  ? 'liquid-btn-primary shadow-xs'
-                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
-                              }`}
-                            >
-                              <span className="font-black text-xs">⊥</span>
-                              <span className="text-[11px]">通常 (T字)</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateActiveStandStyle('xMark')}
-                              className={`py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                                activeStandStyle === 'xMark'
-                                  ? 'liquid-btn-primary shadow-xs'
-                                  : 'liquid-btn text-slate-700 dark:text-slate-300'
-                              }`}
-                            >
-                              <span className={`font-black text-xs ${activeStandStyle === 'xMark' ? 'text-white' : 'text-rose-600'}`}>✕</span>
-                              <span className="text-[11px]">Xマーク</span>
-                            </button>
-                          </div>
-
-                          {/* 全てに適応ボタン (ベジェ上のみ) */}
+                        <div className="pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
                           <button
                             type="button"
-                            onClick={handleApplyToAllCurveStands}
-                            className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
-                            title="このベジェ曲線上のすべての譜面台をこの表示スタイルに一括適用します"
+                            onClick={() => toggleCurveItemSection('standStyle')}
+                            className="w-full flex items-center justify-between text-left py-1 px-1 rounded-lg hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-colors cursor-pointer group"
                           >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>この曲線のすべての譜面台に適用</span>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-blue-500 group-hover:text-blue-600 transition-colors">
+                                {openCurveItemSections['standStyle'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </span>
+                              <Music className="w-3.5 h-3.5 text-[#007AFF] shrink-0" />
+                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                                譜面台の表示スタイル
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal shrink-0">
+                              {activeStandStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
+                            </span>
                           </button>
+
+                          {openCurveItemSections['standStyle'] && (
+                            <div className="mt-2 space-y-2 pl-1 pr-1 pb-1">
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateActiveStandStyle('default')}
+                                  className={`py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                    activeStandStyle === 'default'
+                                      ? 'liquid-btn-primary shadow-xs'
+                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <span className="font-black text-xs">⊥</span>
+                                  <span className="text-[11px]">通常 (T字)</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateActiveStandStyle('xMark')}
+                                  className={`py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                    activeStandStyle === 'xMark'
+                                      ? 'liquid-btn-primary shadow-xs'
+                                      : 'liquid-btn text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <span className={`font-black text-xs ${activeStandStyle === 'xMark' ? 'text-white' : 'text-rose-600'}`}>✕</span>
+                                  <span className="text-[11px]">Xマーク</span>
+                                </button>
+                              </div>
+
+                              {/* 全てに適応ボタン (ベジェ上のみ) */}
+                              <button
+                                type="button"
+                                onClick={handleApplyToAllCurveStands}
+                                className="w-full mt-0.5 py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                                title="このベジェ曲線上のすべての譜面台をこの表示スタイルに一括適用します"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>この曲線のすべての譜面台に適用</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -1671,54 +1744,76 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       };
 
                       return (
-                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-2">
-                          <label className="flex flex-col gap-1">
-                            <span className="text-xs text-slate-500 font-medium">楽器種類</span>
-                            <select
-                              value={currentType}
-                              onChange={(e) => handleUpdateActivePercussionType(e.target.value)}
-                              className="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white"
-                            >
-                              {getGroupedPercussionData().map(group => (
-                                <optgroup key={group.category} label={group.category}>
-                                  {group.items.map(p => (
-                                    <option key={p.dropdownName} value={p.dropdownName}>
-                                      {p.dropdownName} ({p.canvasName})
-                                    </option>
+                        <div className="pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
+                          <button
+                            type="button"
+                            onClick={() => toggleCurveItemSection('percussion')}
+                            className="w-full flex items-center justify-between text-left py-1 px-1 rounded-lg hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-colors cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-blue-500 group-hover:text-blue-600 transition-colors">
+                                {openCurveItemSections['percussion'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </span>
+                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                                楽器種類・ラベル設定
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal shrink-0 truncate max-w-[100px]">
+                              {currentType}
+                            </span>
+                          </button>
+
+                          {openCurveItemSections['percussion'] && (
+                            <div className="mt-2 space-y-2 pl-1 pr-1 pb-1">
+                              <label className="flex flex-col gap-1">
+                                <span className="text-xs text-slate-500 font-medium">楽器種類</span>
+                                <select
+                                  value={currentType}
+                                  onChange={(e) => handleUpdateActivePercussionType(e.target.value)}
+                                  className="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white"
+                                >
+                                  {getGroupedPercussionData().map(group => (
+                                    <optgroup key={group.category} label={group.category}>
+                                      {group.items.map(p => (
+                                        <option key={p.dropdownName} value={p.dropdownName}>
+                                          {p.dropdownName} ({p.canvasName})
+                                        </option>
+                                      ))}
+                                    </optgroup>
                                   ))}
-                                </optgroup>
-                              ))}
-                            </select>
-                          </label>
-                          {onOpenPercussionLabelModal && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onOpenPercussionLabelModal({
-                                  type: 'curveItem',
-                                  itemId: activeItem.id,
-                                  curveId: selectedCurve.id,
-                                  targetType: 'percussion',
-                                  canvasName: percInfo?.canvasName || currentType || '打楽器',
-                                  percussionType: currentType,
-                                  initialText: percInfo?.canvasName || '',
-                                  width: size,
-                                  height: size * aspect,
-                                  color: activeItem.color || selectedCurve.color,
-                                  currentOffsetX: activeItem.labelOffsetX || 0,
-                                  currentOffsetY: activeItem.labelOffsetY || 0,
-                                  currentRotation: activeItem.labelRotation || 0,
-                                  currentFontSize: activeItem.labelFontSize,
-                                  currentLetterSpacing: activeItem.labelLetterSpacing || 0,
-                                  isVertical: Boolean(activeItem.isVerticalName),
-                                  showPercussionName: activeItem.showPercussionName !== false,
-                                });
-                              }}
-                              className="py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
-                            >
-                              <Move className="w-3.5 h-3.5" />
-                              <span>名前の位置・回転・サイズを設定...</span>
-                            </button>
+                                </select>
+                              </label>
+                              {onOpenPercussionLabelModal && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onOpenPercussionLabelModal({
+                                      type: 'curveItem',
+                                      itemId: activeItem.id,
+                                      curveId: selectedCurve.id,
+                                      targetType: 'percussion',
+                                      canvasName: percInfo?.canvasName || currentType || '打楽器',
+                                      percussionType: currentType,
+                                      initialText: percInfo?.canvasName || '',
+                                      width: size,
+                                      height: size * aspect,
+                                      color: activeItem.color || selectedCurve.color,
+                                      currentOffsetX: activeItem.labelOffsetX || 0,
+                                      currentOffsetY: activeItem.labelOffsetY || 0,
+                                      currentRotation: activeItem.labelRotation || 0,
+                                      currentFontSize: activeItem.labelFontSize,
+                                      currentLetterSpacing: activeItem.labelLetterSpacing || 0,
+                                      isVertical: Boolean(activeItem.isVerticalName),
+                                      showPercussionName: activeItem.showPercussionName !== false,
+                                    });
+                                  }}
+                                  className="w-full py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
+                                >
+                                  <Move className="w-3.5 h-3.5" />
+                                  <span>名前の位置・回転・サイズを設定...</span>
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       );
@@ -1734,35 +1829,54 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       if (!isCurveItemSymbol || !onOpenPercussionLabelModal) return null;
                       const size = activeItem.size || selectedCurve.itemSize;
                       return (
-                        <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 flex flex-col gap-1.5">
+                        <div className="pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
                           <button
                             type="button"
-                            onClick={() => {
-                              onOpenPercussionLabelModal({
-                                type: 'curveItem',
-                                itemId: activeItem.id,
-                                curveId: selectedCurve.id,
-                                targetType: 'symbol',
-                                canvasName: '記号テキスト',
-                                symbolShape: activeItem.symbolShape || 'circle',
-                                symbolFilled: Boolean(activeItem.symbolFilled),
-                                initialText: activeItem.symbolText || '',
-                                width: size,
-                                height: size,
-                                color: activeItem.color || selectedCurve.color,
-                                currentOffsetX: activeItem.labelOffsetX || 0,
-                                currentOffsetY: activeItem.labelOffsetY || 0,
-                                currentRotation: activeItem.labelRotation || 0,
-                                currentFontSize: activeItem.labelFontSize || activeItem.symbolFontSize,
-                                currentLetterSpacing: activeItem.labelLetterSpacing || 0,
-                                isVertical: Boolean(activeItem.isVerticalName),
-                              });
-                            }}
-                            className="py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
+                            onClick={() => toggleCurveItemSection('symbol')}
+                            className="w-full flex items-center justify-between text-left py-1 px-1 rounded-lg hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-colors cursor-pointer group"
                           >
-                            <Move className="w-3.5 h-3.5" />
-                            <span>文字の位置・回転・サイズを設定...</span>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-blue-500 group-hover:text-blue-600 transition-colors">
+                                {openCurveItemSections['symbol'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </span>
+                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                                記号テキスト設定
+                              </span>
+                            </div>
                           </button>
+
+                          {openCurveItemSections['symbol'] && (
+                            <div className="mt-2 pl-1 pr-1 pb-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onOpenPercussionLabelModal({
+                                    type: 'curveItem',
+                                    itemId: activeItem.id,
+                                    curveId: selectedCurve.id,
+                                    targetType: 'symbol',
+                                    canvasName: '記号テキスト',
+                                    symbolShape: activeItem.symbolShape || 'circle',
+                                    symbolFilled: Boolean(activeItem.symbolFilled),
+                                    initialText: activeItem.symbolText || '',
+                                    width: size,
+                                    height: size,
+                                    color: activeItem.color || selectedCurve.color,
+                                    currentOffsetX: activeItem.labelOffsetX || 0,
+                                    currentOffsetY: activeItem.labelOffsetY || 0,
+                                    currentRotation: activeItem.labelRotation || 0,
+                                    currentFontSize: activeItem.labelFontSize || activeItem.symbolFontSize,
+                                    currentLetterSpacing: activeItem.labelLetterSpacing || 0,
+                                    isVertical: Boolean(activeItem.isVerticalName),
+                                  });
+                                }}
+                                className="w-full py-1.5 px-2.5 rounded-xl text-xs font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-101 active:scale-99"
+                              >
+                                <Move className="w-3.5 h-3.5" />
+                                <span>文字の位置・回転・サイズを設定...</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
