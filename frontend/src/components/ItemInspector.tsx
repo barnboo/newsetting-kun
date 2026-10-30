@@ -1189,11 +1189,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                               onUpdateCurve(selectedCurve.id, { items: next, itemCount: next.length });
                             }
                           }}
-                          className="text-[11px] text-red-600 hover:text-red-700 dark:text-red-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                          className="p-1 rounded text-red-500 hover:text-red-700 dark:hover:text-red-400 hover:bg-red-500/10 cursor-pointer transition-colors"
                           title="このオブジェクトを曲線から削除 (Deleteキー)"
                         >
-                          <Trash2 className="w-3 h-3" />
-                          <span>削除</span>
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => onSelectCurveItem?.(null)}

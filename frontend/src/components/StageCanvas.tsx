@@ -3014,11 +3014,10 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
               <button
                 type="button"
                 onClick={() => onDeleteCurveItem?.(selectedCurveId, selectedCurveItemId)}
-                className="liquid-btn text-red-600 dark:text-red-400 hover:bg-red-500/15 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 cursor-pointer transition-all hover:scale-105 active:scale-95"
+                className="liquid-btn text-red-600 dark:text-red-400 hover:bg-red-500/15 p-1.5 rounded-full flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95"
                 title="このオブジェクトを曲線から削除 (Deleteキー)"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>削除</span>
               </button>
               <button
                 type="button"
