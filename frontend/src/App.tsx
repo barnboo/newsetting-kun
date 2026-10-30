@@ -116,6 +116,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const preloadedBackupRef = useRef<any>(null);
   const hasUserAdjustedIconsRef = useRef<boolean>(false);
+  const isNewUploadRef = useRef<boolean>(false);
 
   // Refresh and load all project backups and storage usage
   const refreshBackups = async () => {
@@ -517,6 +518,7 @@ function App() {
       console.warn('Failed to convert page image to data URL:', e);
     }
     // 新しいPDFを読み込んだ際は前回のセッション状態（ラベルやテンプレ置換設定）を完全にリセット
+    isNewUploadRef.current = true;
     preloadedBackupRef.current = null;
     hasUserAdjustedIconsRef.current = false;
     setExtractedData(null);
@@ -530,26 +532,30 @@ function App() {
     };
     setFileData(activeFileData);
 
-    // アルゴリズムによりステージ領域が自動検出された場合は、領域選択ステップ（Phase 2）をスキップして即座に抽出を開始
-    if (data.auto_stage_region && data.auto_stage_region.width > 20 && data.auto_stage_region.height > 20) {
-      const autoCrop = data.auto_stage_region;
-      const autoRegions = [
-        {
-          type: 'background',
-          crop: autoCrop,
-          percentCrop: {
-            x: (autoCrop.x / data.width) * 100,
-            y: (autoCrop.y / data.height) * 100,
-            width: (autoCrop.width / data.width) * 100,
-            height: (autoCrop.height / data.height) * 100,
-          },
-        },
-      ];
-      setSelectedRegions(autoRegions);
-      void handleRegionsComplete(autoRegions, activeFileData);
-    } else {
-      setCurrentPhase(2);
+    // アルゴリズムによりステージ領域を自動設定し、領域設定ステップを省いて即座に抽出を開始
+    let autoCrop = data.auto_stage_region;
+    if (!autoCrop || autoCrop.width <= 20 || autoCrop.height <= 20) {
+      autoCrop = {
+        x: data.width * 0.08,
+        y: data.height * 0.18,
+        width: data.width * 0.84,
+        height: data.height * 0.68,
+      };
     }
+    const autoRegions = [
+      {
+        type: 'background',
+        crop: autoCrop,
+        percentCrop: {
+          x: (autoCrop.x / data.width) * 100,
+          y: (autoCrop.y / data.height) * 100,
+          width: (autoCrop.width / data.width) * 100,
+          height: (autoCrop.height / data.height) * 100,
+        },
+      },
+    ];
+    setSelectedRegions(autoRegions);
+    void handleRegionsComplete(autoRegions, activeFileData);
   };
 
   const handleRegionsComplete = async (
@@ -558,6 +564,8 @@ function App() {
   ) => {
     const activeFile = targetFileData || fileData;
     if (!activeFile) return;
+    const isFromUpload = isNewUploadRef.current;
+    isNewUploadRef.current = false;
     setSelectedRegions(regions);
     
     setIsExtracting(true);
@@ -569,7 +577,6 @@ function App() {
       
       const data = response.data as ExtractResponse;
       
-      const isInitialUpload = !extractedData;
       const keepCustomIcons = Boolean(
         hasUserAdjustedIconsRef.current &&
         extractedData?.extractedIcons &&
@@ -605,9 +612,9 @@ function App() {
         effectiveLabels = detectedLabels;
       }
 
-      // 新規PDF読込時はテンプレ置換モーダルを表示し、図面枠調整などの再調整時は直接配置画面へ進む
+      // 新規PDF読込時はテンプレ置換モーダルを毎回確実に表示し、図面枠調整などの手動再調整時は直接配置画面へ進む
       setShowIconAdjustModal(false);
-      setShowTemplateModal(isInitialUpload && nextExtractedIcons.length > 0);
+      setShowTemplateModal(isFromUpload);
       setCurrentPhase(3);
 
       // Asynchronously cache session in IndexedDB with standalone DataURLs
@@ -792,13 +799,12 @@ function App() {
 
   const backgroundCrop = selectedRegions.find(r => r.type === 'background')?.crop || null;
 
-  const activeStep = !fileData ? 1 : !extractedData ? 2 : currentPhase;
+  const activeStep = !fileData || currentPhase === 1 ? 1 : currentPhase === 4 ? 3 : 2;
 
   const steps = [
     { num: 1, label: 'PDF読込' },
-    { num: 2, label: '領域設定' },
-    { num: 3, label: 'ステージ配置' },
-    { num: 4, label: 'プレビュー・出力' },
+    { num: 2, label: 'ステージ配置' },
+    { num: 3, label: 'プレビュー・出力' },
   ];
 
   return (

@@ -2066,16 +2066,11 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             <span className="text-slate-300">›</span>
             <div className="flex items-center gap-1 text-slate-500 px-2 py-0.5">
               <span className="w-4 h-4 rounded-full bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-bold flex items-center justify-center">2</span>
-              <span>領域設定</span>
-            </div>
-            <span className="text-slate-300">›</span>
-            <div className="flex items-center gap-1 text-slate-500 px-2 py-0.5">
-              <span className="w-4 h-4 rounded-full bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-bold flex items-center justify-center">3</span>
               <span>ステージ配置</span>
             </div>
             <span className="text-slate-300">›</span>
             <div className="flex items-center gap-1.5 font-bold text-[#007AFF] bg-white/90 px-3 py-1 rounded-full shadow-xs border border-white/80">
-              <span className="w-4 h-4 rounded-full bg-[#007AFF] text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">4</span>
+              <span className="w-4 h-4 rounded-full bg-[#007AFF] text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">3</span>
               <span>プレビュー・出力 (現在地)</span>
             </div>
           </div>

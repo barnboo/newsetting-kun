@@ -2707,21 +2707,15 @@ const StageBuilder: React.FC<Props> = ({
               <span>PDF読込</span>
             </div>
             <span className="text-slate-300 dark:text-slate-600 mx-0.5">›</span>
-            {/* Step 2 */}
-            <div className="flex items-center gap-1.5 px-2 py-0.5 text-slate-600 dark:text-slate-300 font-medium">
-              <span className="w-4 h-4 rounded-full bg-slate-300/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">2</span>
-              <span>領域設定</span>
-            </div>
-            <span className="text-slate-300 dark:text-slate-600 mx-0.5">›</span>
-            {/* Step 3 (Active) */}
+            {/* Step 2 (Active) */}
             <div className="flex items-center gap-1.5 font-bold text-[#007AFF] dark:text-sky-300 bg-white/95 dark:bg-slate-800/95 px-3 py-1 rounded-full shadow-[0_2px_8px_rgba(15,23,42,0.08),inset_0_1px_0.5px_rgba(255,255,255,0.9)]">
-              <span className="w-4 h-4 rounded-full bg-gradient-to-b from-sky-400 to-[#007AFF] text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">3</span>
+              <span className="w-4 h-4 rounded-full bg-gradient-to-b from-sky-400 to-[#007AFF] text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">2</span>
               <span>ステージ配置</span>
             </div>
             <span className="text-slate-300 dark:text-slate-600 mx-0.5">›</span>
-            {/* Step 4 */}
+            {/* Step 3 */}
             <div className="flex items-center gap-1.5 px-2 py-0.5 text-slate-400 dark:text-slate-500 font-medium">
-              <span className="w-4 h-4 rounded-full bg-slate-300/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">4</span>
+              <span className="w-4 h-4 rounded-full bg-slate-300/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">3</span>
               <span>プレビュー・出力</span>
             </div>
           </div>

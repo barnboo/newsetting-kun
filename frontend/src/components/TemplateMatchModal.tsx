@@ -277,7 +277,18 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
 
         {/* Item List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-transparent">
-          {decisions.map(d => {
+          {decisions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-8 text-center text-slate-500 my-auto">
+              <span className="text-3xl mb-2">🔍</span>
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                自動抽出された記号はありませんでした
+              </p>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                「確定してステージ配置へ進む」を押すと、パレットからパーツを自由に配置できます。
+              </p>
+            </div>
+          ) : (
+            decisions.map(d => {
             const isUsingTemplate = d.useTemplate && d.selectedTemplate !== null;
 
             return (
@@ -451,7 +462,7 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
                 </div>
               </div>
             );
-          })}
+          }))}
         </div>
 
         {/* Footer Actions */}
