@@ -1297,7 +1297,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                             )}
                           </div>
 
-                          <div className="flex items-center justify-between gap-1">
+                          <div className="flex items-center justify-between gap-1 w-full min-w-0">
                             <div className="flex items-center gap-1 shrink-0">
                               <input
                                 type="number"
@@ -1310,9 +1310,9 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                     handleUpdateItemGap(activeItem.id, val);
                                   }
                                 }}
-                                className="w-14 px-1.5 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
+                                className="w-12 px-1 py-0.5 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
                               />
-                              <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400">px</span>
                             </div>
                             <div className="flex items-center gap-0.5 shrink-0">
                               {[-5, -1, 1, 5].map((delta) => (
@@ -1323,7 +1323,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                     const cur = activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap;
                                     handleUpdateItemGap(activeItem.id, Math.max(0, cur + delta));
                                   }}
-                                  className="w-[26px] h-6 flex items-center justify-center text-[10px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
+                                  className="w-[23px] h-5.5 flex items-center justify-center text-[10px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
                                 >
                                   {delta > 0 ? `+${delta}` : delta}
                                 </button>
