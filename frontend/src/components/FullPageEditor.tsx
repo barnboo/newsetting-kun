@@ -1313,8 +1313,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     [activeTallies]
   );
 
-  // Initialize stage dimensions dynamically
-  useEffect(() => {
+  // Initialize stage dimensions dynamically synchronously with layout effect
+  useLayoutEffect(() => {
     if (!containerRef.current) return;
 
     const updateDimensions = () => {
@@ -1343,17 +1343,22 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
       });
     };
 
-    const observer = new ResizeObserver(updateDimensions);
-    observer.observe(containerRef.current);
     updateDimensions();
-
-    return () => observer.disconnect();
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
   }, [bgImage, fitMode, zoomMultiplier]);
 
   // Stable zoom anchor refs
   const prevDimensionsRef = useRef(dimensions);
-  const zoomAnchorRef = useRef<{ x: number; y: number } | null>(null);
+  const zoomAnchorRef = useRef<{
+    sceneIdx: number;
+    rx: number;
+    ry: number;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
 
+  // Keep zoom anchor perfectly stable so zoomed position stays under finger/cursor
   useLayoutEffect(() => {
     const prev = prevDimensionsRef.current;
     prevDimensionsRef.current = dimensions;
@@ -1362,19 +1367,51 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     if (prev.scale === dimensions.scale || prev.scale === 0) return;
 
     const container = containerRef.current;
-    const ratio = dimensions.scale / prev.scale;
+    const anchor = zoomAnchorRef.current;
 
-    const anchor = zoomAnchorRef.current || {
-      x: container.clientWidth / 2,
-      y: container.clientHeight / 2,
-    };
-    zoomAnchorRef.current = null;
+    if (anchor) {
+      const paperEl = document.getElementById(`scene-paper-${anchor.sceneIdx}`) || document.getElementById(`scene-paper-0`);
+      if (paperEl) {
+        const containerRect = container.getBoundingClientRect();
+        const paperRect = paperEl.getBoundingClientRect();
+        const currentPaperScrollLeft = container.scrollLeft + (paperRect.left - containerRect.left);
+        const currentPaperScrollTop = container.scrollTop + (paperRect.top - containerRect.top);
 
-    container.scrollLeft = (container.scrollLeft + anchor.x) * ratio - anchor.x;
-    container.scrollTop = (container.scrollTop + anchor.y) * ratio - anchor.y;
-  }, [dimensions]);
+        const targetContentX = currentPaperScrollLeft + anchor.rx * dimensions.width;
+        const targetContentY = currentPaperScrollTop + anchor.ry * dimensions.height;
 
-  // Container mouse wheel zoom
+        container.scrollLeft = targetContentX - anchor.clientX;
+        container.scrollTop = targetContentY - anchor.clientY;
+      }
+      zoomAnchorRef.current = null;
+    } else {
+      const containerW = container.clientWidth;
+      const containerH = container.clientHeight;
+      const centerX = containerW / 2;
+      const centerY = containerH / 2;
+      const targetIdx = activeSceneIdx >= 0 && activeSceneIdx < effectiveScenes.length ? activeSceneIdx : 0;
+      const paperEl = document.getElementById(`scene-paper-${targetIdx}`) || document.getElementById(`scene-paper-0`);
+      if (paperEl) {
+        const containerRect = container.getBoundingClientRect();
+        const paperRect = paperEl.getBoundingClientRect();
+        const currentPaperScrollLeft = container.scrollLeft + (paperRect.left - containerRect.left);
+        const currentPaperScrollTop = container.scrollTop + (paperRect.top - containerRect.top);
+
+        const prevCenterX = container.scrollLeft + centerX;
+        const prevCenterY = container.scrollTop + centerY;
+        const rx = prev.width > 0 ? (prevCenterX - currentPaperScrollLeft) / prev.width : 0.5;
+        const ry = prev.height > 0 ? (prevCenterY - currentPaperScrollTop) / prev.height : 0.5;
+
+        const targetContentX = currentPaperScrollLeft + Math.max(0, Math.min(1, rx)) * dimensions.width;
+        const targetContentY = currentPaperScrollTop + Math.max(0, Math.min(1, ry)) * dimensions.height;
+
+        container.scrollLeft = targetContentX - centerX;
+        container.scrollTop = targetContentY - centerY;
+      }
+    }
+  }, [dimensions, activeSceneIdx, effectiveScenes.length]);
+
+  // Container mouse wheel zoom (StageCanvas と同じ操作感)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -1384,14 +1421,43 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         e.preventDefault();
         e.stopPropagation();
 
-        const rect = container.getBoundingClientRect();
-        zoomAnchorRef.current = {
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
-        };
+        const containerRect = container.getBoundingClientRect();
 
+        // マウス位置の下にある用紙（または一番近い用紙）を特定
+        const papers = effectiveScenes.map((_, i) => document.getElementById(`scene-paper-${i}`));
+        let targetPaper: HTMLElement | null = null;
+        let targetIdx = activeSceneIdx;
+
+        for (let i = 0; i < papers.length; i++) {
+          const p = papers[i];
+          if (p) {
+            const r = p.getBoundingClientRect();
+            if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+              targetPaper = p;
+              targetIdx = i;
+              break;
+            }
+          }
+        }
+        if (!targetPaper) {
+          targetPaper = papers[targetIdx] || papers[0];
+        }
+
+        if (targetPaper) {
+          const pr = targetPaper.getBoundingClientRect();
+          const rx = pr.width > 0 ? (e.clientX - pr.left) / pr.width : 0.5;
+          const ry = pr.height > 0 ? (e.clientY - pr.top) / pr.height : 0.5;
+          zoomAnchorRef.current = {
+            sceneIdx: targetIdx,
+            rx: Math.max(0, Math.min(1, rx)),
+            ry: Math.max(0, Math.min(1, ry)),
+            clientX: e.clientX - containerRect.left,
+            clientY: e.clientY - containerRect.top,
+          };
+        }
+
+        const delta = e.deltaY < 0 ? 0.1 : -0.1;
         setZoomMultiplier(prev => {
-          const delta = e.deltaY < 0 ? 0.1 : -0.1;
           return Math.min(Math.max(Number((prev + delta).toFixed(2)), 0.5), 2.5);
         });
       }
@@ -1399,7 +1465,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
     container.addEventListener('wheel', handleWheel, { passive: false });
     return () => container.removeEventListener('wheel', handleWheel);
-  }, []);
+  }, [activeSceneIdx, effectiveScenes]);
 
   // Middle mouse or Space+Drag pan
   useEffect(() => {
@@ -1424,10 +1490,10 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         }
       } else if (e.key === '+' || e.key === '=' || (e.ctrlKey && e.key === '=')) {
         e.preventDefault();
-        setZoomMultiplier(prev => Math.min(Number((prev + 0.1).toFixed(2)), 3.0));
+        setZoomMultiplier(prev => Math.min(Number((prev + 0.1).toFixed(2)), 2.5));
       } else if (e.key === '-' || (e.ctrlKey && e.key === '-')) {
         e.preventDefault();
-        setZoomMultiplier(prev => Math.max(Number((prev - 0.1).toFixed(2)), 0.3));
+        setZoomMultiplier(prev => Math.max(Number((prev - 0.1).toFixed(2)), 0.5));
       } else if (e.key === '0' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         setZoomMultiplier(1.0);
@@ -1499,8 +1565,111 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     };
   }, []);
 
-  const handleZoomIn = () => setZoomMultiplier(prev => Math.min(Number((prev + 0.1).toFixed(2)), 3.0));
-  const handleZoomOut = () => setZoomMultiplier(prev => Math.max(Number((prev - 0.1).toFixed(2)), 0.3));
+  // Touch Pinch-to-zoom (2本指ピンチ操作)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let isPinching = false;
+    let startDist = 0;
+    let initialZoom = 1.0;
+    let currentScale = 1.0;
+    let currentMidX = 0;
+    let currentMidY = 0;
+    let targetIdx = activeSceneIdx;
+    let rx = 0.5;
+    let ry = 0.5;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        isPinching = true;
+        initialZoom = zoomMultiplier;
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        startDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        currentMidX = (t1.clientX + t2.clientX) / 2;
+        currentMidY = (t1.clientY + t2.clientY) / 2;
+        currentScale = 1.0;
+
+        const papers = effectiveScenes.map((_, i) => document.getElementById(`scene-paper-${i}`));
+        let targetPaper: HTMLElement | null = null;
+        targetIdx = activeSceneIdx;
+
+        for (let i = 0; i < papers.length; i++) {
+          const p = papers[i];
+          if (p) {
+            const r = p.getBoundingClientRect();
+            if (currentMidX >= r.left && currentMidX <= r.right && currentMidY >= r.top && currentMidY <= r.bottom) {
+              targetPaper = p;
+              targetIdx = i;
+              break;
+            }
+          }
+        }
+        if (!targetPaper) {
+          targetPaper = papers[targetIdx] || papers[0];
+        }
+
+        if (targetPaper) {
+          const pr = targetPaper.getBoundingClientRect();
+          rx = pr.width > 0 ? (currentMidX - pr.left) / pr.width : 0.5;
+          ry = pr.height > 0 ? (currentMidY - pr.top) / pr.height : 0.5;
+        }
+
+        e.preventDefault();
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && isPinching) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const curDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        currentMidX = (t1.clientX + t2.clientX) / 2;
+        currentMidY = (t1.clientY + t2.clientY) / 2;
+
+        const rawScale = startDist > 10 ? curDist / startDist : 1.0;
+        const minScale = 0.5 / (initialZoom || 1);
+        const maxScale = 2.5 / (initialZoom || 1);
+        currentScale = Math.min(maxScale, Math.max(minScale, rawScale));
+
+        e.preventDefault();
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2 && isPinching) {
+        isPinching = false;
+        const finalZoom = Math.min(2.5, Math.max(0.5, Number((initialZoom * currentScale).toFixed(2))));
+        if (Math.abs(finalZoom - initialZoom) >= 0.02) {
+          const box = container.getBoundingClientRect();
+          zoomAnchorRef.current = {
+            sceneIdx: targetIdx,
+            rx: Math.max(0, Math.min(1, rx)),
+            ry: Math.max(0, Math.min(1, ry)),
+            clientX: currentMidX - box.left,
+            clientY: currentMidY - box.top,
+          };
+          setZoomMultiplier(finalZoom);
+        }
+      }
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchEnd);
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [zoomMultiplier, activeSceneIdx, effectiveScenes]);
+
+  const handleZoomIn = () => setZoomMultiplier(prev => Math.min(Number((prev + 0.1).toFixed(2)), 2.5));
+  const handleZoomOut = () => setZoomMultiplier(prev => Math.max(Number((prev - 0.1).toFixed(2)), 0.5));
   const handleZoomReset = () => setZoomMultiplier(1.0);
 
   const scrollToScene = (idx: number) => {
@@ -2324,6 +2493,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         {/* Canvas Scrollable Workspace: Multi-scene sheets stacked vertically */}
         <div
           ref={containerRef}
+          style={{ touchAction: 'pan-x pan-y' }}
           className="flex-1 overflow-auto bg-transparent p-6 flex flex-col items-center gap-10"
         >
           {effectiveScenes.map((sc, idx) => {
@@ -2388,7 +2558,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
 
                 {/* Printable A4 Sheet Paper */}
                 <div
-                  className={`relative bg-white rounded-xs transition-all ${
+                  id={`scene-paper-${idx}`}
+                  className={`relative bg-white rounded-xs transition-colors ${
                     isActive
                       ? 'ring-4 ring-blue-500/80 shadow-2xl'
                       : 'ring-1 ring-slate-300 shadow-lg opacity-95 hover:opacity-100 hover:ring-2 hover:ring-slate-400'
