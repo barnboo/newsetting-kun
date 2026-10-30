@@ -388,6 +388,27 @@ const INITIAL_SUGGESTIONS = [
   'プレビューの青い強調枠は出力される？',
 ];
 
+function renderFormattedText(text: string) {
+  return text.split('\n').map((line, lineIdx) => {
+    const parts = line.split(/(\*\*.*?\*\*)/g);
+    return (
+      <React.Fragment key={lineIdx}>
+        {parts.map((part, i) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return (
+              <strong key={i} className="font-bold text-slate-900 dark:text-white">
+                {part.slice(2, -2)}
+              </strong>
+            );
+          }
+          return part;
+        })}
+        {lineIdx < text.split('\n').length - 1 && '\n'}
+      </React.Fragment>
+    );
+  });
+}
+
 export const HelpAssistantModal: React.FC<{
   isOpen: boolean;
   initialTab?: HelpModalTab;
@@ -608,7 +629,7 @@ export const HelpAssistantModal: React.FC<{
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-bl-xs border border-slate-200/80 dark:border-slate-700'
                       }`}
                     >
-                      {msg.text}
+                      {renderFormattedText(msg.text)}
 
                       {/* Jump to PDF Page buttons if matchedItems exist */}
                       {msg.matchedItems && msg.matchedItems.length > 0 && (
