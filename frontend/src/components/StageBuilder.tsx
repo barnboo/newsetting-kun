@@ -3046,12 +3046,10 @@ const StageBuilder: React.FC<Props> = ({
                     </div>
                   ))}
                 </>
+              ) : extractedIcons.length === 0 ? (
+                <p className="text-xs text-slate-400 w-full text-center">PDFから切り出されたアイコンがありません</p>
               ) : (
-                <>
-                  {extractedIcons.length === 0 ? (
-                    <p className="text-xs text-slate-400 w-full text-center">PDFから切り出されたアイコンがありません</p>
-                  ) : (
-                    extractedIcons.map((icon) => {
+                extractedIcons.map((icon) => {
                       const tmplId = effectiveTemplateReplacements?.[icon.id];
                       const matchedTmpl = tmplId
                         ? TEMPLATE_SHAPES.find(t => t.id === tmplId || t.type === tmplId.replace(/^tmpl_/, ''))
@@ -3146,42 +3144,6 @@ const StageBuilder: React.FC<Props> = ({
                       );
                     })
                   )}
-                  <div className={`border-l pl-2.5 ml-1 shrink-0 h-12 flex items-center gap-2 ${isDarkMode ? 'border-white/12' : 'border-slate-300/60'}`}>
-                    {onOpenTemplateModal && (
-                      <button
-                        onClick={onOpenTemplateModal}
-                        className="liquid-btn text-[11px] font-bold px-3 py-2 rounded-full transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer text-emerald-700 dark:text-emerald-300"
-                        title="標準テンプレートへの置き換え設定を開きます"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" /> テンプレ置換
-                      </button>
-                    )}
-                    <button
-                      onClick={() => {
-                        if (onOpenIconAdjustModal) {
-                          onOpenIconAdjustModal();
-                        } else {
-                          setIsAdjusting(true);
-                        }
-                      }}
-                      className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-slate-700 dark:text-slate-200 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
-                      title="パーツアイコンの切り抜き枠を手動調整します"
-                    >
-                      <Settings className="w-3.5 h-3.5" /> パーツ枠調整
-                    </button>
-                    {onReAdjustBackground && (
-                      <button
-                        type="button"
-                        onClick={onReAdjustBackground}
-                        className="text-[11px] font-bold px-3 py-2 rounded-full liquid-btn text-blue-600 dark:text-sky-300 whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
-                        title="ステージ図面の切り出し枠を再設定します"
-                      >
-                        <Crop className="w-3.5 h-3.5" /> 図面枠調整
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
             </div>
 
             {/* Scroll Right Button */}
@@ -3626,22 +3588,59 @@ const StageBuilder: React.FC<Props> = ({
                   </label>
                 </div>
 
-                {/* Stage Background Crop Re-adjust */}
-                {onReAdjustBackground && (
-                  <div className={`pt-3 border-t ${isDarkMode ? 'border-white/10' : 'border-slate-200/50'}`}>
+                {/* 図面・パーツ・テンプレ枠調整 */}
+                <div className={`space-y-2 pt-3 border-t ${isDarkMode ? 'border-white/10' : 'border-slate-200/50'}`}>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">図面・パーツ枠設定</span>
+                  
+                  <div className="space-y-2">
+                    {onOpenTemplateModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawerSubmenu(null);
+                          onOpenTemplateModal();
+                        }}
+                        className="liquid-btn w-full text-xs font-semibold py-2 px-3 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer text-emerald-700 dark:text-emerald-300 shadow-2xs hover:scale-101 active:scale-99"
+                        title="標準テンプレートへの置き換え設定を開きます"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>テンプレ置換</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => {
                         setDrawerSubmenu(null);
-                        onReAdjustBackground();
+                        if (onOpenIconAdjustModal) {
+                          onOpenIconAdjustModal();
+                        } else {
+                          setIsAdjusting(true);
+                        }
                       }}
-                      className="liquid-btn w-full text-xs font-semibold py-2 px-3 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer text-blue-600 dark:text-sky-400"
+                      className="liquid-btn w-full text-xs font-semibold py-2 px-3 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200 shadow-2xs hover:scale-101 active:scale-99"
+                      title="パーツアイコンの切り抜き枠を手動調整します"
                     >
-                      <Crop className="w-4 h-4" />
-                      <span>ステージ図面枠を手動で再調整</span>
+                      <Settings className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                      <span>パーツ枠調整</span>
                     </button>
+
+                    {onReAdjustBackground && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawerSubmenu(null);
+                          onReAdjustBackground();
+                        }}
+                        className="liquid-btn w-full text-xs font-semibold py-2 px-3 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer text-blue-600 dark:text-sky-300 shadow-2xs hover:scale-101 active:scale-99"
+                        title="ステージ図面の切り出し枠を再設定します"
+                      >
+                        <Crop className="w-3.5 h-3.5 text-blue-500 dark:text-sky-400" />
+                        <span>図面枠調整</span>
+                      </button>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
             </div>
           )}
