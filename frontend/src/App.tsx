@@ -569,6 +569,7 @@ function App() {
       
       const data = response.data as ExtractResponse;
       
+      const isInitialUpload = !extractedData;
       const keepCustomIcons = Boolean(
         hasUserAdjustedIconsRef.current &&
         extractedData?.extractedIcons &&
@@ -604,9 +605,9 @@ function App() {
         effectiveLabels = detectedLabels;
       }
 
-      // 各モーダル（テンプレ置換・パーツ枠調整・図面枠調整）は勝手に連鎖表示させず、直接ステージ配置へ進む
+      // 新規PDF読込時はテンプレ置換モーダルを表示し、図面枠調整などの再調整時は直接配置画面へ進む
       setShowIconAdjustModal(false);
-      setShowTemplateModal(false);
+      setShowTemplateModal(isInitialUpload && nextExtractedIcons.length > 0);
       setCurrentPhase(3);
 
       // Asynchronously cache session in IndexedDB with standalone DataURLs
