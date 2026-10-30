@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Ellipse, Line } from 'react-konva';
 import useImage from 'use-image';
 import { Layers, Trash2, FileText, Shapes, Type, Spline, Copy, ClipboardPaste, CopyPlus, X, Check, Highlighter, Edit3, MessageSquareHeart, ExternalLink } from 'lucide-react';
+import { HelpHeaderButtons } from './HelpAssistantModal';
 
 export type ShapeKind = 'circle' | 'cross' | 'rect' | 'triangle';
 
@@ -2477,6 +2478,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           )}
 
           <div className="h-4 w-px bg-slate-300/60 mx-0.5 hidden sm:block" />
+
+          <HelpHeaderButtons compact />
 
           {onExportJson && (
             <button

@@ -16,6 +16,7 @@ import { RegionSelector } from './components/RegionSelector';
 import StageBuilder from './components/StageBuilder';
 import TemplateMatchModal, { type MatchingDecision } from './components/TemplateMatchModal';
 import IconAdjustModal from './components/IconAdjustModal';
+import { HelpHeaderButtons } from './components/HelpAssistantModal';
 import { inferTemplateReplacements } from './utils/templateShapes';
 import {
   loadSessionFromIndexedDB,
@@ -872,6 +873,7 @@ function App() {
 
             {/* Header Actions */}
             <div className="flex items-center gap-2">
+              <HelpHeaderButtons />
               {fileData && (
                 <button
                   type="button"

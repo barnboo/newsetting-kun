@@ -7,6 +7,7 @@ import fitz  # PyMuPDF
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -38,7 +39,7 @@ def cleanup_old_files(max_age_seconds: int = 7200):
         if not os.path.exists(directory):
             continue
         for fname in os.listdir(directory):
-            if fname.startswith("."):
+            if fname.startswith(".") or fname == "manual.pdf":
                 continue
             fpath = os.path.join(directory, fname)
             try:
@@ -2628,6 +2629,18 @@ async def export_pdf(req: ExportPdfRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/manual-pdf/")
+async def get_manual_pdf():
+    candidates = [
+        os.path.abspath(os.path.join(BASE_DIR, "..", "セッティングくん_取扱説明書.pdf")),
+        os.path.abspath(os.path.join(BASE_DIR, "..", "frontend", "public", "manual.pdf")),
+        os.path.join(STATIC_DIR, "manual.pdf"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="application/pdf", filename="セッティングくん_取扱説明書.pdf")
+    raise HTTPException(status_code=404, detail="Manual PDF not found")
 
 # Mount built frontend files if available (for production deployments like Render.com)
 FRONTEND_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))

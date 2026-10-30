@@ -40,6 +40,7 @@ import { copyStageObjects, pasteStageObjects, duplicateStageObjects, hasStageObj
 import { updateSessionTimestampInIndexedDB } from '../utils/indexedDb';
 import { FloatingObjectControlPanel } from './FloatingObjectControlPanel';
 import { PercussionLabelModal, type ItemLabelModalTarget, type ItemLabelSettings } from './PercussionLabelModal';
+import { HelpHeaderButtons } from './HelpAssistantModal';
 
 export interface Scene {
   id: string;
@@ -2759,6 +2760,7 @@ const StageBuilder: React.FC<Props> = ({
 
         {/* Right Actions: Liquid Glass Capsule Buttons */}
         <div className="flex items-center gap-2">
+          <HelpHeaderButtons />
           <button
             type="button"
             onClick={handleExportJson}
