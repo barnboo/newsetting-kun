@@ -3221,14 +3221,6 @@ const StageBuilder: React.FC<Props> = ({
 
       {/* Workspace Body */}
       <div className="flex-1 flex min-h-0 relative overflow-hidden">
-        {/* Dimmed Overlay when a drawer submenu is open */}
-        <div 
-          onClick={() => setDrawerSubmenu(null)}
-          className={`absolute inset-0 bg-slate-950/25 backdrop-blur-[2px] z-20 transition-opacity duration-300 ${
-            drawerSubmenu !== null ? 'opacity-100 pointer-events-auto cursor-pointer' : 'opacity-0 pointer-events-none'
-          }`}
-        />
-
         {/* Left Navigation Container (Liquid Glass Spatial Dock) */}
         <aside className="relative z-30 flex h-full shrink-0">
           {/* Fixed-width Liquid Glass Icon Dock (w-14) */}
