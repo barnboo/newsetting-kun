@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, forwardRef } from 'react';
+import { flushSync } from 'react-dom';
 import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Ellipse, Line } from 'react-konva';
 import useImage from 'use-image';
 import { Layers, Trash2, FileText, Shapes, Type, Spline, Copy, ClipboardPaste, CopyPlus, X, Check, Highlighter, Edit3, MessageSquareHeart, ExternalLink } from 'lucide-react';
@@ -819,7 +820,7 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
             >
               {/* Highlight Underlay when Highlight Mode is ON (User-added elements differentiation) */}
               {highlightUserObjects && !isExporting && (
-                <Group listening={false}>
+                <Group name="highlightUnderlay" listening={false}>
                   {isShape ? (
                     <>
                       <Rect
@@ -887,7 +888,7 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
               )}
 
               {/* Selection Box Outline */}
-              {isSelected && !isShape && (
+              {isSelected && !isExporting && !isShape && (
                 <Rect
                   x={-4}
                   y={-4}
@@ -899,7 +900,7 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
                   cornerRadius={3}
                 />
               )}
-              {isSelected && isShape && (
+              {isSelected && !isExporting && isShape && (
                 <Rect
                   x={-(halfW + 4)}
                   y={-(halfH + 4)}
@@ -2091,10 +2092,17 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   const FEEDBACK_FORM_URL = 'https://forms.gle/fujpm76eSrSao8549';
   const FEEDBACK_STORAGE_KEY = 'stajet_feedback_form_prompted';
 
-  const executeActualExport = () => {
-    setSelectedId(null);
-    setEditingNodeId(null);
-    setIsExporting(true);
+  const executeActualExport = async () => {
+    // 1. 同期的に選択解除とエクスポートフラグを反映
+    flushSync(() => {
+      setSelectedId(null);
+      setEditingNodeId(null);
+      setIsExporting(true);
+    });
+
+    // 2. React および React-Konva が DOM/Canvas を再描画するのを確実に待機
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => setTimeout(r, 60));
 
     try {
       const exportedImages: string[] = [];
@@ -2104,16 +2112,33 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         const stage = stageRefs.current[sc.sceneId];
         if (!stage) continue;
 
+        // 強調表示（highlightUnderlay）と選択枠をKonvaノードレベルでも確実に一時非表示化
+        const underlays = stage.find('.highlightUnderlay');
+        underlays.forEach((u: any) => u.visible(false));
+
+        // ステージ画像レイヤーの不透明度を 1.0 に強制
+        const stageLayoutLayer = stage.findOne('#stageLayoutLayer');
+        const prevOpacity = stageLayoutLayer ? stageLayoutLayer.opacity() : 1.0;
+        if (stageLayoutLayer) stageLayoutLayer.opacity(1.0);
+
         // Hide background layer to export transparent overlay
         const bgLayer = stage.findOne('#bgLayer');
         if (bgLayer) bgLayer.visible(false);
+
+        // 描画バッファを強制更新してキャプチャ
+        stage.draw();
 
         const dataUrl = stage.toDataURL({
           pixelRatio: exportPixelRatio,
           mimeType: 'image/png',
         });
 
+        // 復元
         if (bgLayer) bgLayer.visible(true);
+        if (stageLayoutLayer) stageLayoutLayer.opacity(prevOpacity);
+        underlays.forEach((u: any) => u.visible(true));
+        stage.draw();
+
         exportedImages.push(dataUrl);
       }
 
