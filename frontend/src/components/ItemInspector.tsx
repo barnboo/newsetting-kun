@@ -1292,22 +1292,24 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number"
-                              min="0"
-                              max="500"
-                              value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value);
-                                if (!isNaN(val) && val >= 0) {
-                                  handleUpdateItemGap(activeItem.id, val);
-                                }
-                              }}
-                              className="w-20 px-2 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono"
-                            />
-                            <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
-                            <div className="flex items-center gap-1 ml-auto">
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center gap-1 shrink-0">
+                              <input
+                                type="number"
+                                min="0"
+                                max="500"
+                                value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  if (!isNaN(val) && val >= 0) {
+                                    handleUpdateItemGap(activeItem.id, val);
+                                  }
+                                }}
+                                className="w-14 px-1.5 py-1 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
+                              />
+                              <span className="text-xs text-slate-500 dark:text-slate-400">px</span>
+                            </div>
+                            <div className="flex items-center gap-0.5 shrink-0">
                               {[-5, -1, 1, 5].map((delta) => (
                                 <button
                                   key={delta}
@@ -1316,7 +1318,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                     const cur = activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap;
                                     handleUpdateItemGap(activeItem.id, Math.max(0, cur + delta));
                                   }}
-                                  className="px-1.5 py-0.5 text-[11px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
+                                  className="w-[26px] h-6 flex items-center justify-center text-[10px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
                                 >
                                   {delta > 0 ? `+${delta}` : delta}
                                 </button>
