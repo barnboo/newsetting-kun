@@ -3549,13 +3549,7 @@ const StageBuilder: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        setIsMovingCenter(prev => {
-                          const next = !prev;
-                          if (!next) {
-                            setSnapSettings(s => ({ ...s, showCenterMarker: false }));
-                          }
-                          return next;
-                        });
+                        setIsMovingCenter(prev => !prev);
                       }}
                       className={`w-full text-xs font-semibold py-2 px-3 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer ${
                         isMovingCenter
@@ -3708,7 +3702,6 @@ const StageBuilder: React.FC<Props> = ({
             isMovingCenter={isMovingCenter}
             onExitMoveCenter={() => {
               setIsMovingCenter(false);
-              setSnapSettings(s => ({ ...s, showCenterMarker: false }));
             }}
             onOpenContextMenu={setContextMenu}
             isMeasuringScale={isMeasuringScale}
