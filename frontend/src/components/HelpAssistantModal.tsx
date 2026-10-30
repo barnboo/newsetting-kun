@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BookOpen,
   MessageCircleQuestion,
@@ -513,13 +514,13 @@ export const HelpAssistantModal: React.FC<{
     ]);
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden"
+      className="fixed inset-0 z-[99999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-hidden"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-5xl h-[88vh] max-h-[880px] min-h-[420px] bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-700 flex flex-col overflow-hidden min-h-0"
+        className="w-full max-w-5xl h-[86vh] max-h-[840px] min-h-[460px] bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-700 flex flex-col overflow-hidden min-h-0 relative z-10"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Modal Header */}
@@ -803,7 +804,8 @@ export const HelpAssistantModal: React.FC<{
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
