@@ -425,7 +425,8 @@ export const HelpAssistantModal: React.FC<{
       suggestedQuestions: INITIAL_SUGGESTIONS,
     },
   ]);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
+  const lastBotMsgIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -434,7 +435,36 @@ export const HelpAssistantModal: React.FC<{
   }, [isOpen, initialTab]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // scrollIntoView を使うと親要素やウィンドウ全体が押し上げられ、
+    // モーダルのヘッダーが画面外上部に突き抜けるブラウザバグが発生するため、
+    // 内側のスクロールコンテナの scrollTop のみを直接安全に操作する
+    if (!chatScrollContainerRef.current) return;
+    const container = chatScrollContainerRef.current;
+
+    const timer = setTimeout(() => {
+      // 最新のボットメッセージがあればその先頭が見える位置へ、
+      // なければ一番下までスムーズスクロール
+      if (lastBotMsgIdRef.current) {
+        const botEl = document.getElementById(lastBotMsgIdRef.current);
+        if (botEl) {
+          // コンテナ内での相対位置を計算
+          const containerRect = container.getBoundingClientRect();
+          const botRect = botEl.getBoundingClientRect();
+          const targetScrollTop = container.scrollTop + (botRect.top - containerRect.top) - 16;
+          container.scrollTo({
+            top: Math.max(0, targetScrollTop),
+            behavior: 'smooth',
+          });
+          return;
+        }
+      }
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth',
+      });
+    }, 60);
+
+    return () => clearTimeout(timer);
   }, [messages, activeTab]);
 
   if (!isOpen) return null;
@@ -444,15 +474,19 @@ export const HelpAssistantModal: React.FC<{
     if (!q) return;
     if (!qText) setInput('');
 
+    const userMsgId = `user_${Date.now()}`;
+    const botMsgId = `bot_${Date.now() + 1}`;
+    lastBotMsgIdRef.current = botMsgId;
+
     const userMsg: ChatMessage = {
-      id: `user_${Date.now()}`,
+      id: userMsgId,
       role: 'user',
       text: q,
     };
 
     const result = findBestAnswer(q);
     const botMsg: ChatMessage = {
-      id: `bot_${Date.now() + 1}`,
+      id: botMsgId,
       role: 'assistant',
       text: result.answer,
       matchedItems: result.matchedItems,
@@ -468,6 +502,7 @@ export const HelpAssistantModal: React.FC<{
   };
 
   const handleResetChat = () => {
+    lastBotMsgIdRef.current = null;
     setMessages([
       {
         id: 'welcome_' + Date.now(),
@@ -480,63 +515,65 @@ export const HelpAssistantModal: React.FC<{
 
   return (
     <div
-      className="fixed inset-0 z-[9999] bg-slate-900/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 select-none"
+      className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-5xl h-[86vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-700 flex flex-col overflow-hidden"
+        className="w-full max-w-5xl h-[88vh] max-h-[880px] min-h-[420px] bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-700 flex flex-col overflow-hidden min-h-0"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Modal Header */}
-        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/90 dark:bg-slate-800/80 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-sm">
+        <div className="px-4 sm:px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-800/90 shrink-0 select-none">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
               {activeTab === 'chat' ? (
                 <Sparkles className="w-4 h-4" />
               ) : (
                 <BookOpen className="w-4 h-4" />
               )}
             </div>
-            <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white leading-tight">
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white leading-tight truncate">
                 公式取扱説明書 ＆ AI質問サポート
               </h2>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              <p className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 truncate">
                 全機能・操作方法・自動解析の仕組みを網羅したガイドとQ&Aチャットボット
               </p>
             </div>
           </div>
 
           {/* Center Tab Switcher */}
-          <div className="flex items-center gap-1 bg-slate-200/80 dark:bg-slate-700/80 p-1 rounded-full text-xs">
+          <div className="flex items-center gap-1 bg-slate-200/80 dark:bg-slate-700/80 p-1 rounded-full text-xs shrink-0 mx-2">
             <button
               type="button"
               onClick={() => setActiveTab('chat')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 rounded-full font-bold transition-all cursor-pointer ${
                 activeTab === 'chat'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-sky-400 shadow-xs'
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
               }`}
             >
               <MessageCircleQuestion className="w-3.5 h-3.5" />
-              <span>AI質問チャット</span>
+              <span className="hidden sm:inline">AI質問チャット</span>
+              <span className="sm:hidden">チャット</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('pdf')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 rounded-full font-bold transition-all cursor-pointer ${
                 activeTab === 'pdf'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-sky-400 shadow-xs'
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>説明書PDF (全10頁)</span>
+              <span className="hidden sm:inline">説明書PDF (全10頁)</span>
+              <span className="sm:hidden">説明書PDF</span>
             </button>
           </div>
 
           {/* Right PDF External / Close Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <a
               href="/manual.pdf"
               target="_blank"
@@ -545,7 +582,7 @@ export const HelpAssistantModal: React.FC<{
               title="説明書PDFを新しいタブで開く"
             >
               <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
-              <span>別タブでPDFを開く</span>
+              <span className="hidden lg:inline">別タブで開く</span>
             </a>
             <a
               href="/manual.pdf"
@@ -554,7 +591,7 @@ export const HelpAssistantModal: React.FC<{
               title="説明書PDFをダウンロード"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>PDF保存</span>
+              <span className="hidden lg:inline">PDF保存</span>
             </a>
             <button
               type="button"
@@ -569,9 +606,9 @@ export const HelpAssistantModal: React.FC<{
 
         {/* Body Content */}
         {activeTab === 'chat' ? (
-          <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
             {/* Left Sidebar: Manual Chapters & Topics */}
-            <div className="hidden md:flex w-64 border-r border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 flex-col p-3.5 overflow-y-auto shrink-0">
+            <div className="hidden md:flex w-64 border-r border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 flex-col p-3.5 overflow-y-auto shrink-0 min-h-0 select-none">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   説明書 目次ジャンプ
@@ -613,17 +650,21 @@ export const HelpAssistantModal: React.FC<{
             </div>
 
             {/* Right Main Chat Area */}
-            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-slate-900">
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 select-text">
+            <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-white dark:bg-slate-900">
+              <div
+                ref={chatScrollContainerRef}
+                className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4 min-h-0"
+              >
                 {messages.map((msg) => (
                   <div
                     key={msg.id}
+                    id={msg.id}
                     className={`flex flex-col ${
                       msg.role === 'user' ? 'items-end' : 'items-start'
                     }`}
                   >
                     <div
-                      className={`max-w-[88%] sm:max-w-[80%] rounded-2xl px-4 py-3 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap ${
+                      className={`max-w-[90%] sm:max-w-[82%] rounded-2xl px-4 py-3 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap ${
                         msg.role === 'user'
                           ? 'bg-blue-600 text-white rounded-br-xs shadow-xs font-medium'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-bl-xs border border-slate-200/80 dark:border-slate-700'
@@ -658,7 +699,7 @@ export const HelpAssistantModal: React.FC<{
                     {msg.role === 'assistant' &&
                       msg.suggestedQuestions &&
                       msg.suggestedQuestions.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5 max-w-[90%]">
+                        <div className="mt-2 flex flex-wrap gap-1.5 max-w-[92%]">
                           {msg.suggestedQuestions.map((sq, i) => (
                             <button
                               key={i}
@@ -674,7 +715,6 @@ export const HelpAssistantModal: React.FC<{
                       )}
                   </div>
                 ))}
-                <div ref={chatEndRef} />
               </div>
 
               {/* Bottom Chat Input Bar */}
@@ -683,7 +723,7 @@ export const HelpAssistantModal: React.FC<{
                   e.preventDefault();
                   handleSendQuestion();
                 }}
-                className="p-3 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 flex items-center gap-2 shrink-0"
+                className="p-3 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/70 flex items-center gap-2 shrink-0 select-none"
               >
                 <input
                   type="text"
@@ -695,7 +735,7 @@ export const HelpAssistantModal: React.FC<{
                 <button
                   type="submit"
                   disabled={!input.trim()}
-                  className={`px-4 py-2.5 rounded-full text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 transition-all cursor-pointer ${
+                  className={`px-4 py-2.5 rounded-full text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                     input.trim()
                       ? 'bg-blue-600 hover:bg-blue-700 shadow-xs'
                       : 'bg-slate-300 dark:bg-slate-700 cursor-not-allowed'
