@@ -465,17 +465,44 @@ def classify_equipment_label(raw_text: str):
 
     return None
 
+def extract_all_lines(page):
+    """
+    Extract vertical and horizontal lines from page vector drawings,
+    supporting path segments ('l') and rectangle strokes ('re') as well as thin filled rects.
+    """
+    v_lines = []
+    h_lines = []
+    for d in page.get_drawings():
+        r = fitz.Rect(d["rect"])
+        if r.width <= 3.5 and r.height >= 10.0:
+            v_lines.append(((r.x0 + r.x1) / 2.0, r.y0 - 2.0, r.y1 + 2.0))
+        if r.height <= 3.5 and r.width >= 10.0:
+            h_lines.append(((r.y0 + r.y1) / 2.0, r.x0 - 2.0, r.x1 + 2.0))
+        for it in d.get("items", []):
+            if it[0] == "l":
+                p1, p2 = it[1], it[2]
+                if abs(p1.x - p2.x) <= 2.0 and abs(p1.y - p2.y) >= 10.0:
+                    v_lines.append(((p1.x + p2.x) / 2.0, min(p1.y, p2.y) - 2.0, max(p1.y, p2.y) + 2.0))
+                elif abs(p1.y - p2.y) <= 2.0 and abs(p1.x - p2.x) >= 10.0:
+                    h_lines.append(((p1.y + p2.y) / 2.0, min(p1.x, p2.x) - 2.0, max(p1.x, p2.x) + 2.0))
+            elif it[0] == "re":
+                rect = fitz.Rect(it[1])
+                if rect.height >= 10.0 and rect.width >= 10.0:
+                    v_lines.append((rect.x0, rect.y0 - 2.0, rect.y1 + 2.0))
+                    v_lines.append((rect.x1, rect.y0 - 2.0, rect.y1 + 2.0))
+                    h_lines.append((rect.y0, rect.x0 - 2.0, rect.x1 + 2.0))
+                    h_lines.append((rect.y1, rect.x0 - 2.0, rect.x1 + 2.0))
+    v_lines.sort(key=lambda v: v[0])
+    h_lines.sort(key=lambda h: h[0])
+    return v_lines, h_lines
+
 def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
     """
     Tokenize PDF page (or clipped region) at the character level.
     Reconstructs justified/character-spaced words (e.g. '指 揮 台', '長 机') within table cells,
     while separating inline delimiters ('=', '→', '：', '(', ')') and symbol glyphs ('○', '◎', '×').
     """
-    v_lines = []
-    for d in page.get_drawings():
-        r = fitz.Rect(d["rect"])
-        if r.width <= 3.0 and r.height >= 12.0:
-            v_lines.append(((r.x0 + r.x1) / 2.0, r.y0 - 2.0, r.y1 + 2.0))
+    v_lines, _ = extract_all_lines(page)
 
     def has_v_line_between(x1: float, x2: float, y_mid: float) -> bool:
         if x2 <= x1:
@@ -579,62 +606,58 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
     VERT_EQUIPMENT_WORDS = {
         "電源", "ピアノ", "チャイム", "ドラ", "銅鑼", "指揮台", "譜面台", "椅子", "長机", "マイク",
         "部門", "団体名", "学校名", "バンド名", "出演順", "出演番号", "出場順", "出場番号", "受付番号",
-        "出演者名", "指揮者", "指揮者名", "指揮者氏名", "代表者名", "ふりがな", "フリガナ", "備考",
+        "出演者名", "出演者", "指揮者", "指揮者名", "指揮者氏名", "代表者名", "ふりがな", "フリガナ", "備考",
     }
-    consumed_vert = set()  # (line_idx, tok_idx)
+    tok_id = 0
+    for l in lines:
+        for t in l["tokens"]:
+            t["id"] = tok_id
+            tok_id += 1
+
+    consumed_ids = set()
     n_lines = len(lines)
     for l_i in range(n_lines):
-        for t_i, tok in enumerate(lines[l_i]["tokens"]):
-            if (l_i, t_i) in consumed_vert or tok["type"] != "WORD" or len(tok["text"]) > 2:
+        for tok in lines[l_i]["tokens"]:
+            if tok["id"] in consumed_ids or tok["type"] != "WORD" or len(tok["text"]) > 2:
                 continue
-            chain = [(l_i, t_i, tok)]
+            chain = [(l_i, tok)]
             cur_rect = fitz.Rect(tok["rect"])
             cur_cx = (cur_rect.x0 + cur_rect.x1) / 2.0
             for next_l in range(l_i + 1, min(n_lines, l_i + 6)):
                 found_next = None
-                for nt_i, ntok in enumerate(lines[next_l]["tokens"]):
-                    if (next_l, nt_i) in consumed_vert or ntok["type"] != "WORD" or len(ntok["text"]) > 2:
+                for ntok in lines[next_l]["tokens"]:
+                    if ntok["id"] in consumed_ids or ntok["type"] != "WORD" or len(ntok["text"]) > 2:
                         continue
                     nr = ntok["rect"]
                     ncx = (nr.x0 + nr.x1) / 2.0
                     v_gap = nr.y0 - cur_rect.y1
-                    if abs(ncx - cur_cx) <= 5.0 and -2.0 <= v_gap <= 14.0:
-                        found_next = (next_l, nt_i, ntok)
+                    if abs(ncx - cur_cx) <= 6.0 and -2.0 <= v_gap <= 14.0:
+                        found_next = (next_l, ntok)
                         break
                 if found_next:
                     chain.append(found_next)
-                    cur_rect = cur_rect | found_next[2]["rect"]
-                    joined_so_far = "".join(item[2]["text"] for item in chain)
+                    cur_rect = cur_rect | found_next[1]["rect"]
+                    joined_so_far = "".join(item[1]["text"] for item in chain)
                     if joined_so_far in VERT_EQUIPMENT_WORDS or classify_equipment_label(joined_so_far):
                         break
                 elif lines[next_l]["y_mid"] - cur_rect.y1 > 16.0:
                     break
             if len(chain) >= 2:
-                joined_txt = "".join(item[2]["text"] for item in chain)
+                joined_txt = "".join(item[1]["text"] for item in chain)
                 if joined_txt in VERT_EQUIPMENT_WORDS or classify_equipment_label(joined_txt):
-                    u_rect = fitz.Rect(chain[0][2]["rect"])
+                    u_rect = fitz.Rect(chain[0][1]["rect"])
                     u_chars = []
-                    for ch_l, ch_t, ch_tok in chain:
+                    for _, ch_tok in chain:
                         u_rect |= ch_tok["rect"]
                         u_chars.extend(ch_tok["chars"])
-                        consumed_vert.add((ch_l, ch_t))
-                    # Attach the reconstructed token to the chain line that has choice/tally tokens to its right
-                    best_line_idx = chain[len(chain) // 2][0]
-                    for ch_l, _, _ in chain:
-                        has_right_neighbor = any(
-                            other_t["rect"].x0 > u_rect.x1 and (other_t["rect"].x0 - u_rect.x1) < 60.0
-                            for other_t in lines[ch_l]["tokens"]
-                        )
-                        if has_right_neighbor:
-                            best_line_idx = ch_l
-                            break
-                    for ch_l, ch_t, ch_tok in reversed(chain):
-                        if ch_l == best_line_idx:
-                            ch_tok["text"] = joined_txt
-                            ch_tok["rect"] = u_rect
-                            ch_tok["chars"] = u_chars
-                        else:
-                            lines[ch_l]["tokens"].pop(ch_t)
+                        consumed_ids.add(ch_tok["id"])
+                    chain[0][1]["text"] = joined_txt
+                    chain[0][1]["rect"] = u_rect
+                    chain[0][1]["chars"] = u_chars
+                    consumed_ids.remove(chain[0][1]["id"])
+
+    for l in lines:
+        l["tokens"] = [t for t in l["tokens"] if t["id"] not in consumed_ids]
 
     return lines
 
@@ -2182,17 +2205,15 @@ async def preview_bg(req: PreviewRequest):
                             emit_slot(ts, tier_counts[idx_t], f"{k}_tier_{idx_t}", force_write_zero=(tier_counts[idx_t] == 0))
 
         # Step 4: 団体名・指揮者氏名・番号などのテキスト入力欄を自動検出し、係記入欄（「係が記入」「記入しないで」等）を除外して配置
+        v_lines, h_lines = extract_all_lines(page)
+
         STAFF_ONLY_KEYWORDS = (
             "係が記入", "係で記入", "係員記入", "係記入", "係専用", "係のみ", "係の記入",
-            "係が", "係で", "係員", "係の方", "係欄", "係用", "係",
-            "※係", "（係", "(係", "【係", "［係", "[係",
-            "事務局記入", "事務局", "本部記入", "本部", "主催者記入", "主催者",
-            "受付記入", "受付で記入", "受付用",
-            "審査員記入", "審査員", "審査欄", "講評欄", "審査", "講評", "採点", "点数",
-            "計時", "タイム", "演奏時間",
-            "記入しない", "書かない", "入力しない", "記入不要", "記入はしない",
-            "空欄のまま", "未記入のまま", "未記入", "空欄",
-            "記入禁止", "記入不可", "記入ご遠慮", "ここには記入",
+            "※係", "（係", "(係", "【係", "［係", "[係", "係で記入します", "係が記入します",
+            "事務局記入", "事務局用", "本部記入", "本部用", "主催者記入", "主催者用",
+            "受付記入", "受付で記入", "受付専用", "受付欄",
+            "審査員記入", "審査欄", "講評欄", "採点欄", "点数欄",
+            "記入しないで", "記入不要", "空欄のまま", "未記入のまま", "記入禁止", "記入不可",
         )
         FORM_FIELD_PATTERNS = [
             {
@@ -2200,21 +2221,21 @@ async def preview_bg(req: PreviewRequest):
                 "labels": ["出演団体名", "出場団体名", "団体名", "学校名", "バンド名"],
                 "placeholder": "団体名を入力",
                 "font_size": 20,
-                "min_blank_pt": 35.0,
+                "min_blank_pt": 30.0,
             },
             {
                 "key": "conductor",
-                "labels": ["指揮者氏名", "指揮者名", "出演者氏名", "出演者名", "代表者氏名", "代表者名"],
+                "labels": ["指揮者氏名", "指揮者名", "指揮者", "出演者氏名", "出演者名", "出演者", "代表者氏名", "代表者名"],
+                "neg": ["譜面台", "台", "椅子", "イス", "賞"],
                 "placeholder": "指揮者氏名を入力",
                 "font_size": 20,
-                "min_blank_pt": 30.0,
+                "min_blank_pt": 25.0,
             },
             {
                 "key": "furigana",
                 "labels": [
                     "ふりがな", "フリガナ", "ふり・がな", "フリ・ガナ",
                     "（ふりがな）", "(ふりがな)", "（フリガナ）", "(フリガナ)",
-                    "（ふり・がな）", "(ふり・がな)", "（フリ・ガナ）", "(フリ・ガナ)",
                     "ルビ", "（ルビ）", "(ルビ)", "かな", "カナ",
                 ],
                 "placeholder": "ふりがなを入力",
@@ -2238,73 +2259,61 @@ async def preview_bg(req: PreviewRequest):
             },
             {
                 "key": "division",
-                "labels": ["部門"],
+                "labels": ["部門", "の部"],
                 "placeholder": "部門を入力",
                 "font_size": 18,
-                "min_blank_pt": 28.0,
+                "min_blank_pt": 25.0,
             },
         ]
 
-        # ページ内の全「係記入・記入禁止」キーワードの領域を事前に収集（セル上下の注釈も捕捉可能にする）
-        staff_only_regions = []
+        staff_regions = []
         for ln in tokenized_lines:
             for tok in ln["tokens"]:
-                clean_tok = tok["text"].replace(" ", "").replace("　", "")
-                if any(kw in clean_tok for kw in STAFF_ONLY_KEYWORDS):
-                    staff_only_regions.append((tok["rect"], clean_tok))
+                ct = tok["text"].replace(" ", "").replace("　", "")
+                if any(kw in ct for kw in STAFF_ONLY_KEYWORDS):
+                    staff_regions.append((tok["rect"], ct))
             full_ln = "".join(c["ch"] for c in ln["chars"]).replace(" ", "").replace("　", "")
-            if any(kw in full_ln for kw in STAFF_ONLY_KEYWORDS):
-                ln_rect = fitz.Rect(ln["chars"][0]["rect"].x0, ln["chars"][0]["rect"].y0,
-                                    ln["chars"][-1]["rect"].x1, ln["chars"][-1]["rect"].y1)
-                staff_only_regions.append((ln_rect, full_ln))
+            for kw in STAFF_ONLY_KEYWORDS:
+                if kw in full_ln:
+                    idx = full_ln.find(kw)
+                    if idx < len(ln["chars"]):
+                        kw_r = fitz.Rect(
+                            ln["chars"][idx]["rect"].x0,
+                            ln["chars"][idx]["rect"].y0,
+                            ln["chars"][min(idx + len(kw) - 1, len(ln["chars"]) - 1)]["rect"].x1,
+                            ln["chars"][min(idx + len(kw) - 1, len(ln["chars"]) - 1)]["rect"].y1,
+                        )
+                        staff_regions.append((kw_r, kw))
 
-        # 垂直罫線リスト（セル境界の判定用）
-        form_v_lines = []
-        for d in drawings:
-            r = fitz.Rect(d["rect"])
-            if r.width <= 3.5 and r.height >= 12.0:
-                form_v_lines.append(((r.x0 + r.x1) / 2.0, r.y0 - 2.0, r.y1 + 2.0))
-        form_v_lines.sort(key=lambda v: v[0])
-
-        def is_staff_only_region(anchor_r: fitz.Rect, blank_x0: float, blank_x1: float, line_text: str) -> bool:
-            # 1) ラベル行そのものに係記入キーワードが含まれているかチェック
+        def is_staff_only_region(tr: fitz.Rect, blank_x0: float, blank_x1: float, line_text: str) -> bool:
             clean_line = line_text.replace(" ", "").replace("　", "")
-            if any(kw in clean_line for kw in ("※係", "（係", "(係", "係記入", "係専用", "係のみ", "係が記入", "記入しないで")):
-                return True
-
-            y_mid = (anchor_r.y0 + anchor_r.y1) / 2.0
-            field_x0 = anchor_r.x0 - 25.0
-            field_x1 = max(blank_x1 + 30.0, anchor_r.x1 + 40.0)
-
-            # 2) 事前収集した係記入領域（直上・直下・同セル内の注釈: 上下50pt以内かつ水平重なり）をチェック
-            for s_rect, _ in staff_only_regions:
-                # 水平方向に重なりまたは至近
-                if not (s_rect.x1 < field_x0 or s_rect.x0 > field_x1):
-                    # 垂直方向に近いか（同じ行、または直上・直下の注釈）
-                    if abs((s_rect.y0 + s_rect.y1) / 2.0 - y_mid) <= 50.0:
+            if any(kw in clean_line for kw in ("※係", "（係", "(係", "【係", "［係", "[係", "係記入", "係専用", "係のみ", "係で記入", "係が記入", "記入しないで")):
+                for s_rect, _ in staff_regions:
+                    if abs((s_rect.y0 + s_rect.y1) / 2.0 - (tr.y0 + tr.y1) / 2.0) <= 25.0:
+                        if not (s_rect.x1 < tr.x0 - 20.0 or s_rect.x0 > blank_x1 + 30.0):
+                            return True
+            y_mid = (tr.y0 + tr.y1) / 2.0
+            for s_rect, _ in staff_regions:
+                s_ymid = (s_rect.y0 + s_rect.y1) / 2.0
+                if abs(s_ymid - y_mid) <= 50.0:
+                    if not (s_rect.x1 < (tr.x0 - 15.0) or s_rect.x0 > (blank_x1 + 15.0)):
                         return True
-
-            # 3) 自身の空欄範囲〜直後（最大+35pt）またはラベル直前に係記入キーワードがあるかチェック
-            check_x0 = max(0.0, anchor_r.x0 - 25.0)
-            check_x1 = min(blank_x1 + 35.0, blank_x0 + 180.0)
-            for ln in tokenized_lines:
-                if abs(ln["y_mid"] - y_mid) <= 28.0:
-                    sub_txt = "".join(
-                        c["ch"] for c in ln["chars"]
-                        if check_x0 <= c["rect"].x0 <= check_x1
-                    )
-                    if any(kw in sub_txt for kw in STAFF_ONLY_KEYWORDS):
-                        return True
-                    # 行全体に係記入キーワードがある場合、そのキーワードの開始X座標がこのフィールドのセル範囲内にあるか判定
-                    full_ln = "".join(c["ch"] for c in ln["chars"])
-                    if any(kw in full_ln for kw in STAFF_ONLY_KEYWORDS):
-                        for kw in STAFF_ONLY_KEYWORDS:
-                            kw_idx = full_ln.find(kw)
-                            if kw_idx != -1 and kw_idx < len(ln["chars"]):
-                                kw_x = ln["chars"][kw_idx]["rect"].x0
-                                if (anchor_r.x0 - 25.0) <= kw_x <= (blank_x1 + 25.0):
-                                    return True
             return False
+
+        def find_cell_right(tr: fitz.Rect):
+            y_mid = (tr.y0 + tr.y1) / 2.0
+            h_above = [hy for (hy, hx0, hx1) in h_lines if hx0 <= tr.x0 <= hx1 and hy <= y_mid + 2.0]
+            h_below = [hy for (hy, hx0, hx1) in h_lines if hx0 <= tr.x0 <= hx1 and hy >= y_mid - 2.0]
+            y_top = max(h_above) if h_above else tr.y0 - 2.0
+            y_bot = min(h_below) if h_below else tr.y1 + 2.0
+
+            v_right = [vx for (vx, vy0, vy1) in v_lines if vy0 <= y_mid <= vy1 and tr.x1 - 2.0 <= vx <= tr.x1 + 30.0]
+            if not v_right:
+                return None
+            cell_x0 = v_right[0]
+            v_next = [vx for (vx, vy0, vy1) in v_lines if vy0 <= y_mid <= vy1 and vx >= cell_x0 + 15.0]
+            cell_x1 = v_next[0] if v_next else page_w - 20.0
+            return (cell_x0 + 4.0, cell_x1 - 4.0, (y_top + y_bot) / 2.0)
 
         emitted_field_coords = []
         field_seq = 0
@@ -2312,9 +2321,8 @@ async def preview_bg(req: PreviewRequest):
 
         for line in tokenized_lines:
             full_line_text = "".join(c["ch"] for c in line["chars"])
-            # タイトル行や注意書き文（「〜を記入してください」「〜提出」などの長文）はスキップ
-            if any(skip_w in full_line_text for skip_w in ("記入してください", "提出してください", "コピー", "ステージ配置図", "セッティングシート")):
-                if len(full_line_text) > 25 and "団体名" not in full_line_text and "プログラム" not in full_line_text:
+            if any(skip_w in full_line_text for skip_w in ("記入してください", "提出してください", "ステージ配置図", "セッティングシート", "音楽会合同音楽会")):
+                if len(full_line_text) > 30 and "団体名" not in full_line_text and "プログラム" not in full_line_text:
                     continue
 
             toks = line["tokens"]
@@ -2323,120 +2331,176 @@ async def preview_bg(req: PreviewRequest):
                     continue
                 t_text = tok["text"]
                 tr = tok["rect"]
+                y_mid = (tr.y0 + tr.y1) / 2.0
 
                 for fp in FORM_FIELD_PATTERNS:
                     f_key = fp["key"]
                     matched_lbl = None
 
+                    # Special case: '第 X 日目'
                     if f_key == "day_no":
                         if t_text == "第":
-                            # 直後のトークンに「日目」があるか確認
                             next_tok = toks[t_idx + 1] if (t_idx + 1) < len(toks) else None
                             if next_tok and next_tok["text"].startswith("日目"):
                                 gap_w = next_tok["rect"].x0 - tr.x1
                                 if gap_w >= fp["min_blank_pt"]:
-                                    blank_x0 = tr.x1 + 2.0
-                                    blank_x1 = next_tok["rect"].x0 - 2.0
-                                    if not is_staff_only_region(tr, blank_x0, blank_x1, full_line_text):
-                                        cx_pt = (blank_x0 + blank_x1) / 2.0
-                                        cy_pt = (tr.y0 + tr.y1) / 2.0 - fp["font_size"] * 0.25
+                                    bx0, bx1 = tr.x1 + 2.0, next_tok["rect"].x0 - 2.0
+                                    if not is_staff_only_region(tr, bx0, bx1, full_line_text):
+                                        target_x_pt = (bx0 + bx1) / 2.0
+                                        target_y_pt = y_mid - fp["font_size"] * 0.26
                                         field_seq += 1
                                         auto_nodes.append({
                                             "id": f"field_{f_key}_{field_seq}",
                                             "type": "text",
                                             "text": fp["placeholder"],
-                                            "x": round(cx_pt * 2.0 - 10.0),
-                                            "y": round(cy_pt * 2.0),
+                                            "x": round(target_x_pt * 2.0 - 10.0),
+                                            "y": round(target_y_pt * 2.0),
                                             "fontSize": fp["font_size"],
                                             "radius": 15,
                                         })
-                                        emitted_field_coords.append((cx_pt, cy_pt))
+                                        emitted_field_coords.append((target_x_pt, target_y_pt))
                         continue
 
-                    clean_t = re.sub(r"[（）()【】\[\]:：・\s]", "", t_text)
-                    for lbl in fp["labels"]:
-                        clean_lbl = re.sub(r"[（）()【】\[\]:：・\s]", "", lbl)
-                        if t_text == lbl or clean_t == clean_lbl or (len(clean_lbl) >= 3 and clean_t.startswith(clean_lbl) and len(clean_t) <= len(clean_lbl) + 2):
-                            matched_lbl = lbl
-                            break
-                    if not matched_lbl:
-                        continue
-
-                    # 「プログラム ○○ 番」のように後ろに「番」がある場合
-                    next_tok = toks[t_idx + 1] if (t_idx + 1) < len(toks) else None
-                    if f_key == "program_no" and next_tok and next_tok["text"].startswith("番"):
-                        blank_x0 = tr.x1 + 2.0
-                        blank_x1 = next_tok["rect"].x0 - 2.0
-                        if (blank_x1 - blank_x0) >= fp["min_blank_pt"]:
-                            if not is_staff_only_region(tr, blank_x0, blank_x1, full_line_text):
-                                cx_pt = (blank_x0 + blank_x1) / 2.0
-                                cy_pt = (tr.y0 + tr.y1) / 2.0 - fp["font_size"] * 0.25
-                                if not any(abs(ex - cx_pt) < 20.0 and abs(ey - cy_pt) < 12.0 for ex, ey in emitted_field_coords):
+                    # Special case: '［　］部門' or '[　] 部門' (preceding brackets)
+                    if f_key == "division" and (t_text == "部門" or t_text.endswith("部門")):
+                        prev_tokens = toks[:t_idx]
+                        open_b = None
+                        close_b = None
+                        for pt in reversed(prev_tokens):
+                            if pt["text"] in ("]", "］", "】", ")", "）"):
+                                close_b = pt
+                            elif pt["text"] in ("[", "［", "【", "(", "（") and close_b:
+                                open_b = pt
+                                break
+                        if open_b and close_b and (close_b["rect"].x0 - open_b["rect"].x1) >= fp["min_blank_pt"]:
+                            bx0 = open_b["rect"].x1 + 2.0
+                            bx1 = close_b["rect"].x0 - 2.0
+                            if not is_staff_only_region(tr, bx0, bx1, full_line_text):
+                                target_x_pt = (bx0 + bx1) / 2.0 - len(fp["placeholder"]) * 4.0
+                                target_y_pt = y_mid - fp["font_size"] * 0.26
+                                if not any(abs(ex - target_x_pt) < 25.0 and abs(ey - target_y_pt) < 12.0 for ex, ey in emitted_field_coords):
                                     field_seq += 1
                                     auto_nodes.append({
                                         "id": f"field_{f_key}_{field_seq}",
                                         "type": "text",
                                         "text": fp["placeholder"],
-                                        "x": round(cx_pt * 2.0 - 16.0),
-                                        "y": round(cy_pt * 2.0),
+                                        "x": round(target_x_pt * 2.0),
+                                        "y": round(target_y_pt * 2.0),
                                         "fontSize": fp["font_size"],
                                         "radius": 15,
                                     })
-                                    emitted_field_coords.append((cx_pt, cy_pt))
+                                    emitted_field_coords.append((target_x_pt, target_y_pt))
+                                    continue
+
+                    # Special case: '... の部' (preceding blank)
+                    if f_key == "division" and t_text in ("の部", "部"):
+                        prev_x1 = toks[t_idx - 1]["rect"].x1 if t_idx > 0 else max(30.0, tr.x0 - 150.0)
+                        gap_w = tr.x0 - prev_x1
+                        if gap_w >= fp["min_blank_pt"]:
+                            bx0 = prev_x1 + 6.0
+                            bx1 = tr.x0 - 4.0
+                            if not is_staff_only_region(tr, bx0, bx1, full_line_text):
+                                target_x_pt = (bx0 + bx1) / 2.0 - len(fp["placeholder"]) * 4.0
+                                target_y_pt = y_mid - fp["font_size"] * 0.26
+                                if not any(abs(ex - target_x_pt) < 25.0 and abs(ey - target_y_pt) < 12.0 for ex, ey in emitted_field_coords):
+                                    field_seq += 1
+                                    auto_nodes.append({
+                                        "id": f"field_{f_key}_{field_seq}",
+                                        "type": "text",
+                                        "text": fp["placeholder"],
+                                        "x": round(target_x_pt * 2.0),
+                                        "y": round(target_y_pt * 2.0),
+                                        "fontSize": fp["font_size"],
+                                        "radius": 15,
+                                    })
+                                    emitted_field_coords.append((target_x_pt, target_y_pt))
+                                    continue
+
+                    # Negative keyword check
+                    if fp.get("neg") and any(neg in t_text for neg in fp["neg"]):
                         continue
 
-                    # 右隣のトークンまたはセル右端までの空欄幅を計算
-                    # 1) 同じ行の右隣トークンまでの距離
-                    next_token_x0 = page_w - 20.0
-                    for nt in toks[t_idx + 1:]:
-                        if nt["text"] in (":", "：", "・", "(", "（", ")", "）"):
-                            continue
-                        next_token_x0 = nt["rect"].x0
-                        break
+                    # Match field labels
+                    clean_t = re.sub(r"[（）()【】\[\]:：・\s]", "", t_text)
+                    for lbl in fp["labels"]:
+                        clean_lbl = re.sub(r"[（）()【】\[\]:：・\s]", "", lbl)
+                        if t_text == lbl or clean_t == clean_lbl or (len(clean_lbl) >= 3 and clean_t.startswith(clean_lbl) and len(clean_t) <= len(clean_lbl) + 4):
+                            matched_lbl = lbl
+                            break
+                    if not matched_lbl:
+                        continue
 
-                    # 2) 垂直罫線がある場合は、ラベル右端のすぐ右にある区切り線と、さらにその右のセル終端線を探す
-                    y_mid = (tr.y0 + tr.y1) / 2.0
-                    v_after_label = [vx for (vx, vy0, vy1) in form_v_lines if vy0 <= y_mid <= vy1 and vx >= tr.x1 - 2.0]
-                    cell_x0 = tr.x1 + 8.0
-                    cell_x1 = next_token_x0
-                    if v_after_label:
-                        # ラベル直後の縦罫線（ラベルセルの右端）がある場合
-                        if v_after_label[0] - tr.x1 <= 18.0:
-                            cell_x0 = v_after_label[0] + 6.0
-                            if len(v_after_label) >= 2:
-                                cell_x1 = min(cell_x1, v_after_label[1] - 4.0)
+                    # 1) Try table cell to the right
+                    cell = find_cell_right(tr)
+                    blank_x0, blank_x1, target_y_pt = None, None, y_mid
+                    if cell:
+                        blank_x0, blank_x1, cell_ymid = cell
+                        target_y_pt = cell_ymid
+                        # If there is a '番' inside the cell, stop before '番'
+                        for nt in line["tokens"]:
+                            if nt["rect"].x0 > tr.x1 and nt["text"].startswith("番") and blank_x0 <= nt["rect"].x0 <= blank_x1:
+                                blank_x1 = nt["rect"].x0 - 2.0
+                                break
+
+                    # 2) If not in table cell, check brackets following the label
+                    if blank_x0 is None or (blank_x1 - blank_x0) < fp["min_blank_pt"]:
+                        open_b = None
+                        close_b = None
+                        for nt in toks[t_idx + 1:]:
+                            if nt["text"] in ("【", "[", "［", "(", "（") and not open_b:
+                                open_b = nt
+                            elif nt["text"] in ("】", "]", "］", ")", "）") and open_b:
+                                close_b = nt
+                                break
+                        if open_b and close_b and (close_b["rect"].x0 - open_b["rect"].x1) >= fp["min_blank_pt"]:
+                            blank_x0 = open_b["rect"].x1 + 4.0
+                            blank_x1 = close_b["rect"].x0 - 4.0
                         else:
-                            cell_x1 = min(cell_x1, v_after_label[0] - 4.0)
+                            # 3) Fallback: space until next token or right edge
+                            next_x0 = page_w - 20.0
+                            for nt in toks[t_idx + 1:]:
+                                if nt["text"] in (":", "：", "・", "(", "（", ")", "）", "【", "】", "［", "］"):
+                                    continue
+                                next_x0 = nt["rect"].x0
+                                break
+                            blank_x0 = tr.x1 + 6.0
+                            blank_x1 = next_x0 - 4.0
 
-                    blank_w = cell_x1 - cell_x0
+                    blank_w = blank_x1 - blank_x0
                     if blank_w < fp["min_blank_pt"]:
                         continue
 
-                    # 係記入欄・記入禁止欄のチェック
-                    if is_staff_only_region(tr, cell_x0, cell_x1, full_line_text):
+                    if is_staff_only_region(tr, blank_x0, blank_x1, full_line_text):
                         continue
 
-                    # 配置座標の決定（左寄せ＋適度な余白、または番号系は中央寄せ）
-                    if f_key == "program_no":
-                        target_x_pt = (cell_x0 + min(cell_x1, cell_x0 + 80.0)) / 2.0 - 10.0
-                    else:
-                        target_x_pt = cell_x0 + 6.0
-                    target_y_pt = (tr.y0 + tr.y1) / 2.0 - fp["font_size"] * 0.26
-
-                    if any(abs(ex - target_x_pt) < 25.0 and abs(ey - target_y_pt) < 12.0 for ex, ey in emitted_field_coords):
-                        continue
-
-                    # 出演者名やふりがななどのプレースホルダー名を適切に決定
+                    # Determine font size and placeholder text
+                    font_sz = fp["font_size"]
                     placeholder_txt = fp["placeholder"]
-                    if f_key == "conductor" and "出演者" in matched_lbl:
-                        placeholder_txt = "出演者名を入力"
-                    elif f_key == "conductor" and "代表者" in matched_lbl:
-                        placeholder_txt = "代表者名を入力"
+                    if f_key == "conductor":
+                        if blank_w < 65.0:
+                            font_sz = min(font_sz, 15)
+                            placeholder_txt = "出演者名" if "出演者" in matched_lbl else ("代表者名" if "代表者" in matched_lbl else "指揮者名")
+                        else:
+                            placeholder_txt = "出演者名を入力" if "出演者" in matched_lbl else ("代表者名を入力" if "代表者" in matched_lbl else "指揮者氏名を入力")
                     elif f_key == "furigana":
-                        if "フリガナ" in t_text or "フリ・ガナ" in t_text or "カナ" in t_text:
+                        if any(k in t_text for k in ("フリガナ", "カナ")):
                             placeholder_txt = "フリガナを入力"
                         else:
                             placeholder_txt = "ふりがなを入力"
+
+                    # Determine horizontal placement
+                    if f_key == "program_no":
+                        target_x_pt = (blank_x0 + min(blank_x1, blank_x0 + 70.0)) / 2.0 - 10.0
+                    elif blank_w > 100.0:
+                        target_x_pt = blank_x0 + 6.0
+                    else:
+                        target_x_pt = (blank_x0 + blank_x1) / 2.0 - len(placeholder_txt) * 4.0
+
+                    target_x_pt = max(blank_x0 + 4.0, target_x_pt)
+                    target_y_pt = target_y_pt - font_sz * 0.26
+
+                    if any(abs(ex - target_x_pt) < 25.0 and abs(ey - target_y_pt) < 12.0 for ex, ey in emitted_field_coords):
+                        continue
 
                     field_seq += 1
                     auto_nodes.append({
@@ -2445,20 +2509,18 @@ async def preview_bg(req: PreviewRequest):
                         "text": placeholder_txt,
                         "x": round(target_x_pt * 2.0),
                         "y": round(target_y_pt * 2.0),
-                        "fontSize": fp["font_size"],
+                        "fontSize": font_sz,
                         "radius": 15,
                     })
                     emitted_field_coords.append((target_x_pt, target_y_pt))
 
-                    # 団体名や指揮者の枠内に「ふりがな」「フリガナ」の併記がある場合、上部にふりがな用テキストボックスも生成
-                    has_inline_furi = ("ふりがな" in t_text or "フリガナ" in t_text or "ふりがな" in full_line_text or "フリガナ" in full_line_text)
-                    if has_inline_furi and f_key in ("org_name", "conductor"):
-                        furi_is_katakana = ("フリガナ" in t_text or "フリガナ" in full_line_text)
-                        furi_placeholder = "フリガナを入力" if furi_is_katakana else "ふりがなを入力"
+                    # Inline furigana in cell/box
+                    if f_key in ("org_name", "conductor") and ("ふりがな" in full_line_text or "フリガナ" in full_line_text):
                         furi_y_pt = target_y_pt - 18.0
                         furi_x_pt = target_x_pt
                         if not any(abs(ex - furi_x_pt) < 20.0 and abs(ey - furi_y_pt) < 10.0 for ex, ey in emitted_field_coords):
                             field_seq += 1
+                            furi_placeholder = "フリガナを入力" if "フリガナ" in full_line_text else "ふりがなを入力"
                             auto_nodes.append({
                                 "id": f"field_furigana_{field_seq}",
                                 "type": "text",
