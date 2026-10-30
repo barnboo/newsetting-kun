@@ -2174,11 +2174,11 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           <button
             type="button"
             onClick={onBack}
-            className="liquid-btn flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-slate-800 text-xs font-bold transition-all shrink-0 cursor-pointer"
+            className="liquid-btn flex items-center gap-1.5 px-3 py-1.5 rounded-full text-slate-800 text-xs font-bold transition-all shrink-0 cursor-pointer"
             title="ステージ配置画面に戻る"
           >
             <span>←</span>
-            <span>ステージへ戻る</span>
+            <span className="hidden sm:inline">配置へ</span>
           </button>
           <div className="h-5 w-px bg-slate-300/60" />
           <div className="flex items-center gap-2.5 shrink-0">
@@ -2240,7 +2240,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             <span className="text-slate-300">›</span>
             <div className="flex items-center gap-1.5 font-bold text-[#007AFF] bg-white/90 px-3 py-1 rounded-full shadow-xs border border-white/80">
               <span className="w-4 h-4 rounded-full bg-[#007AFF] text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">3</span>
-              <span>プレビュー・出力 (現在地)</span>
+              <span>プレビュー・出力</span>
             </div>
           </div>
         </div>
@@ -2378,28 +2378,28 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           <button
             type="button"
             onClick={() => handleAddText()}
-            className="liquid-btn flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[#007AFF] text-xs font-bold transition-all shrink-0 cursor-pointer"
+            className="liquid-btn flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[#007AFF] text-xs font-bold transition-all shrink-0 cursor-pointer"
             title="文字を追加して任意の場所に配置"
           >
             <span className="font-bold">T</span>
-            <span>文字追加</span>
+            <span className="hidden sm:inline">文字</span>
           </button>
 
           <button
             type="button"
             onClick={() => handleAddShape()}
-            className="liquid-btn flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-slate-800 text-xs font-bold transition-all shrink-0 cursor-pointer"
+            className="liquid-btn flex items-center gap-1.5 px-3 py-1.5 rounded-full text-slate-800 text-xs font-bold transition-all shrink-0 cursor-pointer"
             title="図形（丸・ばつ・四角・三角）を追加して配置"
           >
             <span>◇</span>
-            <span>図形追加</span>
+            <span className="hidden sm:inline">図形</span>
           </button>
 
           {/* Toggle Bezier Curves in Output */}
           <button
             type="button"
             onClick={() => setShowCurveLines(prev => !prev)}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-xs font-semibold shadow-2xs transition-all shrink-0 cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold shadow-2xs transition-all shrink-0 cursor-pointer ${
               showCurveLines
                 ? 'bg-purple-500/15 border-purple-400/50 text-purple-700 hover:bg-purple-500/20'
                 : 'liquid-btn text-slate-600'
@@ -2407,7 +2407,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             title="出力プレビュー内のベジェ曲線の線（ガイド線）の表示/非表示を切り替えます"
           >
             <span className="font-bold">〜</span>
-            <span>ベジェ線: {showCurveLines ? '表示' : '非表示'}</span>
+            <span>曲線線</span>
           </button>
 
           {/* Highlight User-added Objects Mode Button */}
@@ -2419,19 +2419,19 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                 try {
                   localStorage.setItem('stajet_preview_highlight_user_objects', String(next));
                 } catch {}
-                showToast(next ? '追加要素の強調モードをONにしました（元データと区別しやすく表示中）' : '追加要素の強調モードをOFFにしました');
+                showToast(next ? '追加要素の強調モードをONにしました' : '追加要素の強調モードをOFFにしました');
                 return next;
               });
             }}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-xs font-bold transition-all shrink-0 cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold transition-all shrink-0 cursor-pointer ${
               highlightUserObjects
                 ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-md shadow-amber-500/30 ring-2 ring-amber-400/50'
                 : 'liquid-btn text-slate-700 dark:text-slate-200 border-slate-300/80 dark:border-white/10 hover:border-amber-400 hover:text-amber-600'
             }`}
-            title="プレビュー上で入力・配置した文字や図形を枠線とバッジで強調表示し、元のPDF用紙やステージ画像と見分けやすくします（出力時は強調されません）"
+            title="プレビュー上で入力・配置した文字や図形を枠線とバッジで強調表示（出力時は強調されません）"
           >
             <Highlighter className="w-3.5 h-3.5" />
-            <span>{highlightUserObjects ? '追加要素: 強調中' : '追加要素を強調'}</span>
+            <span className="hidden md:inline">強調</span>
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
               highlightUserObjects ? 'bg-white/30 text-white' : 'bg-slate-200/80 dark:bg-slate-700 text-slate-500'
             }`}>
@@ -2443,11 +2443,11 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             <button
               type="button"
               onClick={handleOpenCopySceneModal}
-              className="liquid-btn flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-blue-600 dark:text-blue-400 text-xs font-bold transition-all shrink-0 cursor-pointer border border-blue-200/60 dark:border-blue-500/30 bg-blue-50/50 dark:bg-blue-500/10 hover:bg-blue-100/60"
+              className="liquid-btn flex items-center gap-1.5 px-3 py-1.5 rounded-full text-blue-600 dark:text-blue-400 text-xs font-bold transition-all shrink-0 cursor-pointer border border-blue-200/60 dark:border-blue-500/30 bg-blue-50/50 dark:bg-blue-500/10 hover:bg-blue-100/60"
               title="現在の場面で配置した文字や図形を、他の場面へ一括で複製します"
             >
               <Copy className="w-3.5 h-3.5" />
-              <span>他場面に複製</span>
+              <span className="hidden sm:inline">複製</span>
             </button>
           )}
 
@@ -2457,11 +2457,11 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             <button
               type="button"
               onClick={onExportJson}
-              className="liquid-btn flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-slate-800 text-xs font-bold transition-all shrink-0 cursor-pointer"
+              className="liquid-btn flex items-center gap-1.5 px-3 py-1.5 rounded-full text-slate-800 text-xs font-bold transition-all shrink-0 cursor-pointer"
               title="現在の全場面・配置データをJSONファイルとしてダウンロード保存します"
             >
               <span>↓</span>
-              <span>JSON保存</span>
+              <span className="hidden sm:inline">JSON</span>
             </button>
           )}
 
@@ -2470,7 +2470,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             type="button"
             onClick={handleExport}
             disabled={isExporting}
-            className="liquid-btn-primary flex items-center gap-2 px-5 py-2 rounded-full text-white text-xs sm:text-sm font-bold transition-all shrink-0 disabled:opacity-50 cursor-pointer"
+            className="liquid-btn-primary flex items-center gap-2 px-4 py-2 rounded-full text-white text-xs sm:text-sm font-bold transition-all shrink-0 disabled:opacity-50 cursor-pointer"
+            title="PDFをダウンロード出力"
           >
             {isExporting ? (
               <span className="animate-spin inline-block text-xs font-bold">↻</span>
@@ -2479,10 +2480,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
             )}
             <span>
               {isExporting
-                ? '書き出し中...'
-                : effectiveScenes.length > 1
-                ? `全${effectiveScenes.length}場面を一括PDF出力`
-                : 'PDFをダウンロード'}
+                ? '出力中...'
+                : 'PDF出力'}
             </span>
           </button>
         </div>
@@ -2762,11 +2761,10 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                       <button
                         type="button"
                         onClick={handleDeleteSelected}
-                        className="text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 px-2.5 py-1 rounded-full font-semibold text-[11px] transition-colors cursor-pointer flex items-center gap-1"
-                        title="BackspaceまたはDeleteキーでも削除できます"
+                        className="text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 p-1 rounded-full font-semibold transition-colors cursor-pointer flex items-center justify-center"
+                        title="削除 (Delete / Backspace)"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>削除 (Backspace)</span>
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
 

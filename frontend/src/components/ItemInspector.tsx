@@ -112,72 +112,72 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <AlignJustify className="w-3.5 h-3.5 text-[#007AFF]" />
               <span>一括整列・均等配置:</span>
             </span>
-            <div className="grid grid-cols-3 gap-1 text-[11px]">
+            <div className="grid grid-cols-3 gap-1 text-xs">
               <button
                 type="button"
                 onClick={() => onAlign('left')}
-                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="左揃え"
               >
-                ← 左揃え
+                ←
               </button>
               <button
                 type="button"
                 onClick={() => onAlign('centerH')}
-                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="水平中央揃え"
               >
-                ↔ 左右中央
+                ↔
               </button>
               <button
                 type="button"
                 onClick={() => onAlign('right')}
-                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="右揃え"
               >
-                → 右揃え
+                →
               </button>
               <button
                 type="button"
                 onClick={() => onAlign('top')}
-                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="上揃え"
               >
-                ↑ 上揃え
+                ↑
               </button>
               <button
                 type="button"
                 onClick={() => onAlign('centerV')}
-                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="垂直中央揃え"
               >
-                ↕ 上下中央
+                ↕
               </button>
               <button
                 type="button"
                 onClick={() => onAlign('bottom')}
-                className="py-1 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="下揃え"
               >
-                ↓ 下揃え
+                ↓
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-1 text-[11px] pt-1 border-t border-slate-200 dark:border-slate-600">
+            <div className="grid grid-cols-2 gap-1 text-xs pt-1 border-t border-slate-200 dark:border-slate-600">
               <button
                 type="button"
                 onClick={() => onAlign('distributeH')}
-                className="py-1 px-1.5 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1.5 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="水平等間隔に整列"
               >
-                || 左右等間隔
+                ||
               </button>
               <button
                 type="button"
                 onClick={() => onAlign('distributeV')}
-                className="py-1 px-1.5 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1.5 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="垂直等間隔に整列"
               >
-                = 上下等間隔
+                =
               </button>
             </div>
           </div>
@@ -187,38 +187,38 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         {onMoveOrder && (
           <div className="p-3 liquid-card rounded-2xl space-y-1.5">
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">層（重なり順）:</span>
-            <div className="grid grid-cols-2 gap-1.5 text-xs">
+            <div className="grid grid-cols-4 gap-1 text-xs">
               <button
                 type="button"
                 onClick={() => onMoveOrder('forward')}
-                className="py-1.5 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="1段階前面へ"
               >
-                ▲ 前面へ
+                ▲
               </button>
               <button
                 type="button"
                 onClick={() => onMoveOrder('backward')}
-                className="py-1.5 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="1段階背面へ"
               >
-                ▼ 背面へ
+                ▼
               </button>
               <button
                 type="button"
                 onClick={() => onMoveOrder('front')}
-                className="py-1 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 text-[11px] text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="最前面へ"
               >
-                ↑ 最前面
+                ⇈
               </button>
               <button
                 type="button"
                 onClick={() => onMoveOrder('back')}
-                className="py-1 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 text-[11px] text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="最背面へ"
               >
-                ↓ 最背面
+                ⇊
               </button>
             </div>
           </div>
@@ -230,9 +230,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               type="button"
               onClick={onTogglePin}
               className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+              title="選択オブジェクトを固定/解除 (Ctrl+F)"
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>選択オブジェクトを固定/解除 (Ctrl+F)</span>
+              <span>固定 / 解除</span>
             </button>
           )}
           {onDuplicateSelected && (
@@ -240,9 +241,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               type="button"
               onClick={onDuplicateSelected}
               className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+              title="選択したオブジェクトを複製 (Ctrl+D)"
             >
               <Copy className="w-3.5 h-3.5" />
-              <span>選択したオブジェクトを複製</span>
+              <span>複製</span>
             </button>
           )}
           {onDeleteSelected && (
@@ -250,9 +252,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               type="button"
               onClick={onDeleteSelected}
               className="w-full py-2.5 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-300 rounded-lg text-xs font-semibold border border-red-200 dark:border-red-800 transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+              title="選択したアイテムを一括削除 (Delete)"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>選択したアイテムを一括削除</span>
+              <span>一括削除</span>
             </button>
           )}
         </div>
@@ -325,9 +328,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
           </div>
           <button
             onClick={() => onDeleteItem(selectedItem.id)}
-            className="text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 px-2 py-1 rounded"
+            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded transition-colors cursor-pointer"
+            title="削除"
           >
-            削除
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
 
@@ -411,18 +415,18 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <button
                 type="button"
                 onClick={() => onMoveOrder('forward')}
-                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-slate-600"
+                className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-600 cursor-pointer"
                 title="1段階前面へ"
               >
-                ▲ 前面へ
+                ▲
               </button>
               <button
                 type="button"
                 onClick={() => onMoveOrder('backward')}
-                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-slate-600"
+                className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-600 cursor-pointer"
                 title="1段階背面へ"
               >
-                ▼ 背面へ
+                ▼
               </button>
             </div>
           </div>
@@ -926,9 +930,11 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         <div className="pt-4 mt-auto">
           <button
             onClick={() => onDuplicateItem(selectedItem.id)}
-            className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold py-2 rounded transition-colors"
+            className="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+            title="複製 (Ctrl+D)"
           >
-            複製する
+            <Copy className="w-3.5 h-3.5" />
+            <span>複製</span>
           </button>
         </div>
       </div>
@@ -975,9 +981,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
           </div>
           <button
             onClick={() => onDeleteCurve(selectedCurve.id)}
-            className="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded cursor-pointer"
+            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded transition-colors cursor-pointer"
+            title="曲線を削除"
           >
-            削除
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
 
@@ -1086,38 +1093,38 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         {onMoveOrder && (
           <div className="p-3 liquid-card rounded-2xl space-y-1.5">
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">層（重なり順）:</span>
-            <div className="grid grid-cols-2 gap-1.5 text-xs">
+            <div className="grid grid-cols-4 gap-1 text-xs">
               <button
                 type="button"
                 onClick={() => onMoveOrder('forward')}
-                className="py-1.5 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="1段階前面へ"
               >
-                ▲ 前面へ
+                ▲
               </button>
               <button
                 type="button"
                 onClick={() => onMoveOrder('backward')}
-                className="py-1.5 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 font-medium text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="1段階背面へ"
               >
-                ▼ 背面へ
+                ▼
               </button>
               <button
                 type="button"
                 onClick={() => onMoveOrder('front')}
-                className="py-1 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 text-[11px] text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="最前面へ"
               >
-                ↑ 最前面
+                ⇈
               </button>
               <button
                 type="button"
                 onClick={() => onMoveOrder('back')}
-                className="py-1 px-2 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded text-slate-700 dark:text-slate-200 text-[11px] text-center"
+                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
                 title="最背面へ"
               >
-                ↓ 最背面
+                ⇊
               </button>
             </div>
           </div>
@@ -1236,20 +1243,18 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                           type="button"
                           disabled={activeItemIndex <= 0}
                           onClick={() => onMoveCurveItemOrder?.(selectedCurve.id, activeItem.id, 'left')}
-                          className="px-2.5 py-1 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer transition-all hover:scale-102 active:scale-98"
+                          className="w-8 h-7 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95"
                           title="左隣（始点側）へ移動 ([ または Alt+←])"
                         >
                           <ArrowLeft className="w-3.5 h-3.5" />
-                          <span>左隣へ</span>
                         </button>
                         <button
                           type="button"
                           disabled={activeItemIndex >= curveItems.length - 1}
                           onClick={() => onMoveCurveItemOrder?.(selectedCurve.id, activeItem.id, 'right')}
-                          className="px-2.5 py-1 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer transition-all hover:scale-102 active:scale-98"
+                          className="w-8 h-7 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95"
                           title="右隣（終点側）へ移動 (] または Alt+→)"
                         >
-                          <span>右隣へ</span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -2128,9 +2133,11 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
           {onDuplicateCurve && (
             <button
               onClick={() => onDuplicateCurve(selectedCurve.id)}
-              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold py-2 rounded transition-colors"
+              className="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+              title="曲線を複製"
             >
-              複製する
+              <Copy className="w-3.5 h-3.5" />
+              <span>複製</span>
             </button>
           )}
         </div>

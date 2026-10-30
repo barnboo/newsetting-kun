@@ -876,11 +876,10 @@ function App() {
                 <button
                   type="button"
                   onClick={handleReset}
-                  className="text-xs text-slate-700 hover:text-rose-600 liquid-btn px-3.5 py-1.5 rounded-full font-semibold flex items-center gap-1.5 cursor-pointer"
+                  className="w-8 h-8 rounded-full text-slate-700 hover:text-rose-600 liquid-btn flex items-center justify-center cursor-pointer transition-colors"
                   title="最初の画面（PDF読込・バックアップ一覧）に戻る"
                 >
-                  <Home className="w-3.5 h-3.5" />
-                  <span>トップに戻る</span>
+                  <Home className="w-4 h-4" />
                 </button>
               )}
             </div>
@@ -1015,28 +1014,25 @@ function App() {
                               type="button"
                               onClick={(e) => handleRenameProject(proj.id, proj.name, e)}
                               title="名前変更"
-                              className="px-2.5 py-1 rounded-full liquid-btn text-slate-700 dark:text-slate-200 hover:text-[#007AFF] flex items-center gap-1 text-xs cursor-pointer font-medium"
+                              className="w-7 h-7 rounded-full liquid-btn text-slate-700 dark:text-slate-200 hover:text-[#007AFF] flex items-center justify-center cursor-pointer"
                             >
-                              <Edit3 className="w-3 h-3" />
-                              <span className="hidden sm:inline">名前変更</span>
+                              <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
                               onClick={(e) => handleExportProjectJson(proj, e)}
                               title="JSON書き出し"
-                              className="px-2.5 py-1 rounded-full liquid-btn text-slate-700 dark:text-slate-200 flex items-center gap-1 text-xs cursor-pointer font-medium"
+                              className="w-7 h-7 rounded-full liquid-btn text-slate-700 dark:text-slate-200 flex items-center justify-center cursor-pointer"
                             >
-                              <Download className="w-3 h-3" />
-                              <span className="hidden sm:inline">JSON</span>
+                              <Download className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
                               onClick={(e) => handleDeleteProject(proj.id, e)}
                               title="削除"
-                              className="px-2.5 py-1 rounded-full liquid-btn hover:!bg-rose-50 dark:hover:!bg-rose-950/50 text-rose-600 dark:text-rose-400 hover:!border-rose-300 flex items-center gap-1 text-xs cursor-pointer font-medium"
+                              className="w-7 h-7 rounded-full liquid-btn hover:!bg-rose-50 dark:hover:!bg-rose-950/50 text-rose-600 dark:text-rose-400 hover:!border-rose-300 flex items-center justify-center cursor-pointer"
                             >
-                              <Trash2 className="w-3 h-3" />
-                              <span className="hidden sm:inline">削除</span>
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>

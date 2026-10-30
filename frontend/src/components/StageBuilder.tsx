@@ -22,7 +22,10 @@ import {
   ClipboardList,
   Edit3,
   Crop,
-  Music
+  Music,
+  RotateCcw,
+  RotateCw,
+  Download
 } from 'lucide-react';
 import type { ExtractedIcon } from '../App';
 import IconAdjustModal from './IconAdjustModal';
@@ -2681,35 +2684,33 @@ const StageBuilder: React.FC<Props> = ({
           <div className={`h-5 w-px mx-1.5 ${isDarkMode ? 'bg-white/15' : 'bg-slate-300/70'}`} />
 
           {/* Operational Tools: Undo / Redo & Zoom (Capsule Glass Controls) */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <button
               onClick={handleUndo}
               disabled={!canUndo}
-              className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 transition-all ${
+              className={`w-7 h-7 rounded-full text-xs font-semibold flex items-center justify-center transition-all ${
                 canUndo
                   ? 'liquid-btn text-slate-800 dark:text-slate-100 cursor-pointer'
                   : 'bg-slate-200/40 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600 border border-white/30 dark:border-white/5 cursor-not-allowed'
               }`}
-              title={`1手元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
+              title={`元に戻す (Ctrl+Z) ${historyRef.current.length > 0 ? `(${historyRef.current.length}件)` : ''}`}
             >
-              <span>↺</span>
-              <span className="hidden xl:inline">元に戻す</span>
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={handleRedo}
               disabled={!canRedo}
-              className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 transition-all ${
+              className={`w-7 h-7 rounded-full text-xs font-semibold flex items-center justify-center transition-all ${
                 canRedo
                   ? 'liquid-btn text-slate-800 dark:text-slate-100 cursor-pointer'
                   : 'bg-slate-200/40 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600 border border-white/30 dark:border-white/5 cursor-not-allowed'
               }`}
               title="やり直す (Ctrl+Y / Ctrl+Shift+Z)"
             >
-              <span>↻</span>
-              <span className="hidden xl:inline">やり直し</span>
+              <RotateCw className="w-3.5 h-3.5" />
             </button>
 
-            <div className={`h-4 w-px mx-1 ${isDarkMode ? 'bg-white/15' : 'bg-slate-300/70'}`} />
+            <div className={`h-4 w-px mx-0.5 ${isDarkMode ? 'bg-white/15' : 'bg-slate-300/70'}`} />
 
             <div className="flex items-center liquid-btn rounded-full overflow-hidden p-0.5">
               <button
@@ -2719,7 +2720,7 @@ const StageBuilder: React.FC<Props> = ({
               >
                 −
               </button>
-              <span className="text-[11px] font-bold font-mono px-2 min-w-[3.2rem] text-center text-slate-800 dark:text-slate-100">
+              <span className="text-[11px] font-bold font-mono px-1.5 min-w-[2.8rem] text-center text-slate-800 dark:text-slate-100">
                 {Math.round(zoomMultiplier * 100)}%
               </span>
               <button
@@ -2757,33 +2758,34 @@ const StageBuilder: React.FC<Props> = ({
         </div>
 
         {/* Right Actions: Liquid Glass Capsule Buttons */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={handleExportJson}
-            className="px-3.5 py-1.5 rounded-full text-xs font-bold liquid-btn text-slate-800 dark:text-slate-100 flex items-center gap-1.5 cursor-pointer"
+            className="w-8 h-8 sm:w-auto px-2 sm:px-3 py-1.5 rounded-full text-xs font-bold liquid-btn text-slate-800 dark:text-slate-100 flex items-center justify-center gap-1.5 cursor-pointer"
             title="現在の全場面・配置データをJSONファイルとしてダウンロード保存します"
           >
-            <span>↓</span>
-            <span>JSON保存</span>
+            <Download className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">JSON</span>
           </button>
           <button
             onClick={handleGoToExport}
             disabled={isPreparingExport}
-            className={`text-white text-xs sm:text-sm font-bold px-5 py-2 rounded-full transition-all flex items-center gap-2 cursor-pointer ${
+            className={`text-white text-xs sm:text-sm font-bold px-4 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer ${
               isPreparingExport
                 ? 'bg-blue-400/70 cursor-not-allowed'
                 : 'liquid-btn-primary'
             }`}
+            title="プレビュー・出力へ進む"
           >
             {isPreparingExport ? (
               <>
                 <span className="animate-spin text-sm">⏳</span>
-                <span>プレビュー生成中...</span>
+                <span>生成中...</span>
               </>
             ) : (
               <>
-                <span>次へ進む (出力プレビュー)</span>
+                <span>プレビュー</span>
                 <span>→</span>
               </>
             )}
