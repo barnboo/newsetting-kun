@@ -23,6 +23,33 @@ const TallyTable: React.FC<Props> = ({
   onUpdateLabel,
   onAddIcon,
 }) => {
+  // ヘルパー: アイテムが打楽器の場合の集計キーを判定（PDFの特定打楽器・打楽器枠に合算、または tmpl_percussion に集約）
+  const getPercussionCountKey = (pType?: string): string => {
+    // 1. もしPDF抽出アイコンの中にこの打楽器名（例: チャイム、ドラ等）と合致するラベルがあればそのアイコンID
+    if (pType && extractedIcons.length > 0) {
+      const matchedSpecific = extractedIcons.find(ic => {
+        const lbl = (iconLabels[ic.id] || ic.label || '').trim();
+        return lbl === pType;
+      });
+      if (matchedSpecific) return matchedSpecific.id;
+    }
+    // 2. もしPDF抽出アイコンの中に「打楽器」「パーカッション」等があり、tmpl_percussion に置換されているか打楽器ラベルなら
+    if (extractedIcons.length > 0) {
+      const generalPerc = extractedIcons.find(ic => {
+        if (templateReplacements?.[ic.id] === 'tmpl_percussion' || templateReplacements?.[ic.id] === 'percussion') return true;
+        const lbl = (iconLabels[ic.id] || ic.label || '').trim();
+        return lbl.includes('打楽器') || lbl.includes('パーカッション') || lbl.toLowerCase().includes('perc');
+      });
+      if (generalPerc) {
+        if (templateReplacements?.[generalPerc.id]) {
+          return 'tmpl_percussion';
+        }
+        return generalPerc.id;
+      }
+    }
+    return 'tmpl_percussion';
+  };
+
   // Count items per iconId (placed items)
   const counts: Record<string, number> = {};
   for (const item of placedItems) {
@@ -31,6 +58,14 @@ const TallyTable: React.FC<Props> = ({
       const chairKey = isPiano ? 'tmpl_pianoChair' : 'tmpl_chorusChair';
       counts[chairKey] = (counts[chairKey] || 0) + 1;
       counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + 1;
+    } else if (
+      item.templateType === 'percussion' ||
+      Boolean(item.percussionType) ||
+      item.iconId === 'tmpl_percussion' ||
+      item.iconId.startsWith('tmpl_percussion_')
+    ) {
+      const pKey = getPercussionCountKey(item.percussionType);
+      counts[pKey] = (counts[pKey] || 0) + 1;
     } else {
       counts[item.iconId] = (counts[item.iconId] || 0) + 1;
     }
@@ -40,7 +75,15 @@ const TallyTable: React.FC<Props> = ({
   for (const curve of curveObjects) {
     if (Array.isArray(curve.items)) {
       for (const it of curve.items) {
-        if (it.isCustom && it.iconId) {
+        if (
+          it.type === 'percussion' ||
+          Boolean(it.percussionType) ||
+          it.iconId === 'tmpl_percussion' ||
+          (it.iconId && it.iconId.startsWith('tmpl_percussion_'))
+        ) {
+          const pKey = getPercussionCountKey(it.percussionType);
+          counts[pKey] = (counts[pKey] || 0) + 1;
+        } else if (it.isCustom && it.iconId) {
           counts[it.iconId] = (counts[it.iconId] || 0) + 1;
         } else if (it.type === 'ensembleChairAndStand') {
           const effectiveChairType = it.chairType || curve.chairType;
@@ -60,6 +103,9 @@ const TallyTable: React.FC<Props> = ({
         const chairKey = isPiano ? 'tmpl_pianoChair' : 'tmpl_chorusChair';
         counts[chairKey] = (counts[chairKey] || 0) + curve.itemCount;
         counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + curve.itemCount;
+      } else if (tmplType === 'percussion' || tmplType?.startsWith('percussion_')) {
+        const pKey = getPercussionCountKey(curve.percussionType);
+        counts[pKey] = (counts[pKey] || 0) + curve.itemCount;
       } else if (tmplType) {
         const key = `tmpl_${tmplType}`;
         counts[key] = (counts[key] || 0) + curve.itemCount;

@@ -1361,7 +1361,7 @@ const StageBuilder: React.FC<Props> = ({
 
     const newItem: PlacedItem = {
       id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      iconId,
+      iconId: isPercussionId ? 'tmpl_percussion' : iconId,
       templateType,
       percussionType,
       showPercussionName: true,
@@ -2059,6 +2059,31 @@ const StageBuilder: React.FC<Props> = ({
       positionsMap[key].push([(effCrop.x + stageX) / 2.0, (effCrop.y + stageY) / 2.0]);
     };
 
+    // ヘルパー: アイテムが打楽器の場合の集計キーを判定（PDFの特定打楽器・打楽器枠に合算、または tmpl_percussion に集約）
+    const getPercussionCountKey = (pType?: string): string => {
+      if (pType && extractedIcons.length > 0) {
+        const matchedSpecific = extractedIcons.find(ic => {
+          const lbl = (iconLabels[ic.id] || ic.label || '').trim();
+          return lbl === pType;
+        });
+        if (matchedSpecific) return matchedSpecific.id;
+      }
+      if (extractedIcons.length > 0) {
+        const generalPerc = extractedIcons.find(ic => {
+          if (effectiveTemplateReplacements?.[ic.id] === 'tmpl_percussion' || effectiveTemplateReplacements?.[ic.id] === 'percussion') return true;
+          const lbl = (iconLabels[ic.id] || ic.label || '').trim();
+          return lbl.includes('打楽器') || lbl.includes('パーカッション') || lbl.toLowerCase().includes('perc');
+        });
+        if (generalPerc) {
+          if (effectiveTemplateReplacements?.[generalPerc.id]) {
+            return 'tmpl_percussion';
+          }
+          return generalPerc.id;
+        }
+      }
+      return 'tmpl_percussion';
+    };
+
     // Count normal placed items
     for (const item of items) {
       const cx = item.x + (item.width * (item.scaleX || 1)) / 2;
@@ -2070,6 +2095,15 @@ const StageBuilder: React.FC<Props> = ({
         addPos(chairKey, cx, cy);
         counts['tmpl_ensembleStand'] = (counts['tmpl_ensembleStand'] || 0) + 1;
         addPos('tmpl_ensembleStand', cx, cy);
+      } else if (
+        item.templateType === 'percussion' ||
+        Boolean(item.percussionType) ||
+        item.iconId === 'tmpl_percussion' ||
+        item.iconId.startsWith('tmpl_percussion_')
+      ) {
+        const pKey = getPercussionCountKey(item.percussionType);
+        counts[pKey] = (counts[pKey] || 0) + 1;
+        addPos(pKey, cx, cy);
       } else {
         counts[item.iconId] = (counts[item.iconId] || 0) + 1;
         addPos(item.iconId, cx, cy);
@@ -2098,7 +2132,16 @@ const StageBuilder: React.FC<Props> = ({
           const it: CurveItem = curve.items[idx];
           const p = placedCurveItems[idx];
           const [sx, sy] = p ? toStagePt(p.x, p.y) : [curve.x, curve.y];
-          if (it.isCustom && it.iconId) {
+          if (
+            it.type === 'percussion' ||
+            Boolean(it.percussionType) ||
+            it.iconId === 'tmpl_percussion' ||
+            (it.iconId && it.iconId.startsWith('tmpl_percussion_'))
+          ) {
+            const pKey = getPercussionCountKey(it.percussionType);
+            counts[pKey] = (counts[pKey] || 0) + 1;
+            addPos(pKey, sx, sy);
+          } else if (it.isCustom && it.iconId) {
             counts[it.iconId] = (counts[it.iconId] || 0) + 1;
             addPos(it.iconId, sx, sy);
           } else if (it.type === 'ensembleChairAndStand') {
@@ -2134,6 +2177,14 @@ const StageBuilder: React.FC<Props> = ({
             const [sx, sy] = p ? toStagePt(p.x, p.y) : [curve.x, curve.y];
             addPos(chairKey, sx, sy);
             addPos('tmpl_ensembleStand', sx, sy);
+          }
+        } else if (tmplType === 'percussion' || tmplType?.startsWith('percussion_')) {
+          const pKey = getPercussionCountKey(curve.percussionType);
+          counts[pKey] = (counts[pKey] || 0) + curve.itemCount;
+          for (let idx = 0; idx < curve.itemCount; idx++) {
+            const p = pts[idx];
+            const [sx, sy] = p ? toStagePt(p.x, p.y) : [curve.x, curve.y];
+            addPos(pKey, sx, sy);
           }
         } else if (tmplType) {
           const key = `tmpl_${tmplType}`;
