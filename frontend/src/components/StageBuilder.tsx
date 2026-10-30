@@ -21,7 +21,8 @@ import {
   ArrowDown,
   ClipboardList,
   Edit3,
-  Crop
+  Crop,
+  Music
 } from 'lucide-react';
 import type { ExtractedIcon } from '../App';
 import IconAdjustModal from './IconAdjustModal';
@@ -60,6 +61,7 @@ export interface StageSnapshot {
   extractedIcons?: ExtractedIcon[];
   iconLabels?: Record<string, string>;
   templateReplacements?: Record<string, string>;
+  pianoLidOptions?: string[];
   previewSettings?: PreviewSettings;
 }
 
@@ -67,6 +69,7 @@ interface Props {
   backgroundUrl: string | null;
   iconsRegionUrl: string | null;
   extractedIcons: ExtractedIcon[];
+  pianoLidOptions?: string[];
   backgroundCrop: { x: number; y: number; width: number; height: number } | null;
   fileId: string | null;
   pageImageUrl: string;
@@ -105,6 +108,7 @@ const StageBuilder: React.FC<Props> = ({
   backgroundUrl,
   iconsRegionUrl,
   extractedIcons,
+  pianoLidOptions,
   backgroundCrop,
   fileId,
   pageImageUrl,
@@ -308,6 +312,14 @@ const StageBuilder: React.FC<Props> = ({
       return !replacedTmplIdSet.has(id1) && !replacedTmplIdSet.has(id2);
     });
   }, [replacedTmplIdSet]);
+
+  const effectivePianoLidOptions = useMemo(() => {
+    if (pianoLidOptions && pianoLidOptions.length > 0) return pianoLidOptions;
+    if (initialBackup?.pianoLidOptions && initialBackup.pianoLidOptions.length > 0) return initialBackup.pianoLidOptions;
+    return [];
+  }, [pianoLidOptions, initialBackup]);
+
+  const [pianoLidPrompt, setPianoLidPrompt] = useState<{ itemId: string; currentState: string } | null>(null);
 
   const [iconLabels, setIconLabels] = useState<Record<string, string>>(() => {
     const merged: Record<string, string> = {
@@ -706,6 +718,7 @@ const StageBuilder: React.FC<Props> = ({
     backgroundCrop: backgroundCrop || initialBackup?.backgroundCrop,
     iconLabels: { ...iconLabelsRef.current },
     templateReplacements: { ...templateReplacementsRef.current },
+    pianoLidOptions: effectivePianoLidOptions,
     previewSettings: previewSettingsRef.current || undefined,
     ...(includeStaticImages
       ? {
@@ -1324,6 +1337,21 @@ const StageBuilder: React.FC<Props> = ({
 
   // ─── Placed Item Handlers ───────────────────────────────────────────────────
 
+  const isPianoLabel = (lbl?: string) => {
+    if (!lbl) return false;
+    const norm = lbl.trim();
+    if (norm.includes('椅子') || norm.includes('イス') || norm.includes('いす') || norm.includes('蓋') || norm.includes('屋根')) return false;
+    return norm.includes('ピアノ') || norm.toLowerCase().includes('piano');
+  };
+
+  const isPianoObject = (iconId: string, templateType?: string) => {
+    if (templateType === 'piano' || iconId === 'tmpl_piano') return true;
+    const repl = effectiveTemplateReplacements?.[iconId];
+    if (repl === 'tmpl_piano' || repl === 'piano') return true;
+    const lbl = iconLabels[iconId] || extractedIcons.find(ic => ic.id === iconId)?.label;
+    return isPianoLabel(lbl);
+  };
+
   const handleAddItem = (iconId: string, x?: number, y?: number) => {
     // Check if iconId refers to a percussion or template
     const isPercussionId = iconId.startsWith('tmpl_percussion_');
@@ -1358,6 +1386,8 @@ const StageBuilder: React.FC<Props> = ({
     const spawnY = y ?? (effCenter?.y ?? 300);
 
     const isSymbol = templateType === 'symbol';
+    const isPiano = isPianoObject(iconId, templateType);
+    const initialPianoLid = isPiano ? (effectivePianoLidOptions[0] || '全開') : undefined;
 
     const newItem: PlacedItem = {
       id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -1365,6 +1395,7 @@ const StageBuilder: React.FC<Props> = ({
       templateType,
       percussionType,
       showPercussionName: true,
+      pianoLidState: initialPianoLid,
       symbolShape: isSymbol ? 'circle' : undefined,
       symbolFilled: isSymbol ? false : undefined,
       symbolText: isSymbol ? '' : undefined,
@@ -1384,6 +1415,10 @@ const StageBuilder: React.FC<Props> = ({
     setSelectedCurveItemId(null);
     const itemLabel = isPercussionId ? (percussionType || '打楽器') : isTemplate ? (tmpl?.label || 'テンプレ') : (iconLabels[iconId] || iconDef?.label || 'パーツ');
     triggerAddToast(itemLabel);
+
+    if (isPiano && effectivePianoLidOptions.length > 0) {
+      setPianoLidPrompt({ itemId: newItem.id, currentState: effectivePianoLidOptions[0] });
+    }
   };
 
   const handleUpdateItem = (id: string, newAttrs: Partial<PlacedItem>) => {
@@ -2478,8 +2513,8 @@ const StageBuilder: React.FC<Props> = ({
         const urlWithoutCurves = stageCanvasRef.current?.exportStageImage({ hideCurveLines: true }) || '';
         const scTallies = computeTallies(sc.placedItems || [], sc.curveObjects || []);
 
-        const pianoItem = (sc.placedItems || []).find(it => it.templateType === 'piano' || it.iconId === 'tmpl_piano');
-        const scPianoLid = pianoItem?.pianoLidState || '半開';
+        const pianoItem = (sc.placedItems || []).find(it => isPianoObject(it.iconId, it.templateType));
+        const scPianoLid = pianoItem?.pianoLidState || effectivePianoLidOptions[0] || '半開';
 
         let scAutoNodes: any[] = [];
         try {
@@ -3754,6 +3789,9 @@ const StageBuilder: React.FC<Props> = ({
               onAlign={handleAlign}
               onOpenPercussionLabelModal={setPercLabelModalTarget}
               templateReplacements={effectiveTemplateReplacements}
+              pianoLidOptions={effectivePianoLidOptions}
+              iconLabels={iconLabels}
+              extractedIcons={extractedIcons}
             />
           ) : (
             <div
@@ -3934,6 +3972,60 @@ const StageBuilder: React.FC<Props> = ({
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 liquid-glass-heavy text-slate-800 dark:white px-4 py-2 rounded-full text-xs font-bold shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-none">
           <span className="w-2 h-2 rounded-full bg-[#007AFF] animate-ping" />
           <span>{addToast}</span>
+        </div>
+      )}
+
+      {/* Piano Lid State Selection Popup Modal (when placing a piano object & PDF has lid choices) */}
+      {pianoLidPrompt && effectivePianoLidOptions.length > 0 && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="liquid-glass-heavy rounded-3xl p-6 max-w-sm w-full space-y-4 animate-in fade-in zoom-in-95 duration-150 text-slate-800 dark:text-slate-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[#007AFF]/15 text-[#007AFF] flex items-center justify-center">
+                  <Music className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-base tracking-tight">ピアノの蓋の状態を選択</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPianoLidPrompt(null)}
+                className="rounded-full w-7 h-7 flex items-center justify-center liquid-btn text-slate-500 dark:text-slate-300 cursor-pointer"
+                title="閉じる"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              PDFに記載されている選択肢から、ピアノの蓋（屋根）の状態を選んでください。
+              <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                ※後から右側の設定メニューでも変更できます。
+              </span>
+            </p>
+
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              {effectivePianoLidOptions.map((opt) => {
+                const isSelected = pianoLidPrompt.currentState === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => {
+                      handleUpdateItem(pianoLidPrompt.itemId, { pianoLidState: opt });
+                      setPianoLidPrompt(null);
+                    }}
+                    className={`py-3 px-4 rounded-2xl text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 border ${
+                      isSelected
+                        ? 'bg-[#007AFF] text-white border-[#007AFF] shadow-md'
+                        : 'liquid-btn text-slate-800 dark:text-slate-100 hover:border-[#007AFF]/60 hover:text-[#007AFF]'
+                    }`}
+                  >
+                    <span>{opt}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

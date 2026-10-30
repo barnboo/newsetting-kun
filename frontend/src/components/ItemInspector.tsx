@@ -43,6 +43,9 @@ interface ItemInspectorProps {
   onAlign?: (type: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => void;
   onOpenPercussionLabelModal?: (target: ItemLabelModalTarget) => void;
   templateReplacements?: Record<string, string>;
+  pianoLidOptions?: string[];
+  iconLabels?: Record<string, string>;
+  extractedIcons?: { id: string; label?: string }[];
 }
 
 export const ItemInspector: React.FC<ItemInspectorProps> = ({
@@ -68,6 +71,9 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
   onAlign,
   onOpenPercussionLabelModal,
   templateReplacements,
+  pianoLidOptions,
+  iconLabels,
+  extractedIcons,
 }) => {
   const [openCurveItemSections, setOpenCurveItemSections] = useState<Record<string, boolean>>({});
 
@@ -274,8 +280,15 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
     };
 
     const matchedTmplId = selectedItem ? templateReplacements?.[selectedItem.iconId] : undefined;
+    const itemCustomLabel = iconLabels?.[selectedItem.iconId] || extractedIcons?.find(ic => ic.id === selectedItem.iconId)?.label || '';
+    const isPianoByLabel = (() => {
+      const norm = itemCustomLabel.trim();
+      if (!norm) return false;
+      if (norm.includes('椅子') || norm.includes('イス') || norm.includes('いす') || norm.includes('蓋') || norm.includes('屋根')) return false;
+      return norm.includes('ピアノ') || norm.toLowerCase().includes('piano');
+    })();
     const isPercussion = selectedItem.templateType === 'percussion' || matchedTmplId === 'tmpl_percussion';
-    const isPiano = selectedItem.templateType === 'piano' || matchedTmplId === 'tmpl_piano';
+    const isPiano = selectedItem.templateType === 'piano' || matchedTmplId === 'tmpl_piano' || isPianoByLabel;
     const isSymbol = selectedItem.templateType === 'symbol' ||
                      matchedTmplId === 'tmpl_symbol' ||
                      matchedTmplId?.replace(/^tmpl_/, '') === 'symbol';
@@ -284,6 +297,9 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                     selectedItem.templateType === 'ensembleChairAndStand';
     const isPianoChair = selectedItem.templateType === 'pianoChair' ||
                          selectedItem.templateType === 'turnerChair';
+    const lidChoices = pianoLidOptions && pianoLidOptions.length > 0
+      ? pianoLidOptions
+      : ['閉', '蒲鉾板', '半開', '全開'];
 
     return (
       <div
@@ -293,7 +309,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[120px]">
-              {TEMPLATE_SHAPES.find(t => t.type === selectedItem.templateType)?.label || 'パーツ'}
+              {TEMPLATE_SHAPES.find(t => t.type === selectedItem.templateType)?.label || itemCustomLabel || 'パーツ'}
             </h3>
             {onTogglePin && (
               <label className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 cursor-pointer select-none">
@@ -736,24 +752,31 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
         )}
 
         {isPiano && (
-          <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
-            <h4 className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex flex-col gap-2">
+            <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
               <Music className="w-3.5 h-3.5 text-[#007AFF]" />
-              <span>ピアノ設定</span>
+              <span>ピアノ設定（蓋の状態）</span>
             </h4>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500 font-medium">蓋の状態</span>
-              <select
-                value={selectedItem.pianoLidState || '全開'}
-                onChange={(e) => onUpdateItem(selectedItem.id, { pianoLidState: e.target.value })}
-                className="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white"
-              >
-                <option value="閉">閉</option>
-                <option value="蒲鉾板">蒲鉾板</option>
-                <option value="半開">半開</option>
-                <option value="全開">全開</option>
-              </select>
-            </label>
+            <div className="grid grid-cols-2 gap-1.5">
+              {lidChoices.map((opt) => {
+                const currentVal = selectedItem.pianoLidState || lidChoices[0] || '全開';
+                const isActive = currentVal === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => onUpdateItem(selectedItem.id, { pianoLidState: opt })}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-[#007AFF] text-white border-[#007AFF] shadow-2xs'
+                        : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600 hover:border-[#007AFF]/50'
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 

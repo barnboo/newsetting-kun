@@ -20,6 +20,7 @@ export interface SavedSession {
       rect: { x: number; y: number; width: number; height: number };
       label?: string;
     }>;
+    pianoLidOptions?: string[];
   } | null;
   iconLabels: Record<string, string>;
   templateReplacements?: Record<string, string>;

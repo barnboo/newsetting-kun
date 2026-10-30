@@ -493,7 +493,16 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
         for l in b.get("lines", []):
             for s in l.get("spans", []):
                 for c in s.get("chars", []):
-                    ch = clean_japanese_text(c.get("c", ""))
+                    raw_c = c.get("c", "")
+                    if raw_c in ("\u3099", "\u309a", "゛", "゜", "ﾞ", "ﾟ") and chars:
+                        comb = "\u3099" if raw_c in ("\u3099", "゛", "ﾞ") else "\u309a"
+                        r_comb = fitz.Rect(c["bbox"])
+                        if abs(((r_comb.y0 + r_comb.y1) / 2.0) - chars[-1]["y_mid"]) < 10.0 and (r_comb.x0 - chars[-1]["rect"].x1) < 8.0:
+                            chars[-1]["ch"] = unicodedata.normalize("NFC", chars[-1]["ch"] + comb)
+                            chars[-1]["rect"] |= r_comb
+                            chars[-1]["w"] = max(1.0, chars[-1]["rect"].width)
+                            continue
+                    ch = clean_japanese_text(raw_c)
                     if ch and not ch.isspace():
                         r = fitz.Rect(c["bbox"])
                         if clip_rect is None or r.intersects(clip_rect):
@@ -628,6 +637,60 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
                             lines[ch_l]["tokens"].pop(ch_t)
 
     return lines
+
+def extract_piano_lid_options(page, tokenized_lines: Optional[list] = None) -> List[str]:
+    """
+    Extracts piano lid state options printed on the PDF form (e.g. ['閉', '蒲鉾板', '半開', '全開'] or ['全開', '半開', 'カマボコ', '閉']).
+    Returns an empty list if no piano lid field/choices exist on the page.
+    """
+    import re as _re
+    if tokenized_lines is None:
+        tokenized_lines = tokenize_pdf_region(page)
+    for line in tokenized_lines:
+        toks = line["tokens"]
+        full_line_text = unicodedata.normalize("NFC", "".join(t["text"] for t in toks))
+        if any(skip_kw in full_line_text for skip_kw in [
+            "（注）", "(注)", "原則禁止", "お借りします", "ご相談ください",
+            "提出書類", "記入してください", "明記してください", "忘れずに"
+        ]):
+            continue
+        lid_anchor = None
+        other_anchors_x = []
+        for t_idx, tok in enumerate(toks):
+            if tok["type"] != "WORD":
+                continue
+            t_text = unicodedata.normalize("NFC", tok["text"])
+            tr = tok["rect"]
+            is_lid = (
+                ("ピアノ" in t_text and ("蓋" in t_text or "屋根" in t_text))
+                or t_text in ("ピアノの蓋", "ピアノ蓋", "ピアノの屋根", "ピアノ屋根")
+                or (t_text in ("蓋", "屋根") and any(kw in full_line_text for kw in ("全開", "半開", "半半開", "閉", "カマボコ", "蒲鉾")))
+            )
+            if is_lid and lid_anchor is None:
+                lid_anchor = (t_idx, tr)
+                continue
+            sem = classify_equipment_label(t_text)
+            if sem or t_text in ("立奏", "座奏", "反響板"):
+                other_anchors_x.append(tr.x0)
+        if lid_anchor is not None:
+            lid_idx, lid_rect = lid_anchor
+            right_bound = min([x for x in other_anchors_x if x > lid_rect.x1], default=99999.0)
+            options = []
+            for tok in toks[lid_idx + 1:]:
+                if tok["rect"].x0 >= right_bound - 18.0:
+                    break
+                if tok["type"] != "WORD":
+                    continue
+                w = unicodedata.normalize("NFC", clean_japanese_text(tok["text"])).strip()
+                if not w or _re.match(r"^[0-9０-９①-⑳\.]+$", w):
+                    continue
+                if w in ("要", "不要", "有", "無", "使用", "不使用", "ピアノ", "蓋", "屋根", "の"):
+                    continue
+                if w not in options:
+                    options.append(w)
+            if options:
+                return options
+    return []
 
 def extract_label_for_icon(bbox: fitz.Rect, page_words: list, tokenized_lines: Optional[list] = None) -> str:
     """
@@ -1314,6 +1377,7 @@ async def extract_regions(req: ExtractRequest):
                             }
                         })
                     
+        piano_lid_options = extract_piano_lid_options(page, page_tokenized_lines)
         doc.close()
         
         icon_labels = {icon["id"]: icon["label"] for icon in extracted_icons if icon.get("label")}
@@ -1322,7 +1386,8 @@ async def extract_regions(req: ExtractRequest):
             "background_url": background_url,
             "icons_region_url": icons_region_url,
             "extracted_icons": extracted_icons,
-            "icon_labels": icon_labels
+            "icon_labels": icon_labels,
+            "piano_lid_options": piano_lid_options
         }
         
     except Exception as e:

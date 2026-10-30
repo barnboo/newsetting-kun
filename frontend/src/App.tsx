@@ -39,6 +39,7 @@ export interface ExtractResponse {
   icons_region_url: string;
   extracted_icons: ExtractedIcon[];
   icon_labels?: Record<string, string>;
+  piano_lid_options?: string[];
 }
 
 export interface BackupProjectMeta {
@@ -103,7 +104,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
 function App() {
   const [fileData, setFileData] = useState<{ file_id: string; image_url: string; width: number; height: number } | null>(null);
-  const [extractedData, setExtractedData] = useState<{ backgroundUrl: string; iconsRegionUrl: string; extractedIcons: ExtractedIcon[] } | null>(null);
+  const [extractedData, setExtractedData] = useState<{ backgroundUrl: string; iconsRegionUrl: string; extractedIcons: ExtractedIcon[]; pianoLidOptions?: string[] } | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [selectedRegions, setSelectedRegions] = useState<any[]>([]);
   const [currentPhase, setCurrentPhase] = useState<1 | 2 | 3 | 4>(1);
@@ -235,6 +236,7 @@ function App() {
     let backgroundUrl = sess?.extractedData?.backgroundUrl || localBackup?.backgroundUrl || '';
     let iconsRegionUrl = sess?.extractedData?.iconsRegionUrl || localBackup?.iconsRegionUrl || '';
     let extractedIcons = sess?.extractedData?.extractedIcons || localBackup?.extractedIcons || [];
+    let pianoLidOptions = sess?.extractedData?.pianoLidOptions || localBackup?.pianoLidOptions || [];
     let pageImageUrl = sess?.fileData?.image_url || localBackup?.pageImageUrl || '';
     let selectedRegions = sess?.selectedRegions || [];
     let rawIconLabels = localBackup?.iconLabels || sess?.iconLabels || {};
@@ -320,6 +322,7 @@ function App() {
       backgroundUrl,
       iconsRegionUrl,
       extractedIcons,
+      pianoLidOptions,
     });
     setIconLabels(iconLabels);
     const effectiveReplacements =
@@ -588,11 +591,13 @@ function App() {
       const nextExtractedIcons = keepCustomIcons
         ? (extractedData?.extractedIcons || data.extracted_icons)
         : data.extracted_icons;
+      const nextPianoLidOptions = data.piano_lid_options ?? extractedData?.pianoLidOptions ?? [];
 
       setExtractedData({
         backgroundUrl: data.background_url,
         iconsRegionUrl: nextIconsRegionUrl,
         extractedIcons: nextExtractedIcons,
+        pianoLidOptions: nextPianoLidOptions,
       });
 
       let effectiveLabels = iconLabels;
@@ -634,6 +639,7 @@ function App() {
             backgroundUrl: bgDataUrl,
             iconsRegionUrl: iconsRegionDataUrl,
             extractedIcons: iconsWithDataUrls,
+            pianoLidOptions: nextPianoLidOptions,
           });
           const pageImageDataUrl = activeFile.image_url.startsWith('data:')
             ? activeFile.image_url
@@ -647,6 +653,7 @@ function App() {
               backgroundUrl: bgDataUrl,
               iconsRegionUrl: iconsRegionDataUrl,
               extractedIcons: iconsWithDataUrls,
+              pianoLidOptions: nextPianoLidOptions,
             },
             iconLabels: effectiveLabels,
             selectedRegions: regions,
@@ -1139,6 +1146,7 @@ function App() {
                 backgroundUrl={extractedData.backgroundUrl} 
                 iconsRegionUrl={extractedData.iconsRegionUrl}
                 extractedIcons={extractedData.extractedIcons} 
+                pianoLidOptions={extractedData.pianoLidOptions || []}
                 backgroundCrop={backgroundCrop}
                 fileId={fileData.file_id}
                 pageImageUrl={fileData.image_url}
