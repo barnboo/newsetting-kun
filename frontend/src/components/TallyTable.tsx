@@ -23,28 +23,25 @@ const TallyTable: React.FC<Props> = ({
   onUpdateLabel,
   onAddIcon,
 }) => {
-  // ヘルパー: アイテムが打楽器の場合の集計キーを判定（PDFの特定打楽器・打楽器枠に合算、または tmpl_percussion に集約）
+  // ヘルパー: アイテムが打楽器の場合の集計キーを判定（明示的にテンプレート置換されているPDFパーツにのみ合算、それ以外は tmpl_percussion に集約）
   const getPercussionCountKey = (pType?: string): string => {
-    // 1. もしPDF抽出アイコンの中にこの打楽器名（例: チャイム、ドラ等）と合致するラベルがあればそのアイコンID
+    // 1. もしPDF抽出アイコンの中にこの打楽器が明示的にテンプレ置換されているものがあればそのアイコンID
     if (pType && extractedIcons.length > 0) {
       const matchedSpecific = extractedIcons.find(ic => {
+        const tmpl = templateReplacements?.[ic.id];
+        if (tmpl && (tmpl === `tmpl_percussion_${pType}` || tmpl === pType)) return true;
         const lbl = (iconLabels[ic.id] || ic.label || '').trim();
-        return lbl === pType;
+        return lbl === pType && Boolean(tmpl);
       });
       if (matchedSpecific) return matchedSpecific.id;
     }
-    // 2. もしPDF抽出アイコンの中に「打楽器」「パーカッション」等があり、tmpl_percussion に置換されているか打楽器ラベルなら
+    // 2. もしPDF抽出アイコンの中に「打楽器」があり、明示的に tmpl_percussion に置換されている場合のみ
     if (extractedIcons.length > 0) {
       const generalPerc = extractedIcons.find(ic => {
-        if (templateReplacements?.[ic.id] === 'tmpl_percussion' || templateReplacements?.[ic.id] === 'percussion') return true;
-        const lbl = (iconLabels[ic.id] || ic.label || '').trim();
-        return lbl.includes('打楽器') || lbl.includes('パーカッション') || lbl.toLowerCase().includes('perc');
+        return templateReplacements?.[ic.id] === 'tmpl_percussion' || templateReplacements?.[ic.id] === 'percussion';
       });
       if (generalPerc) {
-        if (templateReplacements?.[generalPerc.id]) {
-          return 'tmpl_percussion';
-        }
-        return generalPerc.id;
+        return 'tmpl_percussion';
       }
     }
     return 'tmpl_percussion';

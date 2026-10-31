@@ -34,7 +34,7 @@ export interface SceneExportData {
   stageImageUrl: string;
   stageImageUrlWithCurves?: string;
   stageImageUrlWithoutCurves?: string;
-  tallies: { icon_id: string; label: string; count: number; source?: 'pdf' | 'template' }[];
+  tallies: { icon_id: string; label: string; count: number; source?: 'pdf' | 'template'; is_template_replaced?: boolean }[];
   initialNodes?: OverlayNode[];
   savedNodes?: OverlayNode[];
 }
@@ -44,7 +44,7 @@ interface FullPageEditorProps {
   pageImageUrl: string;
   stageImageUrl: string;
   backgroundCrop?: { x: number; y: number; width: number; height: number } | null;
-  tallies: { icon_id: string; label: string; count: number; source?: 'pdf' | 'template' }[];
+  tallies: { icon_id: string; label: string; count: number; source?: 'pdf' | 'template'; is_template_replaced?: boolean }[];
   initialNodes?: OverlayNode[];
   sceneExports?: SceneExportData[];
   initialPreviewSettings?: PreviewSettings;

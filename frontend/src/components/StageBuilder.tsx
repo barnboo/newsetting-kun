@@ -2098,26 +2098,26 @@ const StageBuilder: React.FC<Props> = ({
       positionsMap[key].push([(effCrop.x + stageX) / 2.0, (effCrop.y + stageY) / 2.0]);
     };
 
-    // ヘルパー: アイテムが打楽器の場合の集計キーを判定（PDFの特定打楽器・打楽器枠に合算、または tmpl_percussion に集約）
+    // ヘルパー: アイテムが打楽器の場合の集計キーを判定（明示的にテンプレート置換されているPDFパーツにのみ合算、それ以外は tmpl_percussion に集約）
     const getPercussionCountKey = (pType?: string): string => {
+      // 1. PDF抽出アイコンの中で、この打楽器に対応するテンプレ置換が行われている場合
       if (pType && extractedIcons.length > 0) {
         const matchedSpecific = extractedIcons.find(ic => {
+          const tmpl = effectiveTemplateReplacements?.[ic.id];
+          if (tmpl && (tmpl === `tmpl_percussion_${pType}` || tmpl === pType)) return true;
           const lbl = (iconLabels[ic.id] || ic.label || '').trim();
-          return lbl === pType;
+          return lbl === pType && Boolean(tmpl);
         });
         if (matchedSpecific) return matchedSpecific.id;
       }
+      // 2. もしPDF抽出アイコンの中に「打楽器」があり、明示的に tmpl_percussion に置換されている場合のみ
       if (extractedIcons.length > 0) {
         const generalPerc = extractedIcons.find(ic => {
-          if (effectiveTemplateReplacements?.[ic.id] === 'tmpl_percussion' || effectiveTemplateReplacements?.[ic.id] === 'percussion') return true;
-          const lbl = (iconLabels[ic.id] || ic.label || '').trim();
-          return lbl.includes('打楽器') || lbl.includes('パーカッション') || lbl.toLowerCase().includes('perc');
+          const rep = effectiveTemplateReplacements?.[ic.id];
+          return rep === 'tmpl_percussion' || rep === 'percussion';
         });
         if (generalPerc) {
-          if (effectiveTemplateReplacements?.[generalPerc.id]) {
-            return 'tmpl_percussion';
-          }
-          return generalPerc.id;
+          return 'tmpl_percussion';
         }
       }
       return 'tmpl_percussion';
@@ -2263,6 +2263,7 @@ const StageBuilder: React.FC<Props> = ({
         count: totalForIcon,
         positions: combinedPositions,
         source: 'pdf' as const,
+        is_template_replaced: Boolean(effectiveTmplId),
       };
     });
 
@@ -2279,6 +2280,7 @@ const StageBuilder: React.FC<Props> = ({
           count: counts[k] || 0,
           positions: positionsMap[k] || [],
           source: 'template' as const,
+          is_template_replaced: false,
         };
       });
 
