@@ -32,23 +32,35 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-def cleanup_old_files(max_age_seconds: int = 7200):
-    """Automatically delete temporary files older than 2 hours."""
+def cleanup_old_files(upload_max_age_seconds: int = 86400 * 7, static_max_age_seconds: int = 86400):
+    """Automatically delete temporary preview PNGs older than 24 hours,
+    and retain uploaded PDF files and layout caches for at least 7 days so users working
+    across long sessions or taking breaks never lose their background PDF and auto-detection layout.
+    """
     now = time.time()
-    for directory in [UPLOAD_DIR, STATIC_DIR]:
-        if not os.path.exists(directory):
-            continue
-        for fname in os.listdir(directory):
+    # 1. Clean STATIC_DIR (rendered preview images)
+    if os.path.exists(STATIC_DIR):
+        for fname in os.listdir(STATIC_DIR):
             if fname.startswith(".") or fname == "manual.pdf":
                 continue
-            fpath = os.path.join(directory, fname)
+            fpath = os.path.join(STATIC_DIR, fname)
             try:
-                if os.path.isfile(fpath):
-                    file_age = now - os.path.getmtime(fpath)
-                    if file_age > max_age_seconds:
-                        os.remove(fpath)
+                if os.path.isfile(fpath) and (now - os.path.getmtime(fpath) > static_max_age_seconds):
+                    os.remove(fpath)
             except Exception as e:
-                print(f"Error removing {fpath}: {e}")
+                print(f"Error removing static file {fpath}: {e}")
+
+    # 2. Clean UPLOAD_DIR (source PDFs & auto-nodes caches)
+    if os.path.exists(UPLOAD_DIR):
+        for fname in os.listdir(UPLOAD_DIR):
+            if fname.startswith(".") or fname == "manual.pdf":
+                continue
+            fpath = os.path.join(UPLOAD_DIR, fname)
+            try:
+                if os.path.isfile(fpath) and (now - os.path.getmtime(fpath) > upload_max_age_seconds):
+                    os.remove(fpath)
+            except Exception as e:
+                print(f"Error removing upload file {fpath}: {e}")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -1577,6 +1589,146 @@ class TallyItem(BaseModel):
     source: Optional[str] = None
     is_template_replaced: Optional[bool] = None
 
+# ─── 根本解決: 最長一致・厳格除外による備品シグネチャ定義 ──────────────────
+EQUIPMENT_STD_DEFS = [
+    {
+        "key": "piano",
+        "names": ["ピアノ", "グランドピアノ", "アップライトピアノ"],
+        "tmpls": ["tmpl_piano", "tmpl_grandPiano"],
+        "neg": ["蓋", "反響板", "椅子", "イス", "いす", "譜めくり", "めくり"],
+    },
+    {
+        "key": "piano_lid",
+        "names": ["ピアノの蓋", "ピアノ蓋"],
+        "tmpls": [],
+        "neg": [],
+    },
+    {
+        "key": "podium",
+        "names": ["指揮台"],
+        "tmpls": ["tmpl_podium"],
+        "neg": [],
+    },
+    {
+        "key": "p_stand",
+        "names": ["指揮用譜面台", "指揮譜面台", "指揮者用譜面台", "指揮者譜面台", "指揮者用"],
+        "tmpls": ["tmpl_conductorStand"],
+        "neg": ["合奏"],
+    },
+    {
+        "key": "stand",
+        "names": ["合奏用譜面台", "合奏譜面台", "譜面台"],
+        "tmpls": ["tmpl_ensembleStand"],
+        "neg": ["指揮"],
+    },
+    {
+        "key": "p_chair",
+        "names": ["ピアノ椅子", "ピアノイス", "ピアノ用椅子", "ピアノ用イス"],
+        "tmpls": ["tmpl_pianoChair"],
+        "neg": ["譜めくり", "めくり", "合奏"],
+    },
+    {
+        "key": "turner_chair",
+        "names": ["譜めくり椅子", "譜めくりイス", "譜捲り椅子", "めくり椅子", "譜めくり用椅子"],
+        "tmpls": ["tmpl_turnerChair"],
+        "neg": ["ピアノ"],
+    },
+    {
+        "key": "chair",
+        "names": ["合奏用椅子", "合奏椅子", "パイプ椅子", "普通椅子", "椅子"],
+        "tmpls": ["tmpl_chorusChair", "tmpl_pipeChair"],
+        "neg": ["ピアノ", "指揮", "パーカッション", "打楽器", "譜めくり", "めくり", "コントラバス", "バス", "チェロ", "補助", "立奏"],
+    },
+    {
+        "key": "table",
+        "names": ["長机", "机", "テーブル", "デスク"],
+        "tmpls": ["tmpl_longDesk", "tmpl_desk"],
+        "neg": [],
+    },
+    {
+        "key": "cord",
+        "names": ["延長コード", "電源コード", "コード", "電源"],
+        "tmpls": ["tmpl_extensionCord"],
+        "neg": [],
+    },
+    {
+        "key": "mic",
+        "names": ["マイク", "マイクロフォン", "マイクロホン", "アナウンスマイク"],
+        "tmpls": ["tmpl_mic", "tmpl_microphone"],
+        "neg": [],
+    },
+    {
+        "key": "chime",
+        "names": ["チャイム", "チューブラーベル", "Chime"],
+        "tmpls": ["tmpl_chime"],
+        "neg": [],
+    },
+    {
+        "key": "gong",
+        "names": ["ドラ", "銅鑼", "ゴング", "タムタム", "Gong"],
+        "tmpls": ["tmpl_gong"],
+        "neg": ["ドラム"],
+    },
+]
+
+def update_cached_nodes_with_tallies(cached_nodes: list, tallies: list, piano_lid: str = "") -> list:
+    """Updates equipment tally numbers in cached auto_nodes using current scene tallies,
+    ensuring auto-input never breaks even if original PDF is temporarily unreachable."""
+    import copy
+    nodes = copy.deepcopy(cached_nodes)
+    assigned_counts = {d["key"]: 0 for d in EQUIPMENT_STD_DEFS}
+    has_extracted_pdf_icons = any(getattr(x, 'source', None) == 'pdf' for x in tallies)
+
+    for t in tallies:
+        c = max(0, int(t.count or 0))
+        lbl = clean_japanese_text(t.label or "").strip()
+        iid = (t.icon_id or "").strip()
+        source = getattr(t, 'source', None)
+        is_tmpl_rep = getattr(t, 'is_template_replaced', None)
+
+        if has_extracted_pdf_icons and source == 'template' and not is_tmpl_rep:
+            continue
+
+        best_def = None
+        for d in EQUIPMENT_STD_DEFS:
+            if iid in d["tmpls"]:
+                best_def = d
+                break
+        if not best_def:
+            sem = classify_equipment_label(lbl)
+            if sem:
+                _, sem_key = sem
+                for d in EQUIPMENT_STD_DEFS:
+                    if d["key"] == sem_key:
+                        best_def = d
+                        break
+        if not best_def:
+            for d in EQUIPMENT_STD_DEFS:
+                if any(neg in lbl for neg in d["neg"]):
+                    continue
+                for name in d["names"]:
+                    if name in lbl:
+                        best_def = d
+                        break
+                if best_def:
+                    break
+        if best_def:
+            assigned_counts[best_def["key"]] += c
+        elif lbl:
+            assigned_counts[lbl] = assigned_counts.get(lbl, 0) + c
+
+    # Update numbers in auto_num_* nodes
+    for n in nodes:
+        nid = n.get("id", "")
+        if nid.startswith("auto_num_"):
+            raw_key = nid.replace("auto_num_", "")
+            base_key = raw_key.split("_")[0]
+            val = assigned_counts.get(raw_key, assigned_counts.get(base_key, None))
+            if val is not None:
+                n["text"] = str(val)
+
+    return nodes
+
 class PreviewRequest(BaseModel):
     file_id: str
     tallies: List[TallyItem]
@@ -1586,11 +1738,31 @@ class PreviewRequest(BaseModel):
 async def preview_bg(req: PreviewRequest):
     try:
         pdf_path = os.path.join(UPLOAD_DIR, f"{req.file_id}.pdf")
-        if not os.path.exists(pdf_path):
+        cache_path = os.path.join(UPLOAD_DIR, f"{req.file_id}_auto_nodes.json")
+
+        if os.path.exists(pdf_path):
+            try:
+                os.utime(pdf_path, None)  # Refresh mtime so active projects are never deleted
+            except Exception:
+                pass
+        else:
+            # Fallback to cached auto nodes if PDF is missing (e.g. server restart, ephemeral container, JSON restore)
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, "r", encoding="utf-8") as f:
+                        cached = json.load(f)
+                        cached_nodes = cached.get("auto_nodes", [])
+                        return {
+                            "preview_url": "",
+                            "auto_nodes": update_cached_nodes_with_tallies(cached_nodes, req.tallies, req.piano_lid)
+                        }
+                except Exception as ce:
+                    print(f"Error reading auto_nodes cache: {ce}")
             return {
                 "preview_url": "",
                 "auto_nodes": []
             }
+
         doc = fitz.open(pdf_path)
         page = doc[0]
         if page.rotation != 0:
@@ -1608,87 +1780,7 @@ async def preview_bg(req: PreviewRequest):
             rect = fitz.Rect(unit_rect.x0 - 45, unit_rect.y0 - 2, unit_rect.x0 - 4, unit_rect.y1 + 15)
             page.insert_textbox(rect, str(num_str), fontname="helv", fontsize=11, align=fitz.TEXT_ALIGN_RIGHT, color=color)
 
-        # ─── 根本解決: 最長一致・厳格除外による備品シグネチャ定義 ──────────────────
-        STD_DEFS = [
-            {
-                "key": "piano",
-                "names": ["ピアノ", "グランドピアノ", "アップライトピアノ"],
-                "tmpls": ["tmpl_piano", "tmpl_grandPiano"],
-                "neg": ["蓋", "反響板", "椅子", "イス", "いす", "譜めくり", "めくり"],
-            },
-            {
-                "key": "piano_lid",
-                "names": ["ピアノの蓋", "ピアノ蓋"],
-                "tmpls": [],
-                "neg": [],
-            },
-            {
-                "key": "podium",
-                "names": ["指揮台"],
-                "tmpls": ["tmpl_podium"],
-                "neg": [],
-            },
-            {
-                "key": "p_stand",
-                "names": ["指揮用譜面台", "指揮譜面台", "指揮者用譜面台", "指揮者譜面台", "指揮者用"],
-                "tmpls": ["tmpl_conductorStand"],
-                "neg": ["合奏"],
-            },
-            {
-                "key": "stand",
-                "names": ["合奏用譜面台", "合奏譜面台", "譜面台"],
-                "tmpls": ["tmpl_ensembleStand"],
-                "neg": ["指揮"],
-            },
-            {
-                "key": "p_chair",
-                "names": ["ピアノ椅子", "ピアノイス", "ピアノ用椅子", "ピアノ用イス"],
-                "tmpls": ["tmpl_pianoChair"],
-                "neg": ["譜めくり", "めくり", "合奏"],
-            },
-            {
-                "key": "turner_chair",
-                "names": ["譜めくり椅子", "譜めくりイス", "譜捲り椅子", "めくり椅子", "譜めくり用椅子"],
-                "tmpls": ["tmpl_turnerChair"],
-                "neg": ["ピアノ"],
-            },
-            {
-                "key": "chair",
-                "names": ["合奏用椅子", "合奏椅子", "パイプ椅子", "普通椅子", "椅子"],
-                "tmpls": ["tmpl_chorusChair", "tmpl_pipeChair"],
-                "neg": ["ピアノ", "指揮", "パーカッション", "打楽器", "譜めくり", "めくり", "コントラバス", "バス", "チェロ", "補助", "立奏"],
-            },
-            {
-                "key": "table",
-                "names": ["長机", "机", "テーブル", "デスク"],
-                "tmpls": ["tmpl_longDesk", "tmpl_desk"],
-                "neg": [],
-            },
-            {
-                "key": "cord",
-                "names": ["延長コード", "電源コード", "コード", "電源"],
-                "tmpls": ["tmpl_extensionCord"],
-                "neg": [],
-            },
-            {
-                "key": "mic",
-                "names": ["マイク", "マイクロフォン", "マイクロホン", "アナウンスマイク"],
-                "tmpls": ["tmpl_mic", "tmpl_microphone"],
-                "neg": [],
-            },
-            {
-                "key": "chime",
-                "names": ["チャイム", "チューブラーベル", "Chime"],
-                "tmpls": ["tmpl_chime"],
-                "neg": [],
-            },
-            {
-                "key": "gong",
-                "names": ["ドラ", "銅鑼", "ゴング", "タムタム", "Gong"],
-                "tmpls": ["tmpl_gong"],
-                "neg": ["ドラム"],
-            },
-        ]
+        STD_DEFS = EQUIPMENT_STD_DEFS
 
         # 1. ユーザーの配置パーツ群を照合（定型定義 STD_DEFS ＋ 意味分類器 ＋ 動的定義 DYNAMIC_DEFS）
         import re as _re
@@ -2611,6 +2703,14 @@ async def preview_bg(req: PreviewRequest):
         preview_path = os.path.join(STATIC_DIR, preview_filename)
         pix.save(preview_path)
         
+        # Cache auto_nodes for persistent recovery across sessions and server restarts
+        try:
+            cache_path = os.path.join(UPLOAD_DIR, f"{req.file_id}_auto_nodes.json")
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump({"auto_nodes": auto_nodes, "updated_at": time.time()}, f, ensure_ascii=False)
+        except Exception as ce:
+            print(f"Warning: could not write auto_nodes cache: {ce}")
+
         return {
             "preview_url": f"/static/{preview_filename}",
             "auto_nodes": auto_nodes

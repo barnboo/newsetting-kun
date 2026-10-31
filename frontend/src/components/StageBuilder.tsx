@@ -2486,6 +2486,42 @@ const StageBuilder: React.FC<Props> = ({
 
   // ─── Preview Button Handler ──────────────────────────────────────────────────
 
+  const updateAutoNodesWithTallies = (existingNodes: any[], tallies: any[]): any[] => {
+    const countsByKey: Record<string, number> = {};
+    for (const t of tallies) {
+      const c = Number(t.count) || 0;
+      const lbl = (t.label || '').trim();
+      const iid = (t.icon_id || '').trim();
+      if (lbl.includes('指揮台') || iid.includes('podium')) countsByKey['podium'] = (countsByKey['podium'] || 0) + c;
+      else if (lbl.includes('指揮') && (lbl.includes('譜面台') || iid.includes('conductorStand'))) countsByKey['p_stand'] = (countsByKey['p_stand'] || 0) + c;
+      else if (lbl.includes('譜面台') || iid.includes('Stand')) countsByKey['stand'] = (countsByKey['stand'] || 0) + c;
+      else if ((lbl.includes('ピアノ') && (lbl.includes('椅子') || lbl.includes('イス'))) || iid.includes('pianoChair')) countsByKey['p_chair'] = (countsByKey['p_chair'] || 0) + c;
+      else if ((lbl.includes('めくり') && (lbl.includes('椅子') || lbl.includes('イス'))) || iid.includes('turnerChair')) countsByKey['turner_chair'] = (countsByKey['turner_chair'] || 0) + c;
+      else if (lbl.includes('椅子') || lbl.includes('イス') || iid.includes('Chair')) countsByKey['chair'] = (countsByKey['chair'] || 0) + c;
+      else if (lbl.includes('ピアノ') && !lbl.includes('蓋')) countsByKey['piano'] = (countsByKey['piano'] || 0) + c;
+      else if (lbl.includes('机') || lbl.includes('テーブル')) countsByKey['table'] = (countsByKey['table'] || 0) + c;
+      else if (lbl.includes('コード') || lbl.includes('電源')) countsByKey['cord'] = (countsByKey['cord'] || 0) + c;
+      else if (lbl.includes('マイク')) countsByKey['mic'] = (countsByKey['mic'] || 0) + c;
+      else if (lbl.includes('チャイム')) countsByKey['chime'] = (countsByKey['chime'] || 0) + c;
+      else if (lbl.includes('ドラ') || lbl.includes('銅鑼')) countsByKey['gong'] = (countsByKey['gong'] || 0) + c;
+      countsByKey[iid] = (countsByKey[iid] || 0) + c;
+      if (lbl) countsByKey[lbl] = (countsByKey[lbl] || 0) + c;
+    }
+
+    return existingNodes.map(node => {
+      const nid = node.id || '';
+      if (typeof nid === 'string' && nid.startsWith('auto_num_')) {
+        const rawKey = nid.replace('auto_num_', '');
+        const baseKey = rawKey.split('_')[0];
+        const val = countsByKey[rawKey] ?? countsByKey[baseKey];
+        if (val !== undefined) {
+          return { ...node, text: String(val) };
+        }
+      }
+      return node;
+    });
+  };
+
   const handleGoToExport = async () => {
     if (!stageCanvasRef.current) return;
     setIsPreparingExport(true);
@@ -2541,12 +2577,36 @@ const StageBuilder: React.FC<Props> = ({
             file_id: fileId,
             tallies: scTallies,
             piano_lid: scPianoLid,
-          });
-          if (resp.data.auto_nodes) {
+          }, { timeout: 12000 });
+          if (resp.data.auto_nodes && resp.data.auto_nodes.length > 0) {
             scAutoNodes = resp.data.auto_nodes;
           }
         } catch (e) {
-          console.error(`Failed to fetch preview bg for scene ${sc.id}`, e);
+          console.warn(`Initial preview-bg failed for scene ${sc.id}, retrying once...`, e);
+          try {
+            const retryResp = await axios.post('/api/preview-bg/', {
+              file_id: fileId,
+              tallies: scTallies,
+              piano_lid: scPianoLid,
+            }, { timeout: 15000 });
+            if (retryResp.data.auto_nodes && retryResp.data.auto_nodes.length > 0) {
+              scAutoNodes = retryResp.data.auto_nodes;
+            }
+          } catch (e2) {
+            console.error(`Retry failed to fetch preview bg for scene ${sc.id}`, e2);
+          }
+        }
+
+        // CRITICAL FALLBACK: 一定時間放置後のネットワーク瞬断やサーバーコールドスタート時、
+        // 既存の保存済みノードから自動集計ノードを復旧し、最新の集計数値を反映する
+        if (scAutoNodes.length === 0) {
+          const fallbackCandidates =
+            previewSettingsRef.current?.sceneNodesMap?.[sc.id] ||
+            previewSettingsRef.current?.sceneNodesMap?.[allScenes[0]?.id] ||
+            [];
+          if (fallbackCandidates.length > 0) {
+            scAutoNodes = updateAutoNodesWithTallies(fallbackCandidates, scTallies);
+          }
         }
 
         exportList.push({

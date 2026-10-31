@@ -1256,15 +1256,25 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         const freshInitialNodes = (sc.initialNodes || (idx === 0 ? initialNodes : []) || []).filter(
           n => !isOrgNode(n)
         );
+        const freshAutoNodes = freshInitialNodes.filter(isAutoNode);
+
         const mergeWithFreshAuto = (saved: OverlayNode[]) => {
-          const keptSaved = saved.filter(n => !isOrgNode(n) && !isAutoNode(n));
-          const savedFieldIds = new Set(keptSaved.filter(isFieldNode).map(n => n.id));
-          const missingFreshFields = freshInitialNodes.filter(n => isFieldNode(n) && !savedFieldIds.has(n.id));
-          return [
-            ...keptSaved,
-            ...missingFreshFields,
-            ...freshInitialNodes.filter(isAutoNode),
-          ];
+          const keptSaved = saved.filter(n => !isOrgNode(n));
+
+          if (freshAutoNodes.length > 0) {
+            const nonAutoSaved = keptSaved.filter(n => !isAutoNode(n));
+            const savedFieldIds = new Set(nonAutoSaved.filter(isFieldNode).map(n => n.id));
+            const missingFreshFields = freshInitialNodes.filter(n => isFieldNode(n) && !savedFieldIds.has(n.id));
+            return [
+              ...nonAutoSaved,
+              ...missingFreshFields,
+              ...freshAutoNodes,
+            ];
+          } else {
+            // CRITICAL FIX: 一定時間放置後のネットワーク瞬断やサーバーコールドスタート時、
+            // freshInitialNodes が空であっても保存済みの自動集計ノードや入力欄を絶対に消去せず保持する
+            return keptSaved;
+          }
         };
 
         // If already initialized in component state, just filter text_org
@@ -1286,6 +1296,14 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         }
 
         // 3. Fallback to default generated nodes
+        // 他のシーンで既に検出済みのフォーム入力欄やスロットがあればテンプレートとして継承
+        const siblingSceneNodes = Object.values(initialPreviewSettings?.sceneNodesMap || {}).find(
+          list => Array.isArray(list) && list.some(n => isAutoNode(n) || isFieldNode(n))
+        );
+        const effectiveBaseNodes = freshInitialNodes.length > 0
+          ? freshInitialNodes
+          : (siblingSceneNodes ? siblingSceneNodes.filter(n => !isOrgNode(n)) : []);
+
         const defaultSceneNode: OverlayNode | null = effectiveScenes.length > 1 ? {
           id: 'text_scene_name',
           type: 'text',
@@ -1300,7 +1318,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         if (defaultSceneNode) {
           initialList.push(defaultSceneNode);
         }
-        initialList.push(...freshInitialNodes);
+        initialList.push(...effectiveBaseNodes);
         newMap[sc.sceneId] = initialList;
       });
 
