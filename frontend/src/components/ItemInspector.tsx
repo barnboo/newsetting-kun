@@ -361,16 +361,12 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
             <input
               type="number"
               step="1"
-              min="10"
+              min="8"
               value={Math.round(selectedItem.width * (selectedItem.scaleX || 1))}
               onChange={(e) => {
                 const w = parseFloat(e.target.value);
                 if (!isNaN(w) && w > 0) {
-                  if (isSymbol) {
-                    onUpdateItem(selectedItem.id, { width: w, scaleX: 1 });
-                  } else {
-                    onUpdateItem(selectedItem.id, { scaleX: w / selectedItem.width });
-                  }
+                  onUpdateItem(selectedItem.id, { width: Math.round(w), scaleX: 1 });
                 }
               }}
               className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
@@ -381,16 +377,12 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
             <input
               type="number"
               step="1"
-              min="10"
+              min="8"
               value={Math.round(selectedItem.height * (selectedItem.scaleY || 1))}
               onChange={(e) => {
                 const h = parseFloat(e.target.value);
                 if (!isNaN(h) && h > 0) {
-                  if (isSymbol) {
-                    onUpdateItem(selectedItem.id, { height: h, scaleY: 1 });
-                  } else {
-                    onUpdateItem(selectedItem.id, { scaleY: h / selectedItem.height });
-                  }
+                  onUpdateItem(selectedItem.id, { height: Math.round(h), scaleY: 1 });
                 }
               }}
               className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
@@ -406,6 +398,64 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
             />
           </label>
+
+          {/* Quick Size Slider and Presets for Placed Items */}
+          <div className="flex flex-col gap-1.5 col-span-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-700 dark:text-slate-300">サイズ調整（縦横連動）</span>
+              <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                {Math.round(selectedItem.width * (selectedItem.scaleX || 1))} px
+              </span>
+            </div>
+            <input
+              type="range"
+              min="10"
+              max="150"
+              value={Math.round(selectedItem.width * (selectedItem.scaleX || 1))}
+              onChange={(e) => {
+                const newW = parseFloat(e.target.value);
+                if (!isNaN(newW) && newW > 0) {
+                  const currentW = Math.max(1, selectedItem.width * (selectedItem.scaleX || 1));
+                  const currentH = Math.max(1, selectedItem.height * (selectedItem.scaleY || 1));
+                  const ratio = currentH / currentW;
+                  onUpdateItem(selectedItem.id, {
+                    width: Math.round(newW),
+                    height: Math.round(newW * ratio),
+                    scaleX: 1,
+                    scaleY: 1,
+                  });
+                }
+              }}
+              className="w-full accent-[#007AFF] cursor-pointer"
+            />
+            <div className="flex items-center gap-1 mt-1">
+              {[
+                { label: '小', size: 24 },
+                { label: '標準', size: 36 },
+                { label: '大', size: 48 },
+                { label: '特大', size: 64 },
+              ].map(preset => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => {
+                    const currentW = Math.max(1, selectedItem.width * (selectedItem.scaleX || 1));
+                    const currentH = Math.max(1, selectedItem.height * (selectedItem.scaleY || 1));
+                    const ratio = currentH / currentW;
+                    onUpdateItem(selectedItem.id, {
+                      width: preset.size,
+                      height: Math.round(preset.size * ratio),
+                      scaleX: 1,
+                      scaleY: 1,
+                    });
+                  }}
+                  className="flex-1 py-1 px-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+                >
+                  {preset.label} ({preset.size})
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {onMoveOrder && (
@@ -1909,6 +1959,71 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                         </div>
                       );
                     })()}
+
+                    {/* この記号・アイテムの個別サイズ調整 */}
+                    <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          この記号のサイズ
+                        </span>
+                        <span className="font-mono text-xs font-bold text-blue-600 dark:text-sky-400">
+                          {Math.round(activeItem.size || selectedCurve.itemSize)} px
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="10"
+                          max="120"
+                          value={Math.round(activeItem.size || selectedCurve.itemSize)}
+                          onChange={(e) => {
+                            const newSize = parseFloat(e.target.value);
+                            if (!isNaN(newSize) && newSize > 0) {
+                              const nextItems = curveItems.map(it => {
+                                if (it.id === activeItem.id) {
+                                  return { ...it, size: newSize };
+                                }
+                                return it;
+                              });
+                              onUpdateCurve(selectedCurve.id, { items: nextItems });
+                            }
+                          }}
+                          className="flex-1 accent-[#007AFF] cursor-pointer"
+                        />
+                        <input
+                          type="number"
+                          min="10"
+                          max="200"
+                          value={Math.round(activeItem.size || selectedCurve.itemSize)}
+                          onChange={(e) => {
+                            const s = parseFloat(e.target.value);
+                            if (!isNaN(s) && s > 0) {
+                              const nextItems = curveItems.map(it => {
+                                if (it.id === activeItem.id) {
+                                  return { ...it, size: s };
+                                }
+                                return it;
+                              });
+                              onUpdateCurve(selectedCurve.id, { items: nextItems });
+                            }
+                          }}
+                          className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const currentSize = activeItem.size || selectedCurve.itemSize;
+                          const nextItems = curveItems.map(it => ({ ...it, size: currentSize }));
+                          onUpdateCurve(selectedCurve.id, { itemSize: currentSize, items: nextItems });
+                        }}
+                        className="w-full py-1.5 px-2 rounded-xl text-[11px] font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                        title="この曲線上のすべてのアイテムにこのサイズを一括適用します"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>この曲線の全記号に適用</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -2021,7 +2136,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
             {/* アイテムサイズ */}
             <div className="flex flex-col gap-1.5 col-span-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">アイテムサイズ</span>
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">記号・アイテムのサイズ</span>
                 <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
                   {Math.round(selectedCurve.itemSize)} px
                 </span>
@@ -2032,7 +2147,18 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                   min="10"
                   max="120"
                   value={Math.round(selectedCurve.itemSize)}
-                  onChange={(e) => onUpdateCurve(selectedCurve.id, { itemSize: parseFloat(e.target.value) })}
+                  onChange={(e) => {
+                    const newSize = parseFloat(e.target.value);
+                    if (!isNaN(newSize) && newSize > 0) {
+                      const updatedItems = Array.isArray(selectedCurve.items)
+                        ? selectedCurve.items.map(it => ({ ...it, size: newSize }))
+                        : undefined;
+                      onUpdateCurve(selectedCurve.id, {
+                        itemSize: newSize,
+                        ...(updatedItems ? { items: updatedItems } : {}),
+                      });
+                    }
+                  }}
                   className="flex-1 accent-[#007AFF] cursor-pointer"
                 />
                 <input
@@ -2042,10 +2168,44 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                   value={Math.round(selectedCurve.itemSize)}
                   onChange={(e) => {
                     const s = parseFloat(e.target.value);
-                    if (!isNaN(s) && s > 0) onUpdateCurve(selectedCurve.id, { itemSize: s });
+                    if (!isNaN(s) && s > 0) {
+                      const updatedItems = Array.isArray(selectedCurve.items)
+                        ? selectedCurve.items.map(it => ({ ...it, size: s }))
+                        : undefined;
+                      onUpdateCurve(selectedCurve.id, {
+                        itemSize: s,
+                        ...(updatedItems ? { items: updatedItems } : {}),
+                      });
+                    }
                   }}
                   className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
                 />
+              </div>
+              {/* Quick size presets for curve */}
+              <div className="flex items-center gap-1 mt-0.5">
+                {[
+                  { label: '小', size: 24 },
+                  { label: '標準', size: 36 },
+                  { label: '大', size: 48 },
+                  { label: '特大', size: 64 },
+                ].map(preset => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      const updatedItems = Array.isArray(selectedCurve.items)
+                        ? selectedCurve.items.map(it => ({ ...it, size: preset.size }))
+                        : undefined;
+                      onUpdateCurve(selectedCurve.id, {
+                        itemSize: preset.size,
+                        ...(updatedItems ? { items: updatedItems } : {}),
+                      });
+                    }}
+                    className="flex-1 py-1 px-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+                  >
+                    {preset.label} ({preset.size})
+                  </button>
+                ))}
               </div>
             </div>
 

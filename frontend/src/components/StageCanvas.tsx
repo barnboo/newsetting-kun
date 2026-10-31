@@ -710,32 +710,7 @@ const CanvasItem: React.FC<{
         }
       }}
       onTransformEnd={() => {
-        const node = groupRef.current;
-        if (!node) return;
-        if (isSymbol) {
-          const sx = node.scaleX();
-          const sy = node.scaleY();
-          const newWidth = Math.max(10, Math.round(item.width * sx));
-          const newHeight = Math.max(10, Math.round(item.height * sy));
-          node.scaleX(1);
-          node.scaleY(1);
-          const textGroup = node.findOne('.symbol-text-group');
-          if (textGroup) {
-            textGroup.scaleX(1);
-            textGroup.scaleY(1);
-          }
-          onChange({
-            x: node.x(),
-            y: node.y(),
-            rotation: node.rotation(),
-            width: newWidth,
-            height: newHeight,
-            scaleX: 1,
-            scaleY: 1,
-          });
-        } else {
-          onChange({ x: node.x(), y: node.y(), rotation: node.rotation(), scaleX: node.scaleX(), scaleY: node.scaleY() });
-        }
+        // Centralized handling in Transformer onTransformEnd to eliminate race condition
         onDragEndAction?.();
       }}
     >
@@ -3489,15 +3464,29 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                       const updates: { id: string; attrs: Partial<PlacedItem> }[] = [];
                       activeItemIds.forEach(id => {
                         const node = stageRef.current?.findOne(`#${id}`);
-                        if (node) {
+                        const it = placedItems.find(item => item.id === id);
+                        if (node && it) {
+                          const sx = node.scaleX();
+                          const sy = node.scaleY();
+                          const newWidth = Math.max(8, Math.round(it.width * sx));
+                          const newHeight = Math.max(8, Math.round(it.height * sy));
+                          node.scaleX(1);
+                          node.scaleY(1);
+                          const textGroup = (node as Konva.Container).findOne?.('.symbol-text-group');
+                          if (textGroup) {
+                            textGroup.scaleX(1);
+                            textGroup.scaleY(1);
+                          }
                           updates.push({
                             id,
                             attrs: {
                               x: node.x(),
                               y: node.y(),
                               rotation: node.rotation(),
-                              scaleX: node.scaleX(),
-                              scaleY: node.scaleY(),
+                              width: newWidth,
+                              height: newHeight,
+                              scaleX: 1,
+                              scaleY: 1,
                             }
                           });
                         }
@@ -3507,17 +3496,18 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                       const node = stageRef.current?.findOne(`#${activeItemIds[0]}`);
                       if (node) {
                         const targetItem = placedItems.find(it => it.id === activeItemIds[0]);
-                        const targetTmplId = targetItem ? templateReplacements?.[targetItem.iconId] : undefined;
-                        const isTargetSymbol = targetItem?.templateType === 'symbol' ||
-                                               targetTmplId === 'tmpl_symbol' ||
-                                               targetTmplId?.replace(/^tmpl_/, '') === 'symbol';
-                        if (targetItem && isTargetSymbol) {
+                        if (targetItem) {
                           const sx = node.scaleX();
                           const sy = node.scaleY();
-                          const newWidth = Math.max(10, Math.round(targetItem.width * sx));
-                          const newHeight = Math.max(10, Math.round(targetItem.height * sy));
+                          const newWidth = Math.max(8, Math.round(targetItem.width * sx));
+                          const newHeight = Math.max(8, Math.round(targetItem.height * sy));
                           node.scaleX(1);
                           node.scaleY(1);
+                          const textGroup = (node as Konva.Container).findOne?.('.symbol-text-group');
+                          if (textGroup) {
+                            textGroup.scaleX(1);
+                            textGroup.scaleY(1);
+                          }
                           onUpdateItem(activeItemIds[0], {
                             x: node.x(),
                             y: node.y(),
@@ -3526,14 +3516,6 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
                             height: newHeight,
                             scaleX: 1,
                             scaleY: 1,
-                          });
-                        } else {
-                          onUpdateItem(activeItemIds[0], {
-                            x: node.x(),
-                            y: node.y(),
-                            rotation: node.rotation(),
-                            scaleX: node.scaleX(),
-                            scaleY: node.scaleY(),
                           });
                         }
                       }
