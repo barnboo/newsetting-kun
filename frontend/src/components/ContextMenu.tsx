@@ -32,6 +32,71 @@ export interface ContextMenuProps {
   onClose: () => void;
 }
 
+export const SubmenuContainer: React.FC<{
+  children: React.ReactNode;
+  className?: string;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}> = ({ children, className = '', onMouseEnter, onMouseLeave }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<React.CSSProperties>({
+    visibility: 'hidden',
+  });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+
+    const parentRect = parent.getBoundingClientRect();
+    const subRect = el.getBoundingClientRect();
+
+    const padding = 10;
+    // Determine whether to open to right or left
+    const spaceOnRight = window.innerWidth - parentRect.right;
+    const spaceOnLeft = parentRect.left;
+
+    let openLeft = false;
+    if (spaceOnRight < subRect.width + padding && spaceOnLeft >= subRect.width + padding) {
+      openLeft = true;
+    } else if (spaceOnRight < subRect.width + padding && spaceOnRight < spaceOnLeft) {
+      openLeft = true;
+    }
+
+    // Determine vertical offset
+    let top = 0;
+    const targetBottom = parentRect.top + subRect.height;
+    if (targetBottom > window.innerHeight - padding) {
+      const overflow = targetBottom - (window.innerHeight - padding);
+      top = -overflow;
+      if (parentRect.top + top < padding) {
+        top = padding - parentRect.top;
+      }
+    }
+
+    setStyle({
+      visibility: 'visible',
+      left: openLeft ? 'auto' : 'calc(100% + 4px)',
+      right: openLeft ? 'calc(100% + 4px)' : 'auto',
+      top: `${top}px`,
+      maxHeight: `calc(100vh - ${padding * 2}px)`,
+    });
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      style={style}
+      className={`absolute z-50 liquid-context-menu rounded-2xl p-1.5 shadow-2xl overflow-y-auto animate-in fade-in zoom-in-95 duration-100 ${className}`}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {children}
+    </div>
+  );
+};
+
 export const ContextMenu: React.FC<ContextMenuProps> = ({
   position,
   canvasPos,
@@ -60,14 +125,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   useLayoutEffect(() => {
     if (!menuRef.current) return;
     const rect = menuRef.current.getBoundingClientRect();
+    const PADDING = 8;
     let x = position.x;
     let y = position.y;
-    if (x + rect.width > window.innerWidth - 8) {
-      x = Math.max(8, window.innerWidth - rect.width - 8);
+    if (x + rect.width > window.innerWidth - PADDING) {
+      x = Math.max(PADDING, window.innerWidth - rect.width - PADDING);
     }
-    if (y + rect.height > window.innerHeight - 8) {
-      y = Math.max(8, window.innerHeight - rect.height - 8);
+    if (y + rect.height > window.innerHeight - PADDING) {
+      y = Math.max(PADDING, window.innerHeight - rect.height - PADDING);
     }
+    x = Math.max(PADDING, x);
+    y = Math.max(PADDING, y);
     setAdjustedPos({ x, y });
   }, [position]);
 
@@ -114,7 +182,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 liquid-context-menu rounded-2xl p-1.5 min-w-[220px] text-xs select-none animate-in fade-in zoom-in-95 duration-100"
+      className="fixed z-50 liquid-context-menu rounded-2xl p-1.5 min-w-[220px] max-h-[calc(100vh-16px)] overflow-y-auto text-xs select-none shadow-2xl border border-slate-200/60 dark:border-white/10 animate-in fade-in zoom-in-95 duration-100"
       style={{ left: adjustedPos.x, top: adjustedPos.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -132,8 +200,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
         {/* PDF Submenu */}
         {activeSubmenu === 'pdf' && (
-          <div
-            className="absolute left-full top-0 ml-1.5 liquid-context-menu rounded-2xl p-1.5 min-w-[210px] max-h-[65vh] overflow-y-auto z-50"
+          <SubmenuContainer
+            className="min-w-[220px]"
             onMouseEnter={() => {
               if (submenuTimeoutRef.current) clearTimeout(submenuTimeoutRef.current);
             }}
@@ -191,7 +259,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                 );
               })
             )}
-          </div>
+          </SubmenuContainer>
         )}
       </div>
 
@@ -209,8 +277,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
         {/* Template Submenu */}
         {activeSubmenu === 'template' && (
-          <div
-            className="absolute left-full top-0 ml-1.5 liquid-context-menu rounded-2xl p-1.5 min-w-[200px] max-h-[65vh] overflow-y-auto z-50"
+          <SubmenuContainer
+            className="min-w-[210px]"
             onMouseEnter={() => {
               if (submenuTimeoutRef.current) clearTimeout(submenuTimeoutRef.current);
             }}
@@ -234,7 +302,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                 <span className="truncate">{tmpl.label}</span>
               </div>
             ))}
-          </div>
+          </SubmenuContainer>
         )}
       </div>
 

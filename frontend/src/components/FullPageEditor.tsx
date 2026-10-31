@@ -4,6 +4,7 @@ import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Ellipse, Line } f
 import useImage from 'use-image';
 import { Layers, Trash2, FileText, Shapes, Type, Spline, Copy, ClipboardPaste, CopyPlus, X, Check, Highlighter, Edit3, MessageSquareHeart, ExternalLink } from 'lucide-react';
 import { HelpHeaderButtons } from './HelpAssistantModal';
+import { SubmenuContainer } from './ContextMenu';
 
 export type ShapeKind = 'circle' | 'cross' | 'rect' | 'triangle';
 
@@ -112,14 +113,17 @@ const PreviewContextMenu: React.FC<PreviewContextMenuProps> = ({
   useLayoutEffect(() => {
     if (!menuRef.current) return;
     const rect = menuRef.current.getBoundingClientRect();
+    const PADDING = 8;
     let x = position.x;
     let y = position.y;
-    if (x + rect.width > window.innerWidth - 8) {
-      x = Math.max(8, window.innerWidth - rect.width - 8);
+    if (x + rect.width > window.innerWidth - PADDING) {
+      x = Math.max(PADDING, window.innerWidth - rect.width - PADDING);
     }
-    if (y + rect.height > window.innerHeight - 8) {
-      y = Math.max(8, window.innerHeight - rect.height - 8);
+    if (y + rect.height > window.innerHeight - PADDING) {
+      y = Math.max(PADDING, window.innerHeight - rect.height - PADDING);
     }
+    x = Math.max(PADDING, x);
+    y = Math.max(PADDING, y);
     setAdjustedPos({ x, y });
   }, [position]);
 
@@ -158,7 +162,7 @@ const PreviewContextMenu: React.FC<PreviewContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 liquid-context-menu rounded-2xl p-1.5 min-w-[210px] text-xs select-none shadow-2xl border border-slate-200/60 dark:border-white/10 animate-in fade-in zoom-in-95 duration-100"
+      className="fixed z-50 liquid-context-menu rounded-2xl p-1.5 min-w-[210px] max-h-[calc(100vh-16px)] overflow-y-auto text-xs select-none shadow-2xl border border-slate-200/60 dark:border-white/10 animate-in fade-in zoom-in-95 duration-100"
       style={{ left: adjustedPos.x, top: adjustedPos.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -190,8 +194,8 @@ const PreviewContextMenu: React.FC<PreviewContextMenuProps> = ({
         <span className="text-[10px] text-slate-400 font-bold">›</span>
 
         {showShapeSubmenu && (
-          <div
-            className="absolute left-full top-0 ml-1.5 liquid-context-menu rounded-2xl p-1.5 min-w-[145px] shadow-2xl border border-slate-200/60 dark:border-white/10 z-50"
+          <SubmenuContainer
+            className="min-w-[145px]"
             onMouseEnter={() => {
               if (submenuTimeoutRef.current) clearTimeout(submenuTimeoutRef.current);
             }}
@@ -214,7 +218,7 @@ const PreviewContextMenu: React.FC<PreviewContextMenuProps> = ({
                 <span className="font-medium">{label}</span>
               </div>
             ))}
-          </div>
+          </SubmenuContainer>
         )}
       </div>
 
