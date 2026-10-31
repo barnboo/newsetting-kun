@@ -287,6 +287,135 @@ const SYNONYM_MAP: Array<[RegExp, string]> = [
   [/自動|入らない|ずれる|枠/g, '出演順 団体名 自動集計 パーツ抽出'],
 ];
 
+function parseDetailBullet(rawDetail: string): { topic: string; content: string } {
+  const match = rawDetail.match(/^【(.*?)】(.*)$/s);
+  if (match) {
+    return { topic: match[1].trim(), content: match[2].trim() };
+  }
+  return { topic: '', content: rawDetail.trim() };
+}
+
+function synthesizeConversationalAnswer(
+  query: string,
+  primary: KnowledgeItem,
+  secondary?: KnowledgeItem
+): string {
+  const cleanQ = query.trim();
+  const isHowTo = /どうやって|方法|やり方|するには|したい|変更|設定|追加|並べる|変える|引く|移動|配置|消す|削除/.test(cleanQ);
+  const isMechanism = /仕組み|なぜ|内部|原理|技術|自動|アルゴリズム|どうして/.test(cleanQ);
+  const isTrouble = /できない|失敗|出ない|入らない|消えた|粗い|ぼやける|見切れ|戻したい|合わない|おかしい/.test(cleanQ);
+
+  const parsedDetails = primary.details.map(parseDetailBullet);
+  const lines: string[] = [];
+
+  if (isMechanism && primary.mechanism) {
+    lines.push(`**「${cleanQ}」の自動処理・内部の仕組みについて解説します。**\n`);
+    lines.push(`💡 **処理の仕組み**：\n${primary.mechanism}\n`);
+    lines.push(`**機能概要**：\n${primary.summary}`);
+  } else if (isHowTo) {
+    lines.push(`**${primary.summary}**\n`);
+
+    // 手順・操作に関連する項目をステップ形式で整理
+    const actionBullets = parsedDetails.filter((p) =>
+      /方法|手順|操作|調整|変更|追加|枠|設定|スナップ|ハンドルの操作|個別間隔/.test(p.topic) ||
+      /クリック|ドラッグ|選択|押す|入力/.test(p.content)
+    );
+    const stepsToDisplay = actionBullets.length > 0 ? actionBullets : parsedDetails;
+
+    lines.push('**具体的な操作手順：**');
+    stepsToDisplay.forEach((st, idx) => {
+      const topicLabel = st.topic ? `**${st.topic}**：` : '';
+      lines.push(`${idx + 1}. ${topicLabel}${st.content}`);
+    });
+
+    const tipBullets = parsedDetails.filter((p) => !stepsToDisplay.includes(p));
+    if (tipBullets.length > 0) {
+      lines.push('\n💡 **補足・ポイント**：');
+      tipBullets.forEach((t) => {
+        lines.push(`- ${t.topic ? `**${t.topic}**：` : ''}${t.content}`);
+      });
+    }
+  } else if (isTrouble) {
+    lines.push(`お困りの件「${cleanQ}」についての対処法をご案内します。\n`);
+    lines.push(`**要点**：${primary.summary}\n`);
+    lines.push('**対処手順・確認ポイント：**');
+    parsedDetails.forEach((st, idx) => {
+      lines.push(`- **${st.topic || `対処 ${idx + 1}`}**：${st.content}`);
+    });
+  } else {
+    // 汎用回答
+    lines.push(`**${primary.title}** についてのご案内です。\n`);
+    lines.push(`${primary.summary}\n`);
+    lines.push('**主なポイント・機能：**');
+    parsedDetails.forEach((st) => {
+      lines.push(`- **${st.topic || '解説'}**：${st.content}`);
+    });
+  }
+
+  if (!isMechanism && primary.mechanism && cleanQ.includes('自動')) {
+    lines.push(`\n⚙️ **自動処理の仕組み**：\n${primary.mechanism}`);
+  }
+
+  if (secondary && secondary.id !== primary.id) {
+    lines.push('\n---');
+    lines.push(`🔗 **あわせて確認したい機能：【${secondary.title}】**`);
+    lines.push(secondary.summary);
+  }
+
+  return lines.join('\n');
+}
+
+async function askGeminiAi(
+  apiKey: string,
+  userQuestion: string,
+  chatHistory: ChatMessage[]
+): Promise<string> {
+  const manualContext = KNOWLEDGE_BASE.map(
+    (k) => `【${k.title}】(説明書 ${k.chapter} P.${k.page})\n概要: ${k.summary}\n詳細:\n${k.details.join('\n')}${k.mechanism ? `\n仕組み: ${k.mechanism}` : ''}`
+  ).join('\n\n');
+
+  const systemInstructionText = `あなたは吹奏楽・オーケストラ舞台配置図作成アプリ「セッティングくん」の専属AIサポートアシスタントです。
+以下の「公式取扱説明書 全文データ」の内容を完全に踏まえ、ユーザーからの質問に対して、説明書の丸写しや切り貼りをせず、自然で分かりやすく丁寧な対話形式の日本語で回答してください。
+操作手順を聞かれた場合は「1. ... 2. ...」と具体的にステップを案内してください。
+
+【公式取扱説明書 全文データ】
+${manualContext}`;
+
+  const contents = [
+    {
+      role: 'user',
+      parts: [{ text: systemInstructionText + '\n\n質問を受け付けます。ユーザーの疑問に的確かつ自然な会話で回答します。' }],
+    },
+    ...chatHistory.slice(-4).map((m) => ({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.text }],
+    })),
+    {
+      role: 'user',
+      parts: [{ text: userQuestion }],
+    },
+  ];
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey.trim()}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `API error: ${res.status}`);
+  }
+
+  const json = await res.json();
+  const reply = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!reply) throw new Error('No reply from Gemini');
+  return reply;
+}
+
 function findBestAnswer(query: string): {
   answer: string;
   matchedItems: KnowledgeItem[];
@@ -328,37 +457,15 @@ function findBestAnswer(query: string): {
   if (top.length === 0) {
     const fallback = KNOWLEDGE_BASE[0];
     return {
-      answer: `ご質問ありがとうございます。「${cleanQ}」に関連する案内です。\n\n${fallback.summary}\n\n${fallback.details.join('\n')}\n\nより具体的なキーワード（例：「曲線の引き方」「ピアノの蓋」「打楽器の縦書き」「縮尺の合わせ方」「JSON保存」「出演順の自動入力」など）でもお気軽にご質問ください！`,
+      answer: `ご質問ありがとうございます。「${cleanQ}」について、公式説明書から該当する案内が見つかりませんでした。\n\n本アプリは「①PDF読込 → ②領域選択・パーツ抽出 → ③ステージ配置 → ④プレビュー・PDF出力」の4ステップで舞台配置図を作成します。\n\nより具体的なキーワード（例：「曲線の引き方」「ピアノの蓋」「打楽器の縦書き」「縮尺の合わせ方」「JSON保存」「出演順の自動入力」など）でもお気軽にご質問ください！`,
       matchedItems: [fallback],
       suggestedQuestions: fallback.relatedQuestions,
     };
   }
 
   const primary = top[0].item;
-  const asksMechanism = /仕組み|アルゴリズム|どうやって|なぜ|内部|原理|技術|自動/.test(cleanQ);
-
-  let lines: string[] = [];
-  lines.push(`**【${primary.title}】**（説明書 ${primary.chapter} / P.${primary.page}）`);
-  lines.push(primary.summary);
-  lines.push('');
-  for (const d of primary.details) {
-    lines.push(d);
-  }
-  if (primary.mechanism && (asksMechanism || top[0].score >= 15)) {
-    lines.push('');
-    lines.push(`💡 **内部の仕組み**：${primary.mechanism}`);
-  }
-
-  if (top.length > 1 && top[1].score >= top[0].score * 0.65) {
-    const secondary = top[1].item;
-    lines.push('');
-    lines.push(`---`);
-    lines.push(`**【関連：${secondary.title}】**（P.${secondary.page}）`);
-    lines.push(secondary.summary);
-    if (secondary.details[0]) {
-      lines.push(secondary.details[0]);
-    }
-  }
+  const secondary = top.length > 1 && top[1].score >= top[0].score * 0.65 ? top[1].item : undefined;
+  const answer = synthesizeConversationalAnswer(cleanQ, primary, secondary);
 
   const matchedItems = top.map((t) => t.item);
   const suggested = Array.from(
@@ -366,7 +473,7 @@ function findBestAnswer(query: string): {
   ).slice(0, 3);
 
   return {
-    answer: lines.join('\n'),
+    answer,
     matchedItems,
     suggestedQuestions: suggested,
   };
@@ -378,6 +485,7 @@ interface ChatMessage {
   text: string;
   matchedItems?: KnowledgeItem[];
   suggestedQuestions?: string[];
+  isGemini?: boolean;
 }
 
 const INITIAL_SUGGESTIONS = [
@@ -418,6 +526,12 @@ export const HelpAssistantModal: React.FC<{
   const [activeTab, setActiveTab] = useState<HelpModalTab>(initialTab);
   const [pdfPage, setPdfPage] = useState<number>(1);
   const [input, setInput] = useState('');
+  const [geminiKey, setGeminiKey] = useState<string>(
+    () => localStorage.getItem('settingkun_gemini_api_key') || ''
+  );
+  const [showKeyConfig, setShowKeyConfig] = useState(false);
+  const [keyInput, setKeyInput] = useState(geminiKey);
+  const [isAiGenerating, setIsAiGenerating] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
@@ -466,13 +580,13 @@ export const HelpAssistantModal: React.FC<{
     }, 60);
 
     return () => clearTimeout(timer);
-  }, [messages, activeTab]);
+  }, [messages, activeTab, isAiGenerating]);
 
   if (!isOpen) return null;
 
-  const handleSendQuestion = (qText?: string) => {
+  const handleSendQuestion = async (qText?: string) => {
     const q = (qText ?? input).trim();
-    if (!q) return;
+    if (!q || isAiGenerating) return;
     if (!qText) setInput('');
 
     const userMsgId = `user_${Date.now()}`;
@@ -485,16 +599,46 @@ export const HelpAssistantModal: React.FC<{
       text: q,
     };
 
-    const result = findBestAnswer(q);
-    const botMsg: ChatMessage = {
-      id: botMsgId,
-      role: 'assistant',
-      text: result.answer,
-      matchedItems: result.matchedItems,
-      suggestedQuestions: result.suggestedQuestions,
-    };
+    setMessages((prev) => [...prev, userMsg]);
 
-    setMessages((prev) => [...prev, userMsg, botMsg]);
+    const fallbackResult = findBestAnswer(q);
+
+    if (geminiKey) {
+      setIsAiGenerating(true);
+      try {
+        const aiAnswer = await askGeminiAi(geminiKey, q, messages);
+        const botMsg: ChatMessage = {
+          id: botMsgId,
+          role: 'assistant',
+          text: aiAnswer,
+          matchedItems: fallbackResult.matchedItems,
+          suggestedQuestions: fallbackResult.suggestedQuestions,
+          isGemini: true,
+        };
+        setMessages((prev) => [...prev, botMsg]);
+      } catch (err: any) {
+        console.warn('Gemini API failed, falling back to local synthesizer:', err);
+        const botMsg: ChatMessage = {
+          id: botMsgId,
+          role: 'assistant',
+          text: `⚠️ Gemini APIの接続に失敗したため（${err?.message || '通信エラー'}）、内蔵の自然応答エンジンで回答します。\n\n${fallbackResult.answer}`,
+          matchedItems: fallbackResult.matchedItems,
+          suggestedQuestions: fallbackResult.suggestedQuestions,
+        };
+        setMessages((prev) => [...prev, botMsg]);
+      } finally {
+        setIsAiGenerating(false);
+      }
+    } else {
+      const botMsg: ChatMessage = {
+        id: botMsgId,
+        role: 'assistant',
+        text: fallbackResult.answer,
+        matchedItems: fallbackResult.matchedItems,
+        suggestedQuestions: fallbackResult.suggestedQuestions,
+      };
+      setMessages((prev) => [...prev, botMsg]);
+    }
   };
 
   const openPdfAtPage = (page: number) => {
@@ -573,8 +717,25 @@ export const HelpAssistantModal: React.FC<{
             </button>
           </div>
 
-          {/* Right PDF External / Close Actions */}
+          {/* Right PDF External / Gemini AI / Close Actions */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {activeTab === 'chat' && (
+              <button
+                type="button"
+                onClick={() => setShowKeyConfig((v) => !v)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
+                  geminiKey
+                    ? 'bg-purple-100 dark:bg-purple-950/70 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 shadow-xs'
+                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
+                }`}
+                title="Google Gemini APIキーを設定して本物の生成AIと対話する"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span className="hidden sm:inline">
+                  {geminiKey ? 'Gemini AI有効' : 'AI設定'}
+                </span>
+              </button>
+            )}
             <a
               href="/manual.pdf"
               target="_blank"
@@ -604,6 +765,65 @@ export const HelpAssistantModal: React.FC<{
             </button>
           </div>
         </div>
+
+        {/* Gemini AI API Key Configuration Drawer */}
+        {showKeyConfig && activeTab === 'chat' && (
+          <div className="px-4 py-3 bg-purple-50 dark:bg-purple-950/60 border-b border-purple-200 dark:border-purple-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs select-none">
+            <div className="flex-1">
+              <div className="flex items-center gap-1.5 font-bold text-purple-900 dark:text-purple-200">
+                <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                <span>Google Gemini API（本物の生成AI）連携設定</span>
+              </div>
+              <p className="text-[11px] text-purple-700 dark:text-purple-300 mt-0.5">
+                APIキーを設定すると、最新の生成AI（Gemini 2.0 Flash）が説明書全体を学習し、切り貼りではない完全オリジナルの自然な対話形式で質問に答えます（未設定時は高度な内蔵ルールエンジンで回答）。
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline ml-1 font-bold text-purple-800 dark:text-purple-200 hover:text-purple-600"
+                >
+                  無料APIキーの取得はこちら →
+                </a>
+              </p>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <input
+                type="password"
+                placeholder="AIzaSy..."
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                className="px-3 py-1.5 rounded-xl border border-purple-300 dark:border-purple-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-full sm:w-56 focus:outline-none focus:border-purple-500 font-mono text-[11px]"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const trimmed = keyInput.trim();
+                  setGeminiKey(trimmed);
+                  localStorage.setItem('settingkun_gemini_api_key', trimmed);
+                  setShowKeyConfig(false);
+                }}
+                className="px-3 py-1.5 rounded-xl font-bold bg-purple-600 text-white hover:bg-purple-700 cursor-pointer shrink-0 transition-colors"
+              >
+                保存
+              </button>
+              {geminiKey && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGeminiKey('');
+                    setKeyInput('');
+                    localStorage.removeItem('settingkun_gemini_api_key');
+                    setShowKeyConfig(false);
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl text-slate-500 hover:text-red-600 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer shrink-0 transition-colors"
+                  title="キーを解除"
+                >
+                  解除
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Body Content */}
         {activeTab === 'chat' ? (
@@ -664,6 +884,21 @@ export const HelpAssistantModal: React.FC<{
                       msg.role === 'user' ? 'items-end' : 'items-start'
                     }`}
                   >
+                    {msg.role === 'assistant' && (
+                      <div className="mb-1 ml-1 flex items-center gap-1">
+                        {msg.isGemini ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 px-2 py-0.5 rounded-full">
+                            <Sparkles className="w-3 h-3 text-purple-600" />
+                            Gemini 2.0 AI生成
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                            <BookOpen className="w-3 h-3 text-blue-600 dark:text-sky-400" />
+                            公式ガイドアシスタント
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div
                       className={`max-w-[90%] sm:max-w-[82%] rounded-2xl px-4 py-3 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap ${
                         msg.role === 'user'
@@ -716,6 +951,15 @@ export const HelpAssistantModal: React.FC<{
                       )}
                   </div>
                 ))}
+
+                {isAiGenerating && (
+                  <div className="flex flex-col items-start animate-fadeIn">
+                    <div className="bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800/70 text-purple-800 dark:text-purple-200 rounded-2xl rounded-bl-xs px-4 py-3 text-xs sm:text-sm flex items-center gap-2.5">
+                      <Sparkles className="w-4 h-4 text-purple-600 animate-spin" />
+                      <span className="font-medium">Gemini AIが説明書を参照して回答を作成中...</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Bottom Chat Input Bar */}
@@ -730,20 +974,27 @@ export const HelpAssistantModal: React.FC<{
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="使い方の疑問や知りたい機能を入力してください（例：ピアノの蓋、曲線の間隔、打楽器の縦書き、縮尺測定...）"
-                  className="flex-1 px-4 py-2.5 rounded-full text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
+                  disabled={isAiGenerating}
+                  placeholder={
+                    geminiKey
+                      ? 'Gemini AIに質問を入力してください（例：ピアノの蓋の変更方法、曲線の間隔調整など）'
+                      : '使い方の疑問や知りたい機能を入力してください（右上の「AI設定」からGemini連携も可能）'
+                  }
+                  className="flex-1 px-4 py-2.5 rounded-full text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 disabled:opacity-60"
                 />
                 <button
                   type="submit"
-                  disabled={!input.trim()}
+                  disabled={!input.trim() || isAiGenerating}
                   className={`px-4 py-2.5 rounded-full text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-                    input.trim()
-                      ? 'bg-blue-600 hover:bg-blue-700 shadow-xs'
+                    input.trim() && !isAiGenerating
+                      ? geminiKey
+                        ? 'bg-purple-600 hover:bg-purple-700 shadow-xs'
+                        : 'bg-blue-600 hover:bg-blue-700 shadow-xs'
                       : 'bg-slate-300 dark:bg-slate-700 cursor-not-allowed'
                   }`}
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>質問する</span>
+                  <span>{isAiGenerating ? '生成中...' : '質問する'}</span>
                 </button>
               </form>
             </div>
