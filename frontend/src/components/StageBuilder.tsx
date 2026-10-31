@@ -2441,7 +2441,9 @@ const StageBuilder: React.FC<Props> = ({
 
   // ─── Export Handlers ─────────────────────────────────────────────────────────
 
-  const handleExportFinalPdf = async (fullPageImages: string | string[]) => {
+  const handleExportFinalPdf = async (
+    data: string | string[] | { overlays: string | string[]; composites: string | string[] }
+  ) => {
     const tallies = computeTallies();
     try {
       const payload: any = {
@@ -2449,10 +2451,21 @@ const StageBuilder: React.FC<Props> = ({
         tallies,
         piano_lid: '',
       };
-      if (Array.isArray(fullPageImages)) {
-        payload.full_page_images = fullPageImages;
+      if (typeof data === 'object' && data !== null && 'overlays' in data) {
+        if (Array.isArray(data.overlays)) {
+          payload.full_page_images = data.overlays;
+        } else {
+          payload.full_page_image = data.overlays;
+        }
+        if (Array.isArray(data.composites)) {
+          payload.full_composite_images = data.composites;
+        } else {
+          payload.full_composite_image = data.composites;
+        }
+      } else if (Array.isArray(data)) {
+        payload.full_page_images = data;
       } else {
-        payload.full_page_image = fullPageImages;
+        payload.full_page_image = data;
       }
 
       const resp = await axios.post('/api/export-pdf/', payload);

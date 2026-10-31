@@ -39,6 +39,11 @@ export interface SceneExportData {
   savedNodes?: OverlayNode[];
 }
 
+export interface ExportImagesPayload {
+  overlays: string | string[];
+  composites: string | string[];
+}
+
 interface FullPageEditorProps {
   fileId: string;
   pageImageUrl: string;
@@ -52,7 +57,7 @@ interface FullPageEditorProps {
   projectName?: string;
   onUpdateProjectName?: (name: string) => void;
   onBack: () => void;
-  onExport: (fullPageImages: string | string[]) => void;
+  onExport: (data: string | string[] | ExportImagesPayload) => void;
   onExportJson?: () => void;
 }
 
@@ -2094,6 +2099,22 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
   const FEEDBACK_STORAGE_KEY = 'stajet_feedback_form_prompted';
 
   const executeActualExport = async () => {
+    // 0. すべての画像要素のデコード・読み込み完了を待機
+    try {
+      await Promise.all(
+        Array.from(document.images)
+          .filter((img) => !img.complete)
+          .map(
+            (img) =>
+              new Promise((resolve) => {
+                img.onload = img.onerror = resolve;
+              })
+          )
+      );
+    } catch {
+      // ignore
+    }
+
     // 1. 同期的に選択解除とエクスポートフラグを反映
     flushSync(() => {
       setSelectedId(null);
@@ -2106,7 +2127,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     await new Promise(r => setTimeout(r, 60));
 
     try {
-      const exportedImages: string[] = [];
+      const exportedOverlays: string[] = [];
+      const exportedComposites: string[] = [];
       const exportPixelRatio = (1 / dimensions.scale) * 2.0;
 
       for (const sc of effectiveScenes) {
@@ -2122,33 +2144,42 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
         const prevOpacity = stageLayoutLayer ? stageLayoutLayer.opacity() : 1.0;
         if (stageLayoutLayer) stageLayoutLayer.opacity(1.0);
 
-        // Hide background layer to export transparent overlay
         const bgLayer = stage.findOne('#bgLayer');
-        if (bgLayer) bgLayer.visible(false);
 
-        // 描画バッファを強制更新してキャプチャ
+        // 1. 背景レイヤー表示の完全合成画像（コンポジット）をキャプチャ（PDF元データ不在時の100%安全保証用）
+        if (bgLayer) bgLayer.visible(true);
         stage.draw();
-
-        const dataUrl = stage.toDataURL({
+        const compositeDataUrl = stage.toDataURL({
           pixelRatio: exportPixelRatio,
           mimeType: 'image/png',
         });
+        exportedComposites.push(compositeDataUrl);
+
+        // 2. 背景レイヤーを非表示にして透過オーバーレイ画像をキャプチャ（元PDFへの高精細合成用）
+        if (bgLayer) bgLayer.visible(false);
+        stage.draw();
+        const overlayDataUrl = stage.toDataURL({
+          pixelRatio: exportPixelRatio,
+          mimeType: 'image/png',
+        });
+        exportedOverlays.push(overlayDataUrl);
 
         // 復元
         if (bgLayer) bgLayer.visible(true);
         if (stageLayoutLayer) stageLayoutLayer.opacity(prevOpacity);
         underlays.forEach((u: any) => u.visible(true));
         stage.draw();
-
-        exportedImages.push(dataUrl);
       }
 
-      if (exportedImages.length === 0) {
+      if (exportedOverlays.length === 0) {
         alert('書き出し対象のプレビューがありません。');
         return;
       }
 
-      onExport(exportedImages.length === 1 ? exportedImages[0] : exportedImages);
+      onExport({
+        overlays: exportedOverlays.length === 1 ? exportedOverlays[0] : exportedOverlays,
+        composites: exportedComposites.length === 1 ? exportedComposites[0] : exportedComposites,
+      });
     } catch (e) {
       console.error(e);
       alert('PDF書き出し用画像の生成に失敗しました。');

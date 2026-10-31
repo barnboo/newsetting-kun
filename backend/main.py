@@ -2623,8 +2623,10 @@ async def preview_bg(req: PreviewRequest):
 
 class ExportPdfRequest(BaseModel):
     file_id: str
-    full_page_image: Optional[str] = None  # base64 data URL of single page overlay
-    full_page_images: Optional[List[str]] = None  # list of base64 data URLs for multi-scene export
+    full_page_image: Optional[str] = None  # base64 data URL of single page overlay (transparent)
+    full_page_images: Optional[List[str]] = None  # list of base64 data URLs for multi-scene overlay
+    full_composite_image: Optional[str] = None  # base64 data URL of single page with background
+    full_composite_images: Optional[List[str]] = None  # list of base64 data URLs with background
     tallies: List[TallyItem]
     piano_lid: Optional[str] = ""
 
@@ -2639,41 +2641,54 @@ async def export_pdf(req: ExportPdfRequest):
     try:
         cache_buster = str(int(time.time()))
         
-        # Determine list of images to render
-        images = []
+        # Determine list of transparent overlay images (for vector PDF insertion)
+        overlay_images = []
         if req.full_page_images and len(req.full_page_images) > 0:
-            images = req.full_page_images
+            overlay_images = req.full_page_images
         elif req.full_page_image:
-            images = [req.full_page_image]
-            
-        if not images:
-            raise HTTPException(status_code=400, detail="No overlay image provided")
+            overlay_images = [req.full_page_image]
 
-        if has_original_pdf:
+        # Determine list of full composite images (guaranteed to contain background sheet)
+        composite_images = []
+        if req.full_composite_images and len(req.full_composite_images) > 0:
+            composite_images = req.full_composite_images
+        elif req.full_composite_image:
+            composite_images = [req.full_composite_image]
+
+        if not overlay_images and not composite_images:
+            raise HTTPException(status_code=400, detail="No export image provided")
+
+        if has_original_pdf and overlay_images:
             doc = fitz.open(pdf_path)
             # Duplicate template page if multiple scenes are being exported
-            if len(images) > 1:
+            if len(overlay_images) > 1:
                 template_doc = fitz.open(pdf_path)
-                for _ in range(1, len(images)):
+                for _ in range(1, len(overlay_images)):
                     doc.insert_pdf(template_doc, from_page=0, to_page=0)
                 template_doc.close()
 
             # Insert transparent overlay images for each page
-            for i, img_data in enumerate(images):
+            for i, img_data in enumerate(overlay_images):
                 if i < len(doc):
                     page = doc[i]
                     if "," in img_data:
                         image_bytes = base64.b64decode(img_data.split(",")[1])
                     else:
                         image_bytes = base64.b64decode(img_data)
-                    # When a PDF page has rotation (/Rotate 90, 180, 270), PyMuPDF expects coordinates in the unrotated
-                    # cropbox space and needs the rotate parameter set to page.rotation so the inserted overlay matches the
-                    # rendered view orientation without being rotated independently.
-                    page.insert_image(page.cropbox, stream=image_bytes, rotate=page.rotation)
+                    # When a PDF page has rotation (/Rotate 90, 180, 270), PyMuPDF coordinate systems
+                    # can displace overlay insertions. Normalizing rotation guarantees 1:1 pixel match with page.rect.
+                    if page.rotation != 0:
+                        page.remove_rotation()
+                    page.insert_image(page.rect, stream=image_bytes)
         else:
-            # Reconstruct PDF pages directly from images
+            # Reconstruct PDF pages directly from images.
+            # CRITICAL FIX for "稀に背景が出力されない":
+            # If the original PDF is missing from the server (e.g. project restored from JSON backup,
+            # server restart, or ephemeral cloud disk), fallback to composite images that contain the
+            # complete background document sheet, so the exported PDF is NEVER blank or missing the background.
+            src_images = composite_images if composite_images else overlay_images
             doc = fitz.open()
-            for img_data in images:
+            for img_data in src_images:
                 if "," in img_data:
                     image_bytes = base64.b64decode(img_data.split(",")[1])
                 else:
