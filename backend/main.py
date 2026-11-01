@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from PIL import Image
 from typing import List, Optional, Tuple, Dict, Any
+from legend_extractor import extract_legends
 
 app = FastAPI()
 
@@ -999,531 +1000,25 @@ async def extract_regions(req: ExtractRequest):
                 pix_region.save(region_clean_path)
                 icons_region_url = f"/static/{region_filename}"
 
-                # Convert pix_region to OpenCV for table grid removal and symbol cell analysis
-                img_data = np.frombuffer(pix_region.samples, dtype=np.uint8).reshape((pix_region.height, pix_region.width, pix_region.n))
-                if pix_region.n == 4:
-                    img_bgr = cv2.cvtColor(img_data, cv2.COLOR_RGBA2BGR)
-                else:
-                    img_bgr = cv2.cvtColor(img_data, cv2.COLOR_RGB2BGR)
+                # --- High-Precision Legend Extractor Engine ---
+                legend_items = []
+                if is_auto_icons:
+                    try:
+                        legend_items = extract_legends(doc, page_num=0)
+                    except Exception as e:
+                        print(f"[extract_regions] Error running legend_extractor: {e}")
+                        legend_items = []
 
-                gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-                _, thresh = cv2.threshold(gray, 225, 255, cv2.THRESH_BINARY_INV)
-
-                # Filter out table grid lines (horizontal and vertical lines >= 16 pt)
-                h_k = cv2.getStructuringElement(cv2.MORPH_RECT, (int(16 * icon_zoom), 1))
-                v_k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(16 * icon_zoom)))
-                lines_grid = cv2.add(cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_k), cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_k))
-                no_grid = cv2.subtract(thresh, lines_grid)
-
-                # In auto-scan mode, mask out the stage diagram region so stage graphics are never picked up,
-                # while preserving all explicit '記号' columns (multi-column tables)
-                if bg_rect_points is not None and is_auto_icons:
-                    saved_sym_cols = []
-                    for sc in sym_cols:
-                        sx0_p = max(0, int((sc[0] - rect_points.x0) * icon_zoom))
-                        sx1_p = min(pix_region.width, int((sc[1] - rect_points.x0) * icon_zoom))
-                        if sx1_p > sx0_p:
-                            saved_sym_cols.append((sx0_p, sx1_p, no_grid[:, sx0_p:sx1_p].copy()))
-                    bx0 = max(0, int((bg_rect_points.x0 - rect_points.x0) * icon_zoom))
-                    bx1 = min(pix_region.width, int((bg_rect_points.x1 - rect_points.x0) * icon_zoom))
-                    by0 = max(0, int((bg_rect_points.y0 - rect_points.y0) * icon_zoom))
-                    by1 = min(pix_region.height, int((bg_rect_points.y1 - rect_points.y0) * icon_zoom))
-                    if bx1 > bx0 and by1 > by0:
-                        no_grid[by0:by1, bx0:bx1] = 0
-                    for s0, s1, patch in saved_sym_cols:
-                        no_grid[:, s0:s1] = patch
-
-                candidate_boxes = []
-                inline_sym_rects = []
-                associated_label_rects = []
-                consumed_tokens = set()  # (line_idx, tok_idx)
-
-                def is_valid_symbol_token(tok):
-                    txt = tok["text"].strip()
-                    # Pure numbers are item numbers / counters, NEVER symbols
-                    if _re.match(r'^[0-9０-９]+$', txt):
-                        return False
-                    # Reject note bullets and generic words
-                    if txt in ("※", "＊", "・", "●印", "○印", "■印", "×印", "印"):
-                        return False
-                    if is_in_no_col(tok["rect"].x0):
-                        return False
-                    if tok["type"] == "SYMBOL":
-                        return True
-                    if tok["type"] == "WORD":
-                        if len(txt) == 1 and txt not in NON_ICON_1CHAR:
-                            return True
-                        # Accept short symbol codes like P, Pf, Vo, Dr, M, Y, B, etc.
-                        if len(txt) <= 4 and _re.match(r'^[A-Za-z|｜★☆◇◆□■△▲▽▼○◯◎●×＋\+\-]+$', txt):
-                            if txt not in STANDALONE_STOP_WORDS and txt not in ("No", "No.", "TEL", "FAX", "PDF", "OK", "要", "不要", "台", "本", "脚"):
-                                return True
-                    return False
-
-                # Gather small vector drawings (circles, rects, paths) to help match vector icons in legends
-                all_raw_drawings = page.get_drawings()
-                small_legend_drawings = []
-                for d in all_raw_drawings:
-                    dr = fitz.Rect(d['rect'])
-                    if dr.intersects(rect_points) and not is_inside_bg(dr):
-                        if 4.0 <= dr.width <= 75.0 and 4.0 <= dr.height <= 75.0:
-                            if not ((dr.width >= 16 and dr.height <= 2.5) or (dr.height >= 16 and dr.width <= 2.5)):
-                                small_legend_drawings.append(dr)
-
-                # Mode A: Inline Key-Value / Delimiter / Free-form / Parenthesized Legend
-                # Handles '○＝椅子', '○: 椅子', '○ 椅子', '椅子=○', '椅子(○)', '○(椅子)' across any number of columns
-                for l_idx, line in enumerate(tokenized_lines):
-                    toks = line["tokens"]
-                    n_toks = len(toks)
-                    for t_idx in range(n_toks):
-                        if (l_idx, t_idx) in consumed_tokens:
-                            continue
-
-                        # Pattern A0: Table Row Alignment: equipment name matched with symbol in sym_col
-                        if sym_cols and (l_idx, t_idx) not in consumed_tokens and toks[t_idx]["type"] == "WORD":
-                            eq = classify_equipment_label(toks[t_idx]["text"])
-                            if eq:
-                                lr = toks[t_idx]["rect"]
-                                best_st_idx = None
-                                best_dist = 999.0
-                                for st_idx in range(n_toks):
-                                    if st_idx == t_idx or (l_idx, st_idx) in consumed_tokens:
-                                        continue
-                                    st = toks[st_idx]
-                                    if is_in_no_col(st["rect"].x0):
-                                        continue
-                                    if is_in_sym_col(st["rect"].x0) and is_valid_symbol_token(st):
-                                        dist = abs(st["rect"].x0 - lr.x1)
-                                        if dist < best_dist and dist < 240.0:
-                                            best_dist = dist
-                                            best_st_idx = st_idx
-                                if best_st_idx is not None:
-                                    st = toks[best_st_idx]
-                                    sr = st["rect"]
-                                    pad = 2.0
-                                    sym_box = fitz.Rect(sr.x0 - pad, sr.y0 - pad, sr.x1 + pad, sr.y1 + pad)
-                                    candidate_boxes.append((sym_box, eq[0], "table_sym"))
-                                    inline_sym_rects.append(sym_box)
-                                    associated_label_rects.append(lr | sym_box)
-                                    consumed_tokens.add((l_idx, t_idx))
-                                    consumed_tokens.add((l_idx, best_st_idx))
-                                    if t_idx > 0 and (_re.match(r'^[0-9０-９]+$', toks[t_idx - 1]["text"]) or is_in_no_col(toks[t_idx - 1]["rect"].x0)):
-                                        consumed_tokens.add((l_idx, t_idx - 1))
-                                    continue
-
-                        # Pattern A0b: [NUMBER/NO] [WORD(equipment)] [SYMBOL]
-                        if (
-                            t_idx + 2 < n_toks
-                            and (_re.match(r'^[0-9０-９]+$', toks[t_idx]["text"]) or is_in_no_col(toks[t_idx]["rect"].x0))
-                            and toks[t_idx + 1]["type"] == "WORD"
-                            and is_valid_symbol_token(toks[t_idx + 2])
-                        ):
-                            eq = classify_equipment_label(toks[t_idx + 1]["text"])
-                            if eq:
-                                lr = toks[t_idx + 1]["rect"]
-                                sr = toks[t_idx + 2]["rect"]
-                                pad = 2.0
-                                sym_box = fitz.Rect(sr.x0 - pad, sr.y0 - pad, sr.x1 + pad, sr.y1 + pad)
-                                candidate_boxes.append((sym_box, eq[0], "inline_numbered_sym"))
-                                inline_sym_rects.append(sym_box)
-                                associated_label_rects.append(toks[t_idx]["rect"] | lr | sym_box)
-                                consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
-                                continue
-
-                        # Pattern A1: [WORD(label)] [DELIM in PAIR_DELIMS] [SYMBOL]  (e.g. '椅子＝○', '譜面台: ×')
-                        if (
-                            t_idx + 2 < n_toks
-                            and toks[t_idx]["type"] == "WORD"
-                            and toks[t_idx + 1]["text"] in PAIR_DELIMS
-                            and is_valid_symbol_token(toks[t_idx + 2])
-                        ):
-                            eq = classify_equipment_label(toks[t_idx]["text"])
-                            if eq:
-                                sr = toks[t_idx + 2]["rect"]
-                                dr = toks[t_idx + 1]["rect"]
-                                pad = 2.0
-                                x0 = max(dr.x1 + 1.0, sr.x0 - pad)
-                                x1 = sr.x1 + pad
-                                if t_idx + 3 < n_toks:
-                                    x1 = min(toks[t_idx + 3]["rect"].x0 - 1.0, x1)
-                                sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
-                                candidate_boxes.append((sym_box, eq[0], "inline_sym"))
-                                inline_sym_rects.append(sym_box)
-                                associated_label_rects.append(toks[t_idx]["rect"] | dr | sym_box)
-                                consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
-                                continue
-
-                        # Pattern A2: [SYMBOL] [DELIM in PAIR_DELIMS] [WORD(label)]  (e.g. '○＝椅子', '×：譜面台', '□・長机')
-                        if (
-                            t_idx + 2 < n_toks
-                            and is_valid_symbol_token(toks[t_idx])
-                            and toks[t_idx + 1]["text"] in PAIR_DELIMS
-                            and toks[t_idx + 2]["type"] == "WORD"
-                        ):
-                            eq = classify_equipment_label(toks[t_idx + 2]["text"])
-                            if eq:
-                                sr = toks[t_idx]["rect"]
-                                dr = toks[t_idx + 1]["rect"]
-                                pad = 2.0
-                                x0 = sr.x0 - pad
-                                if t_idx > 0:
-                                    x0 = max(toks[t_idx - 1]["rect"].x1 + 1.0, x0)
-                                x1 = min(dr.x0 - 1.0, sr.x1 + pad)
-                                sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
-                                candidate_boxes.append((sym_box, eq[0], "inline_sym"))
-                                inline_sym_rects.append(sym_box)
-                                associated_label_rects.append(sym_box | dr | toks[t_idx + 2]["rect"])
-                                consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
-                                continue
-
-                        # Pattern A3: [WORD(label)] ['(' or '（'] [SYMBOL] [')' or '）']  (e.g. '椅子(○)')
-                        if (
-                            t_idx + 3 < n_toks
-                            and toks[t_idx]["type"] == "WORD"
-                            and toks[t_idx + 1]["text"] in ("(", "（")
-                            and is_valid_symbol_token(toks[t_idx + 2])
-                            and toks[t_idx + 3]["text"] in (")", "）")
-                        ):
-                            eq = classify_equipment_label(toks[t_idx]["text"])
-                            if eq:
-                                sr = toks[t_idx + 2]["rect"]
-                                pad = 1.5
-                                x0 = max(toks[t_idx + 1]["rect"].x1 + 0.5, sr.x0 - pad)
-                                x1 = min(toks[t_idx + 3]["rect"].x0 - 0.5, sr.x1 + pad)
-                                sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
-                                candidate_boxes.append((sym_box, eq[0], "inline_sym"))
-                                inline_sym_rects.append(sym_box)
-                                associated_label_rects.append(toks[t_idx]["rect"] | toks[t_idx + 3]["rect"])
-                                consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2), (l_idx, t_idx + 3)})
-                                continue
-
-                        # Pattern A4: [SYMBOL] ['(' or '（'] [WORD(label)] [')' or '）']  (e.g. '○(椅子)')
-                        if (
-                            t_idx + 3 < n_toks
-                            and is_valid_symbol_token(toks[t_idx])
-                            and toks[t_idx + 1]["text"] in ("(", "（")
-                            and toks[t_idx + 2]["type"] == "WORD"
-                            and toks[t_idx + 3]["text"] in (")", "）")
-                        ):
-                            eq = classify_equipment_label(toks[t_idx + 2]["text"])
-                            if eq:
-                                sr = toks[t_idx]["rect"]
-                                pad = 2.0
-                                x0 = sr.x0 - pad
-                                if t_idx > 0:
-                                    x0 = max(toks[t_idx - 1]["rect"].x1 + 1.0, x0)
-                                x1 = min(toks[t_idx + 1]["rect"].x0 - 0.5, sr.x1 + pad)
-                                sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
-                                candidate_boxes.append((sym_box, eq[0], "inline_sym"))
-                                inline_sym_rects.append(sym_box)
-                                associated_label_rects.append(sym_box | toks[t_idx + 3]["rect"])
-                                consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2), (l_idx, t_idx + 3)})
-                                continue
-
-                        # Pattern A5: [SYMBOL] [WORD(label)] with NO delimiter or space only (e.g. '○ 椅子', '○椅子', '× 譜面台')
-                        if (
-                            t_idx + 1 < n_toks
-                            and is_valid_symbol_token(toks[t_idx])
-                            and toks[t_idx + 1]["type"] == "WORD"
-                        ):
-                            gap = toks[t_idx + 1]["rect"].x0 - toks[t_idx]["rect"].x1
-                            max_gap = 140.0 if is_in_sym_col(toks[t_idx + 1]["rect"].x0) else 45.0
-                            if -2.0 <= gap <= max_gap:
-                                eq = classify_equipment_label(toks[t_idx + 1]["text"])
-                                if eq:
-                                    sr = toks[t_idx]["rect"]
-                                    lr = toks[t_idx + 1]["rect"]
-                                    pad = 2.0
-                                    x0 = sr.x0 - pad
-                                    if t_idx > 0:
-                                        x0 = max(toks[t_idx - 1]["rect"].x1 + 1.0, x0)
-                                    x1 = min(lr.x0 - 0.5, sr.x1 + pad)
-                                    sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
-                                    candidate_boxes.append((sym_box, eq[0], "inline_sym"))
-                                    inline_sym_rects.append(sym_box)
-                                    associated_label_rects.append(sym_box | lr)
-                                    consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1)})
-                                    continue
-
-                        # Pattern A6: [WORD(label)] [SYMBOL] with NO delimiter or space only (e.g. '椅子 ○', '譜面台 ×')
-                        if (
-                            t_idx + 1 < n_toks
-                            and toks[t_idx]["type"] == "WORD"
-                            and is_valid_symbol_token(toks[t_idx + 1])
-                        ):
-                            gap = toks[t_idx + 1]["rect"].x0 - toks[t_idx]["rect"].x1
-                            max_gap = 140.0 if is_in_sym_col(toks[t_idx + 1]["rect"].x0) else 45.0
-                            if -2.0 <= gap <= max_gap:
-                                eq = classify_equipment_label(toks[t_idx]["text"])
-                                if eq:
-                                    lr = toks[t_idx]["rect"]
-                                    sr = toks[t_idx + 1]["rect"]
-                                    pad = 2.0
-                                    x0 = max(lr.x1 + 0.5, sr.x0 - pad)
-                                    x1 = sr.x1 + pad
-                                    if t_idx + 2 < n_toks:
-                                        x1 = min(toks[t_idx + 2]["rect"].x0 - 1.0, x1)
-                                    sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
-                                    candidate_boxes.append((sym_box, eq[0], "inline_sym"))
-                                    inline_sym_rects.append(sym_box)
-                                    associated_label_rects.append(lr | sym_box)
-                                    consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1)})
-                                    continue
-
-                        # Pattern A7: Single token containing both symbol and equipment word (e.g. '○＝椅子', '○:椅子', '○椅子')
-                        tok_txt = toks[t_idx]["text"]
-                        m_lead_sym = _re.match(r'^([○◯⚪◎●◉□■◇◆△▲▽▼×✕✗✘＋\+\*★☆※〒⊥⊤①-⑳])[\s=＝:：\-―ー・/／~〜]*(.+)$', tok_txt)
-                        if m_lead_sym:
-                            lead_sym, trail_word = m_lead_sym.groups()
-                            eq = classify_equipment_label(trail_word)
-                            if eq:
-                                tr = toks[t_idx]["rect"]
-                                sym_w = max(8.0, min(tr.height, tr.width * (1.0 / len(tok_txt))))
-                                sym_box = fitz.Rect(tr.x0 - 1.0, tr.y0 - 1.0, tr.x0 + sym_w + 1.0, tr.y1 + 1.0)
-                                candidate_boxes.append((sym_box, eq[0], "inline_sym"))
-                                inline_sym_rects.append(sym_box)
-                                associated_label_rects.append(tr)
-                                consumed_tokens.add((l_idx, t_idx))
-                                continue
-
-                        # Pattern A8: Vector drawing directly adjacent to [DELIM in PAIR_DELIMS] [WORD(label)] or [WORD(label)]
-                        # (when symbol is not text font but a drawn vector shape e.g. circle/box followed by '=椅子' or '椅子')
-                        if toks[t_idx]["type"] == "WORD":
-                            eq = classify_equipment_label(toks[t_idx]["text"])
-                            if eq:
-                                label_r = toks[t_idx]["rect"]
-                                check_x_right = label_r.x0
-                                if t_idx > 0 and toks[t_idx - 1]["text"] in PAIR_DELIMS:
-                                    check_x_right = toks[t_idx - 1]["rect"].x0
-                                best_dr = None
-                                best_dist = 999.0
-                                for dr in small_legend_drawings:
-                                    if abs(((dr.y0 + dr.y1) / 2.0) - ((label_r.y0 + label_r.y1) / 2.0)) < 12.0:
-                                        dist = check_x_right - dr.x1
-                                        if 0.0 <= dist <= 35.0 and dist < best_dist:
-                                            best_dist = dist
-                                            best_dr = dr
-                                if best_dr is not None:
-                                    pad = 2.0
-                                    sym_box = fitz.Rect(best_dr.x0 - pad, best_dr.y0 - pad, best_dr.x1 + pad, best_dr.y1 + pad)
-                                    candidate_boxes.append((sym_box, eq[0], "vector_legend"))
-                                    inline_sym_rects.append(sym_box)
-                                    associated_label_rects.append(sym_box | label_r)
-                                    consumed_tokens.add((l_idx, t_idx))
-                                    if t_idx > 0 and toks[t_idx - 1]["text"] in PAIR_DELIMS:
-                                        consumed_tokens.add((l_idx, t_idx - 1))
-                                    continue
-
-                # Create text-masked binary image (no_grid_no_text) so text words never contaminate icon crops
-                no_grid_no_text = no_grid.copy()
-                for l_idx, line in enumerate(tokenized_lines):
-                    for t_idx, tok in enumerate(line["tokens"]):
-                        tr = tok["rect"]
-                        if any(tr.intersects(ir) for ir in inline_sym_rects):
-                            continue
-                        should_mask = False
-                        if tok["type"] == "DELIM":
-                            should_mask = True
-                        elif tok["type"] == "WORD":
-                            if len(tok["text"]) >= 2 or tok["text"] in NON_ICON_1CHAR:
-                                should_mask = True
-                        if should_mask:
-                            mx0 = max(0, int((tr.x0 - rect_points.x0) * icon_zoom) - 2)
-                            mx1 = min(pix_region.width, int((tr.x1 - rect_points.x0) * icon_zoom) + 2)
-                            my0 = max(0, int((tr.y0 - rect_points.y0) * icon_zoom) - 2)
-                            my1 = min(pix_region.height, int((tr.y1 - rect_points.y0) * icon_zoom) + 2)
-                            if mx1 > mx0 and my1 > my0:
-                                no_grid_no_text[my0:my1, mx0:mx1] = 0
-
-                # Remove oversized graphical structures (e.g. stage walls, large boxes) and tiny specks from no_grid_no_text
-                num_labels, cc_labels, cc_stats, _ = cv2.connectedComponentsWithStats(no_grid_no_text, connectivity=8)
-                for lbl_i in range(1, num_labels):
-                    cw = cc_stats[lbl_i, cv2.CC_STAT_WIDTH]
-                    ch = cc_stats[lbl_i, cv2.CC_STAT_HEIGHT]
-                    carea = cc_stats[lbl_i, cv2.CC_STAT_AREA]
-                    if (
-                        carea < 12
-                        or cw > int(65 * icon_zoom)
-                        or ch > int(48 * icon_zoom)
-                        or (cw >= int(16 * icon_zoom) and ch <= int(3 * icon_zoom))
-                        or (ch >= int(16 * icon_zoom) and cw <= int(3 * icon_zoom))
-                    ):
-                        no_grid_no_text[cc_labels == lbl_i] = 0
-
-                # Mode B, Mode C & Mode D: Raster images, Table row-based & vector drawing search across MULTI-COLUMNS
-                if True:
-                    # Mode B: Raster Images in rect_points
-                    raw_images = page.get_image_info(xrefs=True)
-                    for img in raw_images:
-                        b = fitz.Rect(img['bbox'])
-                        if b.intersects(rect_points) and (not is_inside_bg(b) or is_in_equip_table(b)):
-                            if 6 <= b.width <= 160 and 6 <= b.height <= 160:
-                                if is_auto_icons and sym_cols:
-                                    bcx = (b.x0 + b.x1) / 2.0
-                                    if not is_in_sym_col(bcx):
-                                        continue
-                                has_word_inside = any(
-                                    tok["type"] == "WORD" and len(tok["text"]) >= 2 and b.intersects(tok["rect"])
-                                    for line in tokenized_lines
-                                    for tok in line["tokens"]
-                                )
-                                if has_word_inside:
-                                    continue
-                                lbl = extract_label_for_icon(b, page_words, tokenized_lines)
-                                if lbl or not is_auto_icons:
-                                    candidate_boxes.append((b, lbl, 'raster'))
-
-                    # Mode C: Table row-based search across MULTI-COLUMNS
-                    for l_idx, line in enumerate(tokenized_lines):
-                        toks = line["tokens"]
-                        line_txt = "".join(t["text"] for t in toks)
-                        if not sym_cols and any(kw in line_txt for kw in ("借用する", "借用しない", "使う", "使わない")):
-                            continue
-                        for t_idx, tok in enumerate(toks):
-                            if (l_idx, t_idx) in consumed_tokens or tok["type"] != "WORD":
-                                continue
-                            if is_inside_bg(tok["rect"]) and not is_in_equip_table(tok["rect"]):
-                                continue
-                            eq = classify_equipment_label(tok["text"])
-                            if not eq:
-                                continue
-                            r = tok["rect"]
-                            canonical_lbl = eq[0]
-
-                            # Build search intervals:
-                            # 1) Nearby symbol columns (all matching columns across multi-column tables)
-                            search_x_ranges = []
-                            for sc in sym_cols:
-                                if abs(sc[0] - r.x1) < 140.0 or abs(sc[1] - r.x0) < 140.0:
-                                    search_x_ranges.append(sc)
-
-                            # 2) Right side: up to the next WORD token or +95pt
-                            right_limit = r.x1 + 95.0
-                            for next_idx in range(t_idx + 1, len(toks)):
-                                nt = toks[next_idx]
-                                if nt["type"] == "WORD" and (len(nt["text"]) >= 2 or nt["text"] in NON_ICON_1CHAR):
-                                    right_limit = min(right_limit, nt["rect"].x0 - 3.0)
-                                    break
-                            if right_limit > r.x1 + 6.0:
-                                search_x_ranges.append((r.x1 + 4.0, right_limit))
-
-                            # 3) Left side: from previous WORD token or -95pt
-                            left_limit = r.x0 - 95.0
-                            for prev_idx in range(t_idx - 1, -1, -1):
-                                pt = toks[prev_idx]
-                                if pt["type"] == "WORD" and (len(pt["text"]) >= 2 or pt["text"] in NON_ICON_1CHAR):
-                                    left_limit = max(left_limit, pt["rect"].x1 + 3.0)
-                                    break
-                            if r.x0 - 4.0 > left_limit:
-                                search_x_ranges.append((left_limit, r.x0 - 4.0))
-
-                            sym_y0 = r.y0 - 8.0
-                            sym_y1 = r.y1 + 8.0
-                            for sx0, sx1 in search_x_ranges:
-                                px0 = max(0, int((sx0 - rect_points.x0) * icon_zoom))
-                                px1 = min(pix_region.width, int((sx1 - rect_points.x0) * icon_zoom))
-                                py0 = max(0, int((sym_y0 - rect_points.y0) * icon_zoom))
-                                py1 = min(pix_region.height, int((sym_y1 - rect_points.y0) * icon_zoom))
-
-                                if px1 > px0 and py1 > py0:
-                                    cell_content = no_grid_no_text[py0:py1, px0:px1]
-                                    dark_y, dark_x = np.where(cell_content > 0)
-                                    if len(dark_x) >= 16:
-                                        pad = 4
-                                        min_x = max(0, int(np.min(dark_x)) + px0 - pad)
-                                        max_x = min(pix_region.width, int(np.max(dark_x)) + px0 + pad)
-                                        min_y = max(0, int(np.min(dark_y)) + py0 - pad)
-                                        max_y = min(pix_region.height, int(np.max(dark_y)) + py0 + pad)
-
-                                        box_pt = fitz.Rect(
-                                            rect_points.x0 + min_x / icon_zoom,
-                                            rect_points.y0 + min_y / icon_zoom,
-                                            rect_points.x0 + max_x / icon_zoom,
-                                            rect_points.y0 + max_y / icon_zoom
-                                        )
-                                        candidate_boxes.append((box_pt, canonical_lbl, 'row_cell'))
-                                        associated_label_rects.append(r)
-                                        break
-
-                    # Mode D: Vector drawings fallback / supplement (supporting multi-columns)
-                    drawings = page.get_drawings()
-                    drawing_rects = []
-                    for d in drawings:
-                        r = fitz.Rect(d['rect'])
-                        if not r.intersects(rect_points):
-                            continue
-                        if bg_excl is not None and r.intersects(bg_excl) and not is_in_equip_table(r):
-                            continue
-                        if is_auto_icons and sym_cols and not is_in_equip_table(r):
-                            continue
-                        if r.width > 120 or r.height > 120:
-                            continue
-                        if (r.width >= 12 and r.height <= 2.5) or (r.height >= 12 and r.width <= 2.5):
-                            continue
-                        if r.width <= 1.8 and r.height <= 1.8:
-                            continue
-                        sw = d.get('width', 1.0) or 1.0
-                        r_exp = fitz.Rect(r.x0 - sw/2, r.y0 - sw/2, r.x1 + sw/2, r.y1 + sw/2)
-                        drawing_rects.append(r_exp)
-
-                    merged_drawings = merge_rects(drawing_rects, margin=6.0)
-                    for md in merged_drawings:
-                        if 5 <= md.width <= 120 and 5 <= md.height <= 120:
-                            lbl = extract_label_for_icon(md, page_words, tokenized_lines)
-                            if lbl:
-                                md_ymid = (md.y0 + md.y1) / 2.0
-                                md_xmid = (md.x0 + md.x1) / 2.0
-                                # Allow multi-column icons: only suppress if in same row AND same column (X within 25pt)
-                                already_found = any(
-                                    clbl == lbl and abs(((cb.y0 + cb.y1) / 2.0) - md_ymid) < 14.0 and abs(((cb.x0 + cb.x1) / 2.0) - md_xmid) < 25.0
-                                    for cb, clbl, _ in candidate_boxes
-                                )
-                                if not already_found:
-                                    candidate_boxes.append((md, lbl, 'drawing'))
-
-                # Deduplicate overlapping candidate boxes without dropping different column instances
-                unique_candidates = []
-                for b, lbl, typ in candidate_boxes:
-                    overlap = False
-                    for idx_u, (ub, ulbl, utyp) in enumerate(unique_candidates):
-                        inter = fitz.Rect(b).intersect(fitz.Rect(ub))
-                        if inter.width > 0 and inter.height > 0:
-                            inter_area = inter.width * inter.height
-                            min_area = min(b.width * b.height, ub.width * ub.height)
-                            if min_area > 0 and inter_area / min_area > 0.40:
-                                overlap = True
-                                if not ulbl and lbl:
-                                    unique_candidates[idx_u] = (ub, lbl, utyp)
-                                break
-                    if not overlap:
-                        final_lbl = lbl or extract_label_for_icon(b, page_words, tokenized_lines)
-                        unique_candidates.append((b, final_lbl, typ))
-
-                # Multi-column visual reading order sort:
-                # Groups candidates by column (X clustering) and sorts top-to-bottom within each column
-                if len(unique_candidates) > 1:
-                    x_coords = sorted(item[0].x0 for item in unique_candidates)
-                    col_thresholds = []
-                    for i in range(len(x_coords) - 1):
-                        if x_coords[i+1] - x_coords[i] > 55.0:
-                            col_thresholds.append((x_coords[i] + x_coords[i+1]) / 2.0)
-                    
-                    def get_candidate_col_index(x: float) -> int:
-                        for c_idx, thresh in enumerate(col_thresholds):
-                            if x < thresh:
-                                return c_idx
-                        return len(col_thresholds)
-
-                    unique_candidates.sort(key=lambda item: (get_candidate_col_index(item[0].x0), item[0].y0))
-
-                extracted_icons = []
-                with Image.open(region_path) as im:
-                    for idx, (b, lbl, typ) in enumerate(unique_candidates):
-                        rel_x = max(0, (b.x0 - rect_points.x0) * icon_zoom)
-                        rel_y = max(0, (b.y0 - rect_points.y0) * icon_zoom)
+                if legend_items:
+                    im = Image.open(region_path)
+                    for idx, item in enumerate(legend_items):
+                        b = item.symbol_box
+                        rel_x = max(0, b.x * icon_zoom)
+                        rel_y = max(0, b.y * icon_zoom)
                         rel_width = min(pix_region.width - rel_x, b.width * icon_zoom)
                         rel_height = min(pix_region.height - rel_y, b.height * icon_zoom)
 
-                        if rel_width < 5 or rel_height < 5:
+                        if rel_width < 4 or rel_height < 4:
                             continue
 
                         icon_filename = f"{req.file_id}_icon_{idx}_{cache_buster}.png"
@@ -1536,7 +1031,11 @@ async def extract_regions(req: ExtractRequest):
                         extracted_icons.append({
                             "id": f"icon_{idx}",
                             "url": f"/static/{icon_filename}",
-                            "label": lbl or f"パーツ {idx + 1}",
+                            "label": item.name,
+                            "name": item.name,
+                            "symbol_box": item.symbol_box.to_dict(),
+                            "label_box": item.label_box.to_dict(),
+                            "symbol_type": item.symbol_type,
                             "rect": {
                                 "x": rel_x,
                                 "y": rel_y,
@@ -1544,7 +1043,554 @@ async def extract_regions(req: ExtractRequest):
                                 "height": rel_height
                             }
                         })
-                    
+
+                if not extracted_icons:
+                    # Convert pix_region to OpenCV for table grid removal and symbol cell analysis
+                    img_data = np.frombuffer(pix_region.samples, dtype=np.uint8).reshape((pix_region.height, pix_region.width, pix_region.n))
+                    if pix_region.n == 4:
+                        img_bgr = cv2.cvtColor(img_data, cv2.COLOR_RGBA2BGR)
+                    else:
+                        img_bgr = cv2.cvtColor(img_data, cv2.COLOR_RGB2BGR)
+    
+                    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                    _, thresh = cv2.threshold(gray, 225, 255, cv2.THRESH_BINARY_INV)
+    
+                    # Filter out table grid lines (horizontal and vertical lines >= 16 pt)
+                    h_k = cv2.getStructuringElement(cv2.MORPH_RECT, (int(16 * icon_zoom), 1))
+                    v_k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(16 * icon_zoom)))
+                    lines_grid = cv2.add(cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_k), cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_k))
+                    no_grid = cv2.subtract(thresh, lines_grid)
+    
+                    # In auto-scan mode, mask out the stage diagram region so stage graphics are never picked up,
+                    # while preserving all explicit '記号' columns (multi-column tables)
+                    if bg_rect_points is not None and is_auto_icons:
+                        saved_sym_cols = []
+                        for sc in sym_cols:
+                            sx0_p = max(0, int((sc[0] - rect_points.x0) * icon_zoom))
+                            sx1_p = min(pix_region.width, int((sc[1] - rect_points.x0) * icon_zoom))
+                            if sx1_p > sx0_p:
+                                saved_sym_cols.append((sx0_p, sx1_p, no_grid[:, sx0_p:sx1_p].copy()))
+                        bx0 = max(0, int((bg_rect_points.x0 - rect_points.x0) * icon_zoom))
+                        bx1 = min(pix_region.width, int((bg_rect_points.x1 - rect_points.x0) * icon_zoom))
+                        by0 = max(0, int((bg_rect_points.y0 - rect_points.y0) * icon_zoom))
+                        by1 = min(pix_region.height, int((bg_rect_points.y1 - rect_points.y0) * icon_zoom))
+                        if bx1 > bx0 and by1 > by0:
+                            no_grid[by0:by1, bx0:bx1] = 0
+                        for s0, s1, patch in saved_sym_cols:
+                            no_grid[:, s0:s1] = patch
+    
+                    candidate_boxes = []
+                    inline_sym_rects = []
+                    associated_label_rects = []
+                    consumed_tokens = set()  # (line_idx, tok_idx)
+    
+                    def is_valid_symbol_token(tok):
+                        txt = tok["text"].strip()
+                        # Pure numbers are item numbers / counters, NEVER symbols
+                        if _re.match(r'^[0-9０-９]+$', txt):
+                            return False
+                        # Reject note bullets and generic words
+                        if txt in ("※", "＊", "・", "●印", "○印", "■印", "×印", "印"):
+                            return False
+                        if is_in_no_col(tok["rect"].x0):
+                            return False
+                        if tok["type"] == "SYMBOL":
+                            return True
+                        if tok["type"] == "WORD":
+                            if len(txt) == 1 and txt not in NON_ICON_1CHAR:
+                                return True
+                            # Accept short symbol codes like P, Pf, Vo, Dr, M, Y, B, etc.
+                            if len(txt) <= 4 and _re.match(r'^[A-Za-z|｜★☆◇◆□■△▲▽▼○◯◎●×＋\+\-]+$', txt):
+                                if txt not in STANDALONE_STOP_WORDS and txt not in ("No", "No.", "TEL", "FAX", "PDF", "OK", "要", "不要", "台", "本", "脚"):
+                                    return True
+                        return False
+    
+                    # Gather small vector drawings (circles, rects, paths) to help match vector icons in legends
+                    all_raw_drawings = page.get_drawings()
+                    small_legend_drawings = []
+                    for d in all_raw_drawings:
+                        dr = fitz.Rect(d['rect'])
+                        if dr.intersects(rect_points) and not is_inside_bg(dr):
+                            if 4.0 <= dr.width <= 75.0 and 4.0 <= dr.height <= 75.0:
+                                if not ((dr.width >= 16 and dr.height <= 2.5) or (dr.height >= 16 and dr.width <= 2.5)):
+                                    small_legend_drawings.append(dr)
+    
+                    # Mode A: Inline Key-Value / Delimiter / Free-form / Parenthesized Legend
+                    # Handles '○＝椅子', '○: 椅子', '○ 椅子', '椅子=○', '椅子(○)', '○(椅子)' across any number of columns
+                    for l_idx, line in enumerate(tokenized_lines):
+                        toks = line["tokens"]
+                        n_toks = len(toks)
+                        for t_idx in range(n_toks):
+                            if (l_idx, t_idx) in consumed_tokens:
+                                continue
+    
+                            # Pattern A0: Table Row Alignment: equipment name matched with symbol in sym_col
+                            if sym_cols and (l_idx, t_idx) not in consumed_tokens and toks[t_idx]["type"] == "WORD":
+                                eq = classify_equipment_label(toks[t_idx]["text"])
+                                if eq:
+                                    lr = toks[t_idx]["rect"]
+                                    best_st_idx = None
+                                    best_dist = 999.0
+                                    for st_idx in range(n_toks):
+                                        if st_idx == t_idx or (l_idx, st_idx) in consumed_tokens:
+                                            continue
+                                        st = toks[st_idx]
+                                        if is_in_no_col(st["rect"].x0):
+                                            continue
+                                        if is_in_sym_col(st["rect"].x0) and is_valid_symbol_token(st):
+                                            dist = abs(st["rect"].x0 - lr.x1)
+                                            if dist < best_dist and dist < 240.0:
+                                                best_dist = dist
+                                                best_st_idx = st_idx
+                                    if best_st_idx is not None:
+                                        st = toks[best_st_idx]
+                                        sr = st["rect"]
+                                        pad = 2.0
+                                        sym_box = fitz.Rect(sr.x0 - pad, sr.y0 - pad, sr.x1 + pad, sr.y1 + pad)
+                                        candidate_boxes.append((sym_box, eq[0], "table_sym"))
+                                        inline_sym_rects.append(sym_box)
+                                        associated_label_rects.append(lr | sym_box)
+                                        consumed_tokens.add((l_idx, t_idx))
+                                        consumed_tokens.add((l_idx, best_st_idx))
+                                        if t_idx > 0 and (_re.match(r'^[0-9０-９]+$', toks[t_idx - 1]["text"]) or is_in_no_col(toks[t_idx - 1]["rect"].x0)):
+                                            consumed_tokens.add((l_idx, t_idx - 1))
+                                        continue
+    
+                            # Pattern A0b: [NUMBER/NO] [WORD(equipment)] [SYMBOL]
+                            if (
+                                t_idx + 2 < n_toks
+                                and (_re.match(r'^[0-9０-９]+$', toks[t_idx]["text"]) or is_in_no_col(toks[t_idx]["rect"].x0))
+                                and toks[t_idx + 1]["type"] == "WORD"
+                                and is_valid_symbol_token(toks[t_idx + 2])
+                            ):
+                                eq = classify_equipment_label(toks[t_idx + 1]["text"])
+                                if eq:
+                                    lr = toks[t_idx + 1]["rect"]
+                                    sr = toks[t_idx + 2]["rect"]
+                                    pad = 2.0
+                                    sym_box = fitz.Rect(sr.x0 - pad, sr.y0 - pad, sr.x1 + pad, sr.y1 + pad)
+                                    candidate_boxes.append((sym_box, eq[0], "inline_numbered_sym"))
+                                    inline_sym_rects.append(sym_box)
+                                    associated_label_rects.append(toks[t_idx]["rect"] | lr | sym_box)
+                                    consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
+                                    continue
+    
+                            # Pattern A1: [WORD(label)] [DELIM in PAIR_DELIMS] [SYMBOL]  (e.g. '椅子＝○', '譜面台: ×')
+                            if (
+                                t_idx + 2 < n_toks
+                                and toks[t_idx]["type"] == "WORD"
+                                and toks[t_idx + 1]["text"] in PAIR_DELIMS
+                                and is_valid_symbol_token(toks[t_idx + 2])
+                            ):
+                                eq = classify_equipment_label(toks[t_idx]["text"])
+                                if eq:
+                                    sr = toks[t_idx + 2]["rect"]
+                                    dr = toks[t_idx + 1]["rect"]
+                                    pad = 2.0
+                                    x0 = max(dr.x1 + 1.0, sr.x0 - pad)
+                                    x1 = sr.x1 + pad
+                                    if t_idx + 3 < n_toks:
+                                        x1 = min(toks[t_idx + 3]["rect"].x0 - 1.0, x1)
+                                    sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
+                                    candidate_boxes.append((sym_box, eq[0], "inline_sym"))
+                                    inline_sym_rects.append(sym_box)
+                                    associated_label_rects.append(toks[t_idx]["rect"] | dr | sym_box)
+                                    consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
+                                    continue
+    
+                            # Pattern A2: [SYMBOL] [DELIM in PAIR_DELIMS] [WORD(label)]  (e.g. '○＝椅子', '×：譜面台', '□・長机')
+                            if (
+                                t_idx + 2 < n_toks
+                                and is_valid_symbol_token(toks[t_idx])
+                                and toks[t_idx + 1]["text"] in PAIR_DELIMS
+                                and toks[t_idx + 2]["type"] == "WORD"
+                            ):
+                                eq = classify_equipment_label(toks[t_idx + 2]["text"])
+                                if eq:
+                                    sr = toks[t_idx]["rect"]
+                                    dr = toks[t_idx + 1]["rect"]
+                                    pad = 2.0
+                                    x0 = sr.x0 - pad
+                                    if t_idx > 0:
+                                        x0 = max(toks[t_idx - 1]["rect"].x1 + 1.0, x0)
+                                    x1 = min(dr.x0 - 1.0, sr.x1 + pad)
+                                    sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
+                                    candidate_boxes.append((sym_box, eq[0], "inline_sym"))
+                                    inline_sym_rects.append(sym_box)
+                                    associated_label_rects.append(sym_box | dr | toks[t_idx + 2]["rect"])
+                                    consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
+                                    continue
+    
+                            # Pattern A3: [WORD(label)] ['(' or '（'] [SYMBOL] [')' or '）']  (e.g. '椅子(○)')
+                            if (
+                                t_idx + 3 < n_toks
+                                and toks[t_idx]["type"] == "WORD"
+                                and toks[t_idx + 1]["text"] in ("(", "（")
+                                and is_valid_symbol_token(toks[t_idx + 2])
+                                and toks[t_idx + 3]["text"] in (")", "）")
+                            ):
+                                eq = classify_equipment_label(toks[t_idx]["text"])
+                                if eq:
+                                    sr = toks[t_idx + 2]["rect"]
+                                    pad = 1.5
+                                    x0 = max(toks[t_idx + 1]["rect"].x1 + 0.5, sr.x0 - pad)
+                                    x1 = min(toks[t_idx + 3]["rect"].x0 - 0.5, sr.x1 + pad)
+                                    sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
+                                    candidate_boxes.append((sym_box, eq[0], "inline_sym"))
+                                    inline_sym_rects.append(sym_box)
+                                    associated_label_rects.append(toks[t_idx]["rect"] | toks[t_idx + 3]["rect"])
+                                    consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2), (l_idx, t_idx + 3)})
+                                    continue
+    
+                            # Pattern A4: [SYMBOL] ['(' or '（'] [WORD(label)] [')' or '）']  (e.g. '○(椅子)')
+                            if (
+                                t_idx + 3 < n_toks
+                                and is_valid_symbol_token(toks[t_idx])
+                                and toks[t_idx + 1]["text"] in ("(", "（")
+                                and toks[t_idx + 2]["type"] == "WORD"
+                                and toks[t_idx + 3]["text"] in (")", "）")
+                            ):
+                                eq = classify_equipment_label(toks[t_idx + 2]["text"])
+                                if eq:
+                                    sr = toks[t_idx]["rect"]
+                                    pad = 2.0
+                                    x0 = sr.x0 - pad
+                                    if t_idx > 0:
+                                        x0 = max(toks[t_idx - 1]["rect"].x1 + 1.0, x0)
+                                    x1 = min(toks[t_idx + 1]["rect"].x0 - 0.5, sr.x1 + pad)
+                                    sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
+                                    candidate_boxes.append((sym_box, eq[0], "inline_sym"))
+                                    inline_sym_rects.append(sym_box)
+                                    associated_label_rects.append(sym_box | toks[t_idx + 3]["rect"])
+                                    consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2), (l_idx, t_idx + 3)})
+                                    continue
+    
+                            # Pattern A5: [SYMBOL] [WORD(label)] with NO delimiter or space only (e.g. '○ 椅子', '○椅子', '× 譜面台')
+                            if (
+                                t_idx + 1 < n_toks
+                                and is_valid_symbol_token(toks[t_idx])
+                                and toks[t_idx + 1]["type"] == "WORD"
+                            ):
+                                gap = toks[t_idx + 1]["rect"].x0 - toks[t_idx]["rect"].x1
+                                max_gap = 140.0 if is_in_sym_col(toks[t_idx + 1]["rect"].x0) else 45.0
+                                if -2.0 <= gap <= max_gap:
+                                    eq = classify_equipment_label(toks[t_idx + 1]["text"])
+                                    if eq:
+                                        sr = toks[t_idx]["rect"]
+                                        lr = toks[t_idx + 1]["rect"]
+                                        pad = 2.0
+                                        x0 = sr.x0 - pad
+                                        if t_idx > 0:
+                                            x0 = max(toks[t_idx - 1]["rect"].x1 + 1.0, x0)
+                                        x1 = min(lr.x0 - 0.5, sr.x1 + pad)
+                                        sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
+                                        candidate_boxes.append((sym_box, eq[0], "inline_sym"))
+                                        inline_sym_rects.append(sym_box)
+                                        associated_label_rects.append(sym_box | lr)
+                                        consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1)})
+                                        continue
+    
+                            # Pattern A6: [WORD(label)] [SYMBOL] with NO delimiter or space only (e.g. '椅子 ○', '譜面台 ×')
+                            if (
+                                t_idx + 1 < n_toks
+                                and toks[t_idx]["type"] == "WORD"
+                                and is_valid_symbol_token(toks[t_idx + 1])
+                            ):
+                                gap = toks[t_idx + 1]["rect"].x0 - toks[t_idx]["rect"].x1
+                                max_gap = 140.0 if is_in_sym_col(toks[t_idx + 1]["rect"].x0) else 45.0
+                                if -2.0 <= gap <= max_gap:
+                                    eq = classify_equipment_label(toks[t_idx]["text"])
+                                    if eq:
+                                        lr = toks[t_idx]["rect"]
+                                        sr = toks[t_idx + 1]["rect"]
+                                        pad = 2.0
+                                        x0 = max(lr.x1 + 0.5, sr.x0 - pad)
+                                        x1 = sr.x1 + pad
+                                        if t_idx + 2 < n_toks:
+                                            x1 = min(toks[t_idx + 2]["rect"].x0 - 1.0, x1)
+                                        sym_box = fitz.Rect(x0, sr.y0 - pad, x1, sr.y1 + pad)
+                                        candidate_boxes.append((sym_box, eq[0], "inline_sym"))
+                                        inline_sym_rects.append(sym_box)
+                                        associated_label_rects.append(lr | sym_box)
+                                        consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1)})
+                                        continue
+    
+                            # Pattern A7: Single token containing both symbol and equipment word (e.g. '○＝椅子', '○:椅子', '○椅子')
+                            tok_txt = toks[t_idx]["text"]
+                            m_lead_sym = _re.match(r'^([○◯⚪◎●◉□■◇◆△▲▽▼×✕✗✘＋\+\*★☆※〒⊥⊤①-⑳])[\s=＝:：\-―ー・/／~〜]*(.+)$', tok_txt)
+                            if m_lead_sym:
+                                lead_sym, trail_word = m_lead_sym.groups()
+                                eq = classify_equipment_label(trail_word)
+                                if eq:
+                                    tr = toks[t_idx]["rect"]
+                                    sym_w = max(8.0, min(tr.height, tr.width * (1.0 / len(tok_txt))))
+                                    sym_box = fitz.Rect(tr.x0 - 1.0, tr.y0 - 1.0, tr.x0 + sym_w + 1.0, tr.y1 + 1.0)
+                                    candidate_boxes.append((sym_box, eq[0], "inline_sym"))
+                                    inline_sym_rects.append(sym_box)
+                                    associated_label_rects.append(tr)
+                                    consumed_tokens.add((l_idx, t_idx))
+                                    continue
+    
+                            # Pattern A8: Vector drawing directly adjacent to [DELIM in PAIR_DELIMS] [WORD(label)] or [WORD(label)]
+                            # (when symbol is not text font but a drawn vector shape e.g. circle/box followed by '=椅子' or '椅子')
+                            if toks[t_idx]["type"] == "WORD":
+                                eq = classify_equipment_label(toks[t_idx]["text"])
+                                if eq:
+                                    label_r = toks[t_idx]["rect"]
+                                    check_x_right = label_r.x0
+                                    if t_idx > 0 and toks[t_idx - 1]["text"] in PAIR_DELIMS:
+                                        check_x_right = toks[t_idx - 1]["rect"].x0
+                                    best_dr = None
+                                    best_dist = 999.0
+                                    for dr in small_legend_drawings:
+                                        if abs(((dr.y0 + dr.y1) / 2.0) - ((label_r.y0 + label_r.y1) / 2.0)) < 12.0:
+                                            dist = check_x_right - dr.x1
+                                            if 0.0 <= dist <= 35.0 and dist < best_dist:
+                                                best_dist = dist
+                                                best_dr = dr
+                                    if best_dr is not None:
+                                        pad = 2.0
+                                        sym_box = fitz.Rect(best_dr.x0 - pad, best_dr.y0 - pad, best_dr.x1 + pad, best_dr.y1 + pad)
+                                        candidate_boxes.append((sym_box, eq[0], "vector_legend"))
+                                        inline_sym_rects.append(sym_box)
+                                        associated_label_rects.append(sym_box | label_r)
+                                        consumed_tokens.add((l_idx, t_idx))
+                                        if t_idx > 0 and toks[t_idx - 1]["text"] in PAIR_DELIMS:
+                                            consumed_tokens.add((l_idx, t_idx - 1))
+                                        continue
+    
+                    # Create text-masked binary image (no_grid_no_text) so text words never contaminate icon crops
+                    no_grid_no_text = no_grid.copy()
+                    for l_idx, line in enumerate(tokenized_lines):
+                        for t_idx, tok in enumerate(line["tokens"]):
+                            tr = tok["rect"]
+                            if any(tr.intersects(ir) for ir in inline_sym_rects):
+                                continue
+                            should_mask = False
+                            if tok["type"] == "DELIM":
+                                should_mask = True
+                            elif tok["type"] == "WORD":
+                                if len(tok["text"]) >= 2 or tok["text"] in NON_ICON_1CHAR:
+                                    should_mask = True
+                            if should_mask:
+                                mx0 = max(0, int((tr.x0 - rect_points.x0) * icon_zoom) - 2)
+                                mx1 = min(pix_region.width, int((tr.x1 - rect_points.x0) * icon_zoom) + 2)
+                                my0 = max(0, int((tr.y0 - rect_points.y0) * icon_zoom) - 2)
+                                my1 = min(pix_region.height, int((tr.y1 - rect_points.y0) * icon_zoom) + 2)
+                                if mx1 > mx0 and my1 > my0:
+                                    no_grid_no_text[my0:my1, mx0:mx1] = 0
+    
+                    # Remove oversized graphical structures (e.g. stage walls, large boxes) and tiny specks from no_grid_no_text
+                    num_labels, cc_labels, cc_stats, _ = cv2.connectedComponentsWithStats(no_grid_no_text, connectivity=8)
+                    for lbl_i in range(1, num_labels):
+                        cw = cc_stats[lbl_i, cv2.CC_STAT_WIDTH]
+                        ch = cc_stats[lbl_i, cv2.CC_STAT_HEIGHT]
+                        carea = cc_stats[lbl_i, cv2.CC_STAT_AREA]
+                        if (
+                            carea < 12
+                            or cw > int(65 * icon_zoom)
+                            or ch > int(48 * icon_zoom)
+                            or (cw >= int(16 * icon_zoom) and ch <= int(3 * icon_zoom))
+                            or (ch >= int(16 * icon_zoom) and cw <= int(3 * icon_zoom))
+                        ):
+                            no_grid_no_text[cc_labels == lbl_i] = 0
+    
+                    # Mode B, Mode C & Mode D: Raster images, Table row-based & vector drawing search across MULTI-COLUMNS
+                    if True:
+                        # Mode B: Raster Images in rect_points
+                        raw_images = page.get_image_info(xrefs=True)
+                        for img in raw_images:
+                            b = fitz.Rect(img['bbox'])
+                            if b.intersects(rect_points) and (not is_inside_bg(b) or is_in_equip_table(b)):
+                                if 6 <= b.width <= 160 and 6 <= b.height <= 160:
+                                    if is_auto_icons and sym_cols:
+                                        bcx = (b.x0 + b.x1) / 2.0
+                                        if not is_in_sym_col(bcx):
+                                            continue
+                                    has_word_inside = any(
+                                        tok["type"] == "WORD" and len(tok["text"]) >= 2 and b.intersects(tok["rect"])
+                                        for line in tokenized_lines
+                                        for tok in line["tokens"]
+                                    )
+                                    if has_word_inside:
+                                        continue
+                                    lbl = extract_label_for_icon(b, page_words, tokenized_lines)
+                                    if lbl or not is_auto_icons:
+                                        candidate_boxes.append((b, lbl, 'raster'))
+    
+                        # Mode C: Table row-based search across MULTI-COLUMNS
+                        for l_idx, line in enumerate(tokenized_lines):
+                            toks = line["tokens"]
+                            line_txt = "".join(t["text"] for t in toks)
+                            if not sym_cols and any(kw in line_txt for kw in ("借用する", "借用しない", "使う", "使わない")):
+                                continue
+                            for t_idx, tok in enumerate(toks):
+                                if (l_idx, t_idx) in consumed_tokens or tok["type"] != "WORD":
+                                    continue
+                                if is_inside_bg(tok["rect"]) and not is_in_equip_table(tok["rect"]):
+                                    continue
+                                eq = classify_equipment_label(tok["text"])
+                                if not eq:
+                                    continue
+                                r = tok["rect"]
+                                canonical_lbl = eq[0]
+    
+                                # Build search intervals:
+                                # 1) Nearby symbol columns (all matching columns across multi-column tables)
+                                search_x_ranges = []
+                                for sc in sym_cols:
+                                    if abs(sc[0] - r.x1) < 140.0 or abs(sc[1] - r.x0) < 140.0:
+                                        search_x_ranges.append(sc)
+    
+                                # 2) Right side: up to the next WORD token or +95pt
+                                right_limit = r.x1 + 95.0
+                                for next_idx in range(t_idx + 1, len(toks)):
+                                    nt = toks[next_idx]
+                                    if nt["type"] == "WORD" and (len(nt["text"]) >= 2 or nt["text"] in NON_ICON_1CHAR):
+                                        right_limit = min(right_limit, nt["rect"].x0 - 3.0)
+                                        break
+                                if right_limit > r.x1 + 6.0:
+                                    search_x_ranges.append((r.x1 + 4.0, right_limit))
+    
+                                # 3) Left side: from previous WORD token or -95pt
+                                left_limit = r.x0 - 95.0
+                                for prev_idx in range(t_idx - 1, -1, -1):
+                                    pt = toks[prev_idx]
+                                    if pt["type"] == "WORD" and (len(pt["text"]) >= 2 or pt["text"] in NON_ICON_1CHAR):
+                                        left_limit = max(left_limit, pt["rect"].x1 + 3.0)
+                                        break
+                                if r.x0 - 4.0 > left_limit:
+                                    search_x_ranges.append((left_limit, r.x0 - 4.0))
+    
+                                sym_y0 = r.y0 - 8.0
+                                sym_y1 = r.y1 + 8.0
+                                for sx0, sx1 in search_x_ranges:
+                                    px0 = max(0, int((sx0 - rect_points.x0) * icon_zoom))
+                                    px1 = min(pix_region.width, int((sx1 - rect_points.x0) * icon_zoom))
+                                    py0 = max(0, int((sym_y0 - rect_points.y0) * icon_zoom))
+                                    py1 = min(pix_region.height, int((sym_y1 - rect_points.y0) * icon_zoom))
+    
+                                    if px1 > px0 and py1 > py0:
+                                        cell_content = no_grid_no_text[py0:py1, px0:px1]
+                                        dark_y, dark_x = np.where(cell_content > 0)
+                                        if len(dark_x) >= 16:
+                                            pad = 4
+                                            min_x = max(0, int(np.min(dark_x)) + px0 - pad)
+                                            max_x = min(pix_region.width, int(np.max(dark_x)) + px0 + pad)
+                                            min_y = max(0, int(np.min(dark_y)) + py0 - pad)
+                                            max_y = min(pix_region.height, int(np.max(dark_y)) + py0 + pad)
+    
+                                            box_pt = fitz.Rect(
+                                                rect_points.x0 + min_x / icon_zoom,
+                                                rect_points.y0 + min_y / icon_zoom,
+                                                rect_points.x0 + max_x / icon_zoom,
+                                                rect_points.y0 + max_y / icon_zoom
+                                            )
+                                            candidate_boxes.append((box_pt, canonical_lbl, 'row_cell'))
+                                            associated_label_rects.append(r)
+                                            break
+    
+                        # Mode D: Vector drawings fallback / supplement (supporting multi-columns)
+                        drawings = page.get_drawings()
+                        drawing_rects = []
+                        for d in drawings:
+                            r = fitz.Rect(d['rect'])
+                            if not r.intersects(rect_points):
+                                continue
+                            if bg_excl is not None and r.intersects(bg_excl) and not is_in_equip_table(r):
+                                continue
+                            if is_auto_icons and sym_cols and not is_in_equip_table(r):
+                                continue
+                            if r.width > 120 or r.height > 120:
+                                continue
+                            if (r.width >= 12 and r.height <= 2.5) or (r.height >= 12 and r.width <= 2.5):
+                                continue
+                            if r.width <= 1.8 and r.height <= 1.8:
+                                continue
+                            sw = d.get('width', 1.0) or 1.0
+                            r_exp = fitz.Rect(r.x0 - sw/2, r.y0 - sw/2, r.x1 + sw/2, r.y1 + sw/2)
+                            drawing_rects.append(r_exp)
+    
+                        merged_drawings = merge_rects(drawing_rects, margin=6.0)
+                        for md in merged_drawings:
+                            if 5 <= md.width <= 120 and 5 <= md.height <= 120:
+                                lbl = extract_label_for_icon(md, page_words, tokenized_lines)
+                                if lbl:
+                                    md_ymid = (md.y0 + md.y1) / 2.0
+                                    md_xmid = (md.x0 + md.x1) / 2.0
+                                    # Allow multi-column icons: only suppress if in same row AND same column (X within 25pt)
+                                    already_found = any(
+                                        clbl == lbl and abs(((cb.y0 + cb.y1) / 2.0) - md_ymid) < 14.0 and abs(((cb.x0 + cb.x1) / 2.0) - md_xmid) < 25.0
+                                        for cb, clbl, _ in candidate_boxes
+                                    )
+                                    if not already_found:
+                                        candidate_boxes.append((md, lbl, 'drawing'))
+    
+                    # Deduplicate overlapping candidate boxes without dropping different column instances
+                    unique_candidates = []
+                    for b, lbl, typ in candidate_boxes:
+                        overlap = False
+                        for idx_u, (ub, ulbl, utyp) in enumerate(unique_candidates):
+                            inter = fitz.Rect(b).intersect(fitz.Rect(ub))
+                            if inter.width > 0 and inter.height > 0:
+                                inter_area = inter.width * inter.height
+                                min_area = min(b.width * b.height, ub.width * ub.height)
+                                if min_area > 0 and inter_area / min_area > 0.40:
+                                    overlap = True
+                                    if not ulbl and lbl:
+                                        unique_candidates[idx_u] = (ub, lbl, utyp)
+                                    break
+                        if not overlap:
+                            final_lbl = lbl or extract_label_for_icon(b, page_words, tokenized_lines)
+                            unique_candidates.append((b, final_lbl, typ))
+    
+                    # Multi-column visual reading order sort:
+                    # Groups candidates by column (X clustering) and sorts top-to-bottom within each column
+                    if len(unique_candidates) > 1:
+                        x_coords = sorted(item[0].x0 for item in unique_candidates)
+                        col_thresholds = []
+                        for i in range(len(x_coords) - 1):
+                            if x_coords[i+1] - x_coords[i] > 55.0:
+                                col_thresholds.append((x_coords[i] + x_coords[i+1]) / 2.0)
+                        
+                        def get_candidate_col_index(x: float) -> int:
+                            for c_idx, thresh in enumerate(col_thresholds):
+                                if x < thresh:
+                                    return c_idx
+                            return len(col_thresholds)
+    
+                        unique_candidates.sort(key=lambda item: (get_candidate_col_index(item[0].x0), item[0].y0))
+    
+                    extracted_icons = []
+                    with Image.open(region_path) as im:
+                        for idx, (b, lbl, typ) in enumerate(unique_candidates):
+                            rel_x = max(0, (b.x0 - rect_points.x0) * icon_zoom)
+                            rel_y = max(0, (b.y0 - rect_points.y0) * icon_zoom)
+                            rel_width = min(pix_region.width - rel_x, b.width * icon_zoom)
+                            rel_height = min(pix_region.height - rel_y, b.height * icon_zoom)
+    
+                            if rel_width < 5 or rel_height < 5:
+                                continue
+    
+                            icon_filename = f"{req.file_id}_icon_{idx}_{cache_buster}.png"
+                            icon_crop_path = os.path.join(STATIC_DIR, icon_filename)
+    
+                            cropped = im.crop((rel_x, rel_y, rel_x + rel_width, rel_y + rel_height))
+                            cropped.save(icon_crop_path)
+                            make_white_transparent(icon_crop_path)
+    
+                            extracted_icons.append({
+                                "id": f"icon_{idx}",
+                                "url": f"/static/{icon_filename}",
+                                "label": lbl or f"パーツ {idx + 1}",
+                                "rect": {
+                                    "x": rel_x,
+                                    "y": rel_y,
+                                    "width": rel_width,
+                                    "height": rel_height
+                                }
+                            })
+                        
         piano_lid_options = extract_piano_lid_options(page)
         doc.close()
         

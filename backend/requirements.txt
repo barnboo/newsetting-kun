@@ -1,7 +1,8 @@
-fastapi
-uvicorn
-PyMuPDF
-Pillow
-python-multipart
-opencv-python-headless
-numpy
+fastapi==0.128.8
+uvicorn==0.39.0
+PyMuPDF==1.26.5
+Pillow==11.3.0
+python-multipart==0.0.20
+opencv-python-headless==5.0.0.93
+numpy==2.0.2
+scipy==1.13.1
