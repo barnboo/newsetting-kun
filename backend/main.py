@@ -903,19 +903,19 @@ async def extract_regions(req: ExtractRequest):
             pix.save(bg_path)
             background_url = f"/static/{bg_filename}"
 
-        # Use explicit 'icons' region if provided, otherwise automatically scan outside the stage diagram
+        # Always use the full page rect for scan and region image so IconAdjustModal displays the complete page background
+        rect_points = fitz.Rect(page.rect)
         icons_region_item = next((r for r in req.regions if r.type == "icons"), None)
         is_auto_icons = icons_region_item is None
+        user_icons_rect: Optional[fitz.Rect] = None
         if icons_region_item is not None:
             ic_crop = icons_region_item.crop
-            rect_points = fitz.Rect(
+            user_icons_rect = fitz.Rect(
                 ic_crop.x / zoom,
                 ic_crop.y / zoom,
                 (ic_crop.x + ic_crop.width) / zoom,
                 (ic_crop.y + ic_crop.height) / zoom
             )
-        else:
-            rect_points = fitz.Rect(page.rect)
 
         bg_excl: Optional[fitz.Rect] = None
         if is_auto_icons and bg_rect_points is not None:

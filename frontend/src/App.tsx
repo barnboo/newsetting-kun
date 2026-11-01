@@ -119,6 +119,7 @@ function App() {
   const preloadedBackupRef = useRef<any>(null);
   const hasUserAdjustedIconsRef = useRef<boolean>(false);
   const isNewUploadRef = useRef<boolean>(false);
+  const openedAdjustFromTemplateRef = useRef<boolean>(false);
 
   // Refresh and load all project backups and storage usage
   const refreshBackups = async () => {
@@ -774,6 +775,10 @@ function App() {
 
   const handleIconAdjustBack = () => {
     setShowIconAdjustModal(false);
+    if (openedAdjustFromTemplateRef.current) {
+      openedAdjustFromTemplateRef.current = false;
+      setShowTemplateModal(true);
+    }
   };
 
   const handleTemplateModalBack = () => {
@@ -1167,7 +1172,7 @@ function App() {
                 onBack={handleBackToHome}
                 onPhaseChange={(p) => setCurrentPhase(p)}
               />
-              {/* Icon adjustment modal (opened independently from toolbar) */}
+              {/* Icon adjustment modal (opened independently from toolbar or template modal) */}
               {showIconAdjustModal && extractedData && fileData && (
                 <IconAdjustModal
                   iconsRegionUrl={extractedData.iconsRegionUrl}
@@ -1177,10 +1182,18 @@ function App() {
                   onBack={handleIconAdjustBack}
                   onClose={() => {
                     setShowIconAdjustModal(false);
+                    if (openedAdjustFromTemplateRef.current) {
+                      openedAdjustFromTemplateRef.current = false;
+                      setShowTemplateModal(true);
+                    }
                   }}
                   onSave={async (newIcons, newLabels) => {
                     await handleIconsUpdated(newIcons, newLabels);
                     setShowIconAdjustModal(false);
+                    if (openedAdjustFromTemplateRef.current) {
+                      openedAdjustFromTemplateRef.current = false;
+                      setShowTemplateModal(true);
+                    }
                   }}
                 />
               )}
@@ -1193,6 +1206,11 @@ function App() {
                   onBack={handleTemplateModalBack}
                   onConfirm={handleTemplateModalConfirm}
                   onSkip={handleTemplateModalSkip}
+                  onOpenManualAdjust={() => {
+                    openedAdjustFromTemplateRef.current = true;
+                    setShowTemplateModal(false);
+                    setShowIconAdjustModal(true);
+                  }}
                 />
               )}
             </>

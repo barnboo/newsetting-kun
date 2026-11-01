@@ -41,6 +41,49 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
     }
   };
 
+  const handleZoomToSymbols = () => {
+    if (!rects || rects.length === 0 || !image || !canvasContainerRef.current) {
+      handleZoomReset();
+      return;
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    rects.forEach(r => {
+      minX = Math.min(minX, r.rect.x);
+      minY = Math.min(minY, r.rect.y);
+      maxX = Math.max(maxX, r.rect.x + r.rect.width);
+      maxY = Math.max(maxY, r.rect.y + r.rect.height);
+    });
+    if (!isFinite(minX)) {
+      handleZoomReset();
+      return;
+    }
+    const bboxW = Math.max(80, maxX - minX);
+    const bboxH = Math.max(80, maxY - minY);
+    const bboxCenterX = (minX + maxX) / 2;
+    const bboxCenterY = (minY + maxY) / 2;
+
+    const container = canvasContainerRef.current;
+    const cW = container.clientWidth || availW;
+    const cH = container.clientHeight || availH;
+
+    const idealScaleX = (cW * 0.75) / (bboxW * baseScale);
+    const idealScaleY = (cH * 0.75) / (bboxH * baseScale);
+    const targetZoom = Math.max(1.0, Math.min(3.0, Math.min(idealScaleX, idealScaleY)));
+    setZoomMultiplier(Number(targetZoom.toFixed(2)));
+
+    setTimeout(() => {
+      if (canvasContainerRef.current && stageWrapperRef.current) {
+        const curScale = baseScale * targetZoom;
+        const curStageW = Math.round(image.width * curScale);
+        const curStageH = Math.round(image.height * curScale);
+        const targetContentX = stageWrapperRef.current.offsetLeft + (bboxCenterX / image.width) * curStageW;
+        const targetContentY = stageWrapperRef.current.offsetTop + (bboxCenterY / image.height) * curStageH;
+        canvasContainerRef.current.scrollLeft = targetContentX - cW / 2;
+        canvasContainerRef.current.scrollTop = targetContentY - cH / 2;
+      }
+    }, 50);
+  };
+
   // Undo / Redo history state
   const historyRef = useRef<ExtractedIcon[][]>([]);
   const redoStackRef = useRef<ExtractedIcon[][]>([]);
@@ -793,10 +836,10 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
             <div>
               <h3 className="text-base font-bold text-slate-800 flex items-center gap-2 tracking-tight">
                 <span>⚙</span>
-                <span>アイコンの抽出範囲を手動調整</span>
+                <span>アイコンの抽出範囲を手動調整（用紙全体）</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                枠をドラッグで移動・変形、余白ドラッグで新規作成。ミドルクリックまたは Space+ドラッグで画面移動。枠を選択して Delete / Backspace または [✕] で削除。
+                用紙全体のどこからでも枠をドラッグで移動・変形、余白ドラッグで新規枠を作成できます。
               </p>
             </div>
 
@@ -852,6 +895,34 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
                 title="ズームイン (Ctrl + +)"
               >
                 +
+              </button>
+            </div>
+
+            {/* View Switchers: Entire Page vs Focus Symbols */}
+            <div className="flex items-center gap-1 ml-2 liquid-segment-track p-0.5 rounded-full text-xs">
+              <button
+                type="button"
+                onClick={handleZoomReset}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                  zoomMultiplier === 1.0
+                    ? 'bg-white shadow-2xs text-[#007AFF]'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="用紙全体が枠内にぴったり収まるように表示します"
+              >
+                用紙全体
+              </button>
+              <button
+                type="button"
+                onClick={handleZoomToSymbols}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                  zoomMultiplier > 1.0
+                    ? 'bg-white shadow-2xs text-indigo-600'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="検出された記号枠のあるエリアに拡大・スクロールします"
+              >
+                記号にズーム
               </button>
             </div>
           </div>
