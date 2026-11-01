@@ -13,7 +13,8 @@ import {
   RotateCw,
   Move,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Palette
 } from 'lucide-react';
 import type { PlacedItem } from './StageCanvas';
 import type { CurveObject, CurveItem } from '../utils/bezierUtils';
@@ -455,6 +456,65 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+
+        {/* Color Palette for PlacedItem */}
+        <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1">
+              <Palette className="w-3.5 h-3.5 text-[#007AFF]" />
+              <span>表示色 (カラー)</span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span
+                className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-2xs"
+                style={{ backgroundColor: selectedItem.color || '#111827' }}
+              />
+              <span className="font-mono text-[10px] text-slate-500">
+                {selectedItem.color || '#111827'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {[
+              { label: '黒', value: '#111827' },
+              { label: '青', value: '#2563eb' },
+              { label: '赤', value: '#dc2626' },
+              { label: '緑', value: '#16a34a' },
+              { label: '紫', value: '#9333ea' },
+              { label: '橙', value: '#ea580c' },
+              { label: '水', value: '#0284c7' },
+              { label: '桃', value: '#db2777' },
+            ].map(col => {
+              const isSelected = (selectedItem.color || '#111827').toLowerCase() === col.value.toLowerCase();
+              return (
+                <button
+                  key={col.value}
+                  type="button"
+                  onClick={() => onUpdateItem(selectedItem.id, { color: col.value })}
+                  className={`w-6 h-6 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                    isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 border-white' : 'border-black/10 hover:scale-105'
+                  }`}
+                  style={{ backgroundColor: col.value }}
+                  title={`${col.label} (${col.value})`}
+                >
+                  {isSelected && <span className="text-[10px] font-bold text-white drop-shadow-xs">✓</span>}
+                </button>
+              );
+            })}
+            <label
+              className="w-6 h-6 rounded-full border border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden transition-all relative"
+              title="自由なカスタム色を選択"
+            >
+              <input
+                type="color"
+                value={selectedItem.color || '#111827'}
+                onChange={(e) => onUpdateItem(selectedItem.id, { color: e.target.value })}
+                className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
+              />
+              <span className="text-[11px] font-bold leading-none text-slate-500">+</span>
+            </label>
           </div>
         </div>
 
@@ -2023,6 +2083,95 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                         <Sparkles className="w-3.5 h-3.5" />
                         <span>この曲線の全記号に適用</span>
                       </button>
+
+                      {/* この記号のカラー設定 */}
+                      <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1">
+                            <Palette className="w-3.5 h-3.5 text-[#007AFF]" />
+                            <span>この記号の表示色</span>
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-2xs"
+                              style={{ backgroundColor: activeItem.color || selectedCurve.color || '#000000' }}
+                            />
+                            <span className="font-mono text-[10px] text-slate-500">
+                              {activeItem.color || selectedCurve.color || '#000000'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {[
+                            { label: '黒', value: '#111827' },
+                            { label: '青', value: '#2563eb' },
+                            { label: '赤', value: '#dc2626' },
+                            { label: '緑', value: '#16a34a' },
+                            { label: '紫', value: '#9333ea' },
+                            { label: '橙', value: '#ea580c' },
+                            { label: '水', value: '#0284c7' },
+                            { label: '桃', value: '#db2777' },
+                          ].map(col => {
+                            const isSelected = (activeItem.color || selectedCurve.color || '#000000').toLowerCase() === col.value.toLowerCase();
+                            return (
+                              <button
+                                key={col.value}
+                                type="button"
+                                onClick={() => {
+                                  const nextItems = curveItems.map(it => {
+                                    if (it.id === activeItem.id) {
+                                      return { ...it, color: col.value };
+                                    }
+                                    return it;
+                                  });
+                                  onUpdateCurve(selectedCurve.id, { items: nextItems });
+                                }}
+                                className={`w-6 h-6 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                                  isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 border-white' : 'border-black/10 hover:scale-105'
+                                }`}
+                                style={{ backgroundColor: col.value }}
+                                title={`${col.label} (${col.value})`}
+                              >
+                                {isSelected && <span className="text-[10px] font-bold text-white drop-shadow-xs">✓</span>}
+                              </button>
+                            );
+                          })}
+                          <label
+                            className="w-6 h-6 rounded-full border border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden transition-all relative"
+                            title="自由なカスタム色を選択"
+                          >
+                            <input
+                              type="color"
+                              value={activeItem.color || selectedCurve.color || '#000000'}
+                              onChange={(e) => {
+                                const newColor = e.target.value;
+                                const nextItems = curveItems.map(it => {
+                                  if (it.id === activeItem.id) {
+                                    return { ...it, color: newColor };
+                                  }
+                                  return it;
+                                });
+                                onUpdateCurve(selectedCurve.id, { items: nextItems });
+                              }}
+                              className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
+                            />
+                            <span className="text-[11px] font-bold leading-none text-slate-500">+</span>
+                          </label>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const currentColor = activeItem.color || selectedCurve.color || '#000000';
+                            const nextItems = curveItems.map(it => ({ ...it, color: currentColor }));
+                            onUpdateCurve(selectedCurve.id, { color: currentColor, items: nextItems });
+                          }}
+                          className="w-full py-1.5 px-2 rounded-xl text-[11px] font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                          title="この曲線上のすべての記号をこの色に一括統一します"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>この曲線の全記号に適用</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -2237,6 +2386,82 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                   }}
                   className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
                 />
+              </div>
+            </div>
+
+            {/* 曲線全体のカラー設定 */}
+            <div className="flex flex-col gap-1.5 col-span-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                  <Palette className="w-3.5 h-3.5 text-[#007AFF]" />
+                  <span>曲線・記号の表示色</span>
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-2xs"
+                    style={{ backgroundColor: selectedCurve.color || '#000000' }}
+                  />
+                  <span className="font-mono text-[10px] text-slate-500">
+                    {selectedCurve.color || '#000000'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {[
+                  { label: '黒', value: '#111827' },
+                  { label: '青', value: '#2563eb' },
+                  { label: '赤', value: '#dc2626' },
+                  { label: '緑', value: '#16a34a' },
+                  { label: '紫', value: '#9333ea' },
+                  { label: '橙', value: '#ea580c' },
+                  { label: '水', value: '#0284c7' },
+                  { label: '桃', value: '#db2777' },
+                ].map(col => {
+                  const isSelected = (selectedCurve.color || '#000000').toLowerCase() === col.value.toLowerCase();
+                  return (
+                    <button
+                      key={col.value}
+                      type="button"
+                      onClick={() => {
+                        const updatedItems = Array.isArray(selectedCurve.items)
+                          ? selectedCurve.items.map(it => ({ ...it, color: col.value }))
+                          : undefined;
+                        onUpdateCurve(selectedCurve.id, {
+                          color: col.value,
+                          ...(updatedItems ? { items: updatedItems } : {}),
+                        });
+                      }}
+                      className={`w-6 h-6 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                        isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 border-white' : 'border-black/10 hover:scale-105'
+                      }`}
+                      style={{ backgroundColor: col.value }}
+                      title={`${col.label} (${col.value})`}
+                    >
+                      {isSelected && <span className="text-[10px] font-bold text-white drop-shadow-xs">✓</span>}
+                    </button>
+                  );
+                })}
+                <label
+                  className="w-6 h-6 rounded-full border border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden transition-all relative"
+                  title="自由なカスタム色を選択"
+                >
+                  <input
+                    type="color"
+                    value={selectedCurve.color || '#000000'}
+                    onChange={(e) => {
+                      const newColor = e.target.value;
+                      const updatedItems = Array.isArray(selectedCurve.items)
+                        ? selectedCurve.items.map(it => ({ ...it, color: newColor }))
+                        : undefined;
+                      onUpdateCurve(selectedCurve.id, {
+                        color: newColor,
+                        ...(updatedItems ? { items: updatedItems } : {}),
+                      });
+                    }}
+                    className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
+                  />
+                  <span className="text-[11px] font-bold leading-none text-slate-500">+</span>
+                </label>
               </div>
             </div>
 

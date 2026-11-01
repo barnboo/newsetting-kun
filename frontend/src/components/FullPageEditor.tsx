@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom';
 import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Ellipse, Line, Transformer } from 'react-konva';
 import Konva from 'konva';
 import useImage from 'use-image';
-import { Layers, Trash2, FileText, Shapes, Type, Spline, Copy, ClipboardPaste, CopyPlus, X, Check, Highlighter, Edit3, MessageSquareHeart, ExternalLink, RotateCw } from 'lucide-react';
+import { Layers, Trash2, FileText, Shapes, Type, Spline, Copy, ClipboardPaste, CopyPlus, X, Check, Highlighter, Edit3, MessageSquareHeart, ExternalLink, RotateCw, Palette } from 'lucide-react';
 import { HelpHeaderButtons } from './HelpAssistantModal';
 import { SubmenuContainer } from './ContextMenu';
 
@@ -770,7 +770,6 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
       {/* Editable Overlay Elements (Text & Shapes) */}
       <Layer id="overlayLayer">
         {nodes.map(t => {
-          const isSelected = t.id === selectedId;
           const isShape = t.type === 'circle' || t.type === 'shape';
           const shapeKind: ShapeKind = t.shapeKind || (t.type === 'circle' ? 'circle' : 'circle');
           const isFilled = Boolean(t.isFilled);
@@ -779,7 +778,7 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
           const halfW = effectiveW / 2;
           const halfH = effectiveH / 2;
 
-          const strokeColor = isSelected ? '#2563eb' : (t.color || '#111827');
+          const strokeColor = t.color || '#111827';
           const fillColor = isFilled ? strokeColor : 'rgba(0, 0, 0, 0.001)';
           const strokeWidth = 2;
 
@@ -1030,7 +1029,7 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
                   text={t.text}
                   fontSize={t.fontSize}
                   fontFamily="'Hiragino Sans', 'Meiryo', sans-serif"
-                  fill={isSelected ? '#1d4ed8' : '#111827'}
+                  fill={t.color || '#111827'}
                   padding={2}
                   opacity={editingId === t.id ? 0 : 1}
                 />
@@ -2203,6 +2202,11 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     handleUpdateNodeAttrs(activeSceneId, selectedId, { rotation: Math.round(deg) });
   };
 
+  const handleUpdateSelectedColor = (newColor: string) => {
+    if (!selectedId) return;
+    handleUpdateNodeAttrs(activeSceneId, selectedId, { color: newColor });
+  };
+
   const FEEDBACK_FORM_URL = 'https://forms.gle/fujpm76eSrSao8549';
   const FEEDBACK_STORAGE_KEY = 'stajet_feedback_form_prompted';
 
@@ -3153,6 +3157,65 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                         >
                           0°
                         </button>
+                      </div>
+                    </div>
+
+                    {/* Color Palette for Text & Shapes */}
+                    <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                          <Palette className="w-3.5 h-3.5 text-[#007AFF]" />
+                          <span>表示色 (カラー):</span>
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-2xs"
+                            style={{ backgroundColor: selectedNode.color || '#111827' }}
+                          />
+                          <span className="font-mono text-[10px] text-slate-500">
+                            {selectedNode.color || '#111827'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {[
+                          { label: '黒', value: '#111827' },
+                          { label: '赤', value: '#dc2626' },
+                          { label: '青', value: '#2563eb' },
+                          { label: '緑', value: '#16a34a' },
+                          { label: '紫', value: '#9333ea' },
+                          { label: '橙', value: '#ea580c' },
+                          { label: '水', value: '#0284c7' },
+                          { label: '桃', value: '#db2777' },
+                        ].map(col => {
+                          const isMatch = (selectedNode.color || '#111827').toLowerCase() === col.value.toLowerCase();
+                          return (
+                            <button
+                              key={col.value}
+                              type="button"
+                              onClick={() => handleUpdateSelectedColor(col.value)}
+                              className={`w-6 h-6 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                                isMatch ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 border-white' : 'border-black/10 hover:scale-105'
+                              }`}
+                              style={{ backgroundColor: col.value }}
+                              title={`${col.label} (${col.value})`}
+                            >
+                              {isMatch && <span className="text-[10px] font-bold text-white drop-shadow-xs">✓</span>}
+                            </button>
+                          );
+                        })}
+                        <label
+                          className="w-6 h-6 rounded-full border border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden transition-all relative"
+                          title="自由なカスタム色を選択"
+                        >
+                          <input
+                            type="color"
+                            value={selectedNode.color || '#111827'}
+                            onChange={(e) => handleUpdateSelectedColor(e.target.value)}
+                            className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
+                          />
+                          <span className="text-[11px] font-bold leading-none text-slate-500">+</span>
+                        </label>
                       </div>
                     </div>
 
