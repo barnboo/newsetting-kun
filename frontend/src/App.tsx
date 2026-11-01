@@ -22,6 +22,7 @@ import {
   loadSessionFromIndexedDB,
   saveSessionToIndexedDB,
   clearSessionFromIndexedDB,
+  clearAllSessionsFromIndexedDB,
   getAllSessionsFromIndexedDB,
   urlToDataUrl,
   cropIconFromImage,
@@ -346,6 +347,32 @@ function App() {
     localStorage.removeItem(`settingkun_backup_${id}_ts`);
     localStorage.removeItem(`settingkun_backup_${id}_meta`);
     await refreshBackups();
+  };
+
+  const handleDeleteAllBackups = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const count = backupProjects.length;
+    if (count === 0) return;
+    const ok = window.confirm(
+      `保存されているすべてのバックアップ（${count}件）を一括削除しますか？\n\n※この操作は取り消せません。必要なデータがある場合は先に「JSON書き出し」を行ってください。`
+    );
+    if (!ok) return;
+
+    try {
+      await clearAllSessionsFromIndexedDB();
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        if (k.startsWith('settingkun_backup_') || k.startsWith('stajet_preview_settings_')) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+      localStorage.removeItem('settingkun_last_fid');
+      await refreshBackups();
+    } catch (err) {
+      console.error('Failed to delete all backups:', err);
+    }
   };
 
   const handleRenameProject = async (id: string, currentName: string, e: React.MouseEvent) => {
@@ -952,9 +979,20 @@ function App() {
                       onChange={handleImportProjectJson}
                     />
                     {backupProjects.length > 0 && (
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold bg-white/60 dark:bg-slate-800/60 px-2.5 py-0.5 rounded-full border border-white/60 dark:border-white/10">
-                        {backupProjects.length} 件保存中
-                      </span>
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleDeleteAllBackups}
+                          className="text-xs liquid-btn text-rose-600 dark:text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-950/40 hover:!border-rose-300 px-3 py-1.5 rounded-full font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                          title="保存されているすべてのバックアップを一括削除します"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>全削除</span>
+                        </button>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold bg-white/60 dark:bg-slate-800/60 px-2.5 py-0.5 rounded-full border border-white/60 dark:border-white/10">
+                          {backupProjects.length} 件保存中
+                        </span>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1127,6 +1165,20 @@ function App() {
                       >
                         内訳を確認
                       </button>
+                      {backupProjects.length > 0 && (
+                        <>
+                          <span>•</span>
+                          <button
+                            type="button"
+                            onClick={handleDeleteAllBackups}
+                            className="text-rose-600 dark:text-rose-400 hover:underline cursor-pointer flex items-center gap-1 font-semibold"
+                            title="保存されているすべてのバックアップを一括削除します"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>バックアップ全削除</span>
+                          </button>
+                        </>
+                      )}
                     </div>
                     <span>※上限(5MB)に達すると自動保存が停止します</span>
                   </div>

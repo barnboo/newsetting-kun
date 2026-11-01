@@ -361,3 +361,22 @@ export async function clearSessionFromIndexedDB(fileId?: string): Promise<void> 
     console.error('Failed to clear session from IndexedDB:', err);
   }
 }
+
+/**
+ * Clear all project sessions from IndexedDB
+ */
+export async function clearAllSessionsFromIndexedDB(): Promise<void> {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.error('Failed to clear all sessions from IndexedDB:', err);
+  }
+}
+
