@@ -26,3 +26,6 @@ backend/static/*
 # Environment variables
 .env
 .env.local
+
+# Test drive files
+test_drive/

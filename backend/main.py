@@ -402,9 +402,9 @@ def clean_japanese_text(text: str) -> str:
 
 SYMBOL_CHARS = set("○◯⚪◎●◉□■◇◆△▲▽▼×✕✗✘＋+＊*☆✭♩♪♫♬〒⊥⊤⊢⊣┳┻╋※") | set("①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳")
 DELIM_CHARS = set("=＝:：→⇒←↔…‥・/／()（）[]［］【】「」『』~〜ー―-‐")
-PAIR_DELIMS = {"=", "＝", ":", "：", "→", "⇒", "←", "↔", "…", "‥", "-", "―", "ー", "‐", "・", "/", "／", "~", "〜"}
+PAIR_DELIMS = {"=", "＝", ":", "：", "→", "⇒", "←", "↔", "…", "‥", "-", "―", "ー", "‐", "・", "・・", "・・・", "/", "／", "~", "〜", "は"}
 STANDALONE_STOP_WORDS = {"要", "不要", "有", "無", "閉", "半開", "半半開", "全開", "蒲鉾板", "立奏", "座奏", "蓋"}
-NON_ICON_1CHAR = set("品名記号要不有無閉開本脚台個枚組式張対番部門団体客席数等印") | set("0123456789")
+NON_ICON_1CHAR = set("品名記号要不有無閉開本脚台個枚組式張対番部門団体客席数等印備考借使用持込注例前次考") | set("0123456789０１２３４５６７８９")
 
 def classify_equipment_label(raw_text: str):
     """
@@ -940,22 +940,28 @@ async def extract_regions(req: ExtractRequest):
                 page_words = page.get_text("words")
                 tokenized_lines = tokenize_pdf_region(page, rect_points)
 
-                # Detect '記号' and '品名' column headers for single or MULTI-COLUMN tables (2 columns, 3 columns, etc.)
+                # Detect '記号', '品名', and 'NO' column headers for single or MULTI-COLUMN tables (2 columns, 3 columns, etc.)
                 sym_cols: List[Tuple[float, float]] = []
                 label_cols: List[Tuple[float, float]] = []
+                no_cols: List[Tuple[float, float]] = []
                 equip_header_rects = []
                 for line in tokenized_lines:
                     for tok in line["tokens"]:
                         txt = tok["text"]
                         if txt in ("記号", "図", "記号/品名", "記号・品名"):
-                            bounds = (tok["rect"].x0 - 18.0, tok["rect"].x1 + 18.0)
-                            if not any(abs(b[0] - bounds[0]) < 24.0 for b in sym_cols):
+                            bounds = (tok["rect"].x0 - 20.0, tok["rect"].x1 + 20.0)
+                            if not any(abs(b[0] - bounds[0]) < 25.0 for b in sym_cols):
                                 sym_cols.append(bounds)
                             equip_header_rects.append(tok["rect"])
                         elif txt in ("品名", "備品", "備品名", "使用備品", "品名/記号", "品名記号"):
                             bounds = (tok["rect"].x0 - 25.0, tok["rect"].x1 + 25.0)
                             if not any(abs(b[0] - bounds[0]) < 25.0 for b in label_cols):
                                 label_cols.append(bounds)
+                            equip_header_rects.append(tok["rect"])
+                        elif txt in ("NO", "No", "No.", "番号", "番"):
+                            bounds = (tok["rect"].x0 - 15.0, tok["rect"].x1 + 15.0)
+                            if not any(abs(b[0] - bounds[0]) < 20.0 for b in no_cols):
+                                no_cols.append(bounds)
                             equip_header_rects.append(tok["rect"])
 
                 # Representative bounds for backwards-compatibility
@@ -966,6 +972,11 @@ async def extract_regions(req: ExtractRequest):
                     if not sym_cols:
                         return False
                     return any(sc[0] - 14.0 <= x <= sc[1] + 14.0 for sc in sym_cols)
+
+                def is_in_no_col(x: float) -> bool:
+                    if not no_cols:
+                        return False
+                    return any(nc[0] - 10.0 <= x <= nc[1] + 10.0 for nc in no_cols)
 
                 def is_in_equip_table(r: fitz.Rect) -> bool:
                     if not sym_cols:
@@ -1028,15 +1039,23 @@ async def extract_regions(req: ExtractRequest):
                 consumed_tokens = set()  # (line_idx, tok_idx)
 
                 def is_valid_symbol_token(tok):
+                    txt = tok["text"].strip()
+                    # Pure numbers are item numbers / counters, NEVER symbols
+                    if _re.match(r'^[0-9０-９]+$', txt):
+                        return False
+                    # Reject note bullets and generic words
+                    if txt in ("※", "＊", "・", "●印", "○印", "■印", "×印", "印"):
+                        return False
+                    if is_in_no_col(tok["rect"].x0):
+                        return False
                     if tok["type"] == "SYMBOL":
                         return True
                     if tok["type"] == "WORD":
-                        txt = tok["text"]
                         if len(txt) == 1 and txt not in NON_ICON_1CHAR:
                             return True
-                        # Accept short symbol codes like P, Pf, Vo, Dr, M, B, etc.
-                        if len(txt) <= 3 and _re.match(r'^[A-Za-z0-9★☆※◇◆□■△▲▽▼○◯◎●×＋\+\-]+$', txt):
-                            if txt not in STANDALONE_STOP_WORDS and txt not in ("No", "No.", "TEL", "FAX"):
+                        # Accept short symbol codes like P, Pf, Vo, Dr, M, Y, B, etc.
+                        if len(txt) <= 4 and _re.match(r'^[A-Za-z|｜★☆◇◆□■△▲▽▼○◯◎●×＋\+\-]+$', txt):
+                            if txt not in STANDALONE_STOP_WORDS and txt not in ("No", "No.", "TEL", "FAX", "PDF", "OK", "要", "不要", "台", "本", "脚"):
                                 return True
                     return False
 
@@ -1058,6 +1077,57 @@ async def extract_regions(req: ExtractRequest):
                     for t_idx in range(n_toks):
                         if (l_idx, t_idx) in consumed_tokens:
                             continue
+
+                        # Pattern A0: Table Row Alignment: equipment name matched with symbol in sym_col
+                        if sym_cols and (l_idx, t_idx) not in consumed_tokens and toks[t_idx]["type"] == "WORD":
+                            eq = classify_equipment_label(toks[t_idx]["text"])
+                            if eq:
+                                lr = toks[t_idx]["rect"]
+                                best_st_idx = None
+                                best_dist = 999.0
+                                for st_idx in range(n_toks):
+                                    if st_idx == t_idx or (l_idx, st_idx) in consumed_tokens:
+                                        continue
+                                    st = toks[st_idx]
+                                    if is_in_no_col(st["rect"].x0):
+                                        continue
+                                    if is_in_sym_col(st["rect"].x0) and is_valid_symbol_token(st):
+                                        dist = abs(st["rect"].x0 - lr.x1)
+                                        if dist < best_dist and dist < 240.0:
+                                            best_dist = dist
+                                            best_st_idx = st_idx
+                                if best_st_idx is not None:
+                                    st = toks[best_st_idx]
+                                    sr = st["rect"]
+                                    pad = 2.0
+                                    sym_box = fitz.Rect(sr.x0 - pad, sr.y0 - pad, sr.x1 + pad, sr.y1 + pad)
+                                    candidate_boxes.append((sym_box, eq[0], "table_sym"))
+                                    inline_sym_rects.append(sym_box)
+                                    associated_label_rects.append(lr | sym_box)
+                                    consumed_tokens.add((l_idx, t_idx))
+                                    consumed_tokens.add((l_idx, best_st_idx))
+                                    if t_idx > 0 and (_re.match(r'^[0-9０-９]+$', toks[t_idx - 1]["text"]) or is_in_no_col(toks[t_idx - 1]["rect"].x0)):
+                                        consumed_tokens.add((l_idx, t_idx - 1))
+                                    continue
+
+                        # Pattern A0b: [NUMBER/NO] [WORD(equipment)] [SYMBOL]
+                        if (
+                            t_idx + 2 < n_toks
+                            and (_re.match(r'^[0-9０-９]+$', toks[t_idx]["text"]) or is_in_no_col(toks[t_idx]["rect"].x0))
+                            and toks[t_idx + 1]["type"] == "WORD"
+                            and is_valid_symbol_token(toks[t_idx + 2])
+                        ):
+                            eq = classify_equipment_label(toks[t_idx + 1]["text"])
+                            if eq:
+                                lr = toks[t_idx + 1]["rect"]
+                                sr = toks[t_idx + 2]["rect"]
+                                pad = 2.0
+                                sym_box = fitz.Rect(sr.x0 - pad, sr.y0 - pad, sr.x1 + pad, sr.y1 + pad)
+                                candidate_boxes.append((sym_box, eq[0], "inline_numbered_sym"))
+                                inline_sym_rects.append(sym_box)
+                                associated_label_rects.append(toks[t_idx]["rect"] | lr | sym_box)
+                                consumed_tokens.update({(l_idx, t_idx), (l_idx, t_idx + 1), (l_idx, t_idx + 2)})
+                                continue
 
                         # Pattern A1: [WORD(label)] [DELIM in PAIR_DELIMS] [SYMBOL]  (e.g. '椅子＝○', '譜面台: ×')
                         if (
@@ -1156,7 +1226,8 @@ async def extract_regions(req: ExtractRequest):
                             and toks[t_idx + 1]["type"] == "WORD"
                         ):
                             gap = toks[t_idx + 1]["rect"].x0 - toks[t_idx]["rect"].x1
-                            if -2.0 <= gap <= 32.0:
+                            max_gap = 140.0 if is_in_sym_col(toks[t_idx + 1]["rect"].x0) else 45.0
+                            if -2.0 <= gap <= max_gap:
                                 eq = classify_equipment_label(toks[t_idx + 1]["text"])
                                 if eq:
                                     sr = toks[t_idx]["rect"]
@@ -1180,7 +1251,8 @@ async def extract_regions(req: ExtractRequest):
                             and is_valid_symbol_token(toks[t_idx + 1])
                         ):
                             gap = toks[t_idx + 1]["rect"].x0 - toks[t_idx]["rect"].x1
-                            if -2.0 <= gap <= 32.0:
+                            max_gap = 140.0 if is_in_sym_col(toks[t_idx + 1]["rect"].x0) else 45.0
+                            if -2.0 <= gap <= max_gap:
                                 eq = classify_equipment_label(toks[t_idx]["text"])
                                 if eq:
                                     lr = toks[t_idx]["rect"]
