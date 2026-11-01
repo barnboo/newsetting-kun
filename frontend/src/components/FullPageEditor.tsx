@@ -1,8 +1,9 @@
 import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, forwardRef } from 'react';
 import { flushSync } from 'react-dom';
-import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Ellipse, Line } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Text, Rect, Group, Ellipse, Line, Transformer } from 'react-konva';
+import Konva from 'konva';
 import useImage from 'use-image';
-import { Layers, Trash2, FileText, Shapes, Type, Spline, Copy, ClipboardPaste, CopyPlus, X, Check, Highlighter, Edit3, MessageSquareHeart, ExternalLink } from 'lucide-react';
+import { Layers, Trash2, FileText, Shapes, Type, Spline, Copy, ClipboardPaste, CopyPlus, X, Check, Highlighter, Edit3, MessageSquareHeart, ExternalLink, RotateCw } from 'lucide-react';
 import { HelpHeaderButtons } from './HelpAssistantModal';
 import { SubmenuContainer } from './ContextMenu';
 
@@ -22,6 +23,9 @@ export interface OverlayNode {
   isFilled?: boolean;
   color?: string;
   strokeWidth?: number;
+  rotation?: number;
+  scaleX?: number;
+  scaleY?: number;
 }
 
 export interface PreviewSettings {
@@ -584,6 +588,7 @@ interface SingleSceneCanvasProps {
   onSelectNode: (id: string | null) => void;
   onStartEditingNode?: (id: string) => void;
   onUpdateNodePos: (id: string, x: number, y: number) => void;
+  onUpdateNodeAttrs?: (id: string, attrs: Partial<OverlayNode>) => void;
   onCanvasDblClick?: (docX: number, docY: number) => void;
   onContextMenu?: (info: {
     clientX: number;
@@ -608,10 +613,28 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
   onSelectNode,
   onStartEditingNode,
   onUpdateNodePos,
+  onUpdateNodeAttrs,
   onCanvasDblClick,
   onContextMenu,
 }, ref) => {
   const [stageImg] = useImage(scene.stageImageUrl, 'anonymous');
+  const trRef = useRef<Konva.Transformer>(null);
+
+  useEffect(() => {
+    if (!trRef.current) return;
+    const stage = trRef.current.getStage();
+    if (!stage) return;
+    if (selectedId && !isExporting && editingId !== selectedId) {
+      const selectedNode = stage.findOne(`#${selectedId}`);
+      if (selectedNode) {
+        trRef.current.nodes([selectedNode]);
+        trRef.current.getLayer()?.batchDraw();
+        return;
+      }
+    }
+    trRef.current.nodes([]);
+    trRef.current.getLayer()?.batchDraw();
+  }, [selectedId, isExporting, editingId, nodes]);
 
   // Fallback crop if backgroundCrop is null/undefined
   const crop = (backgroundCrop && backgroundCrop.width > 0)
@@ -766,6 +789,7 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
               id={t.id}
               x={t.x}
               y={t.y}
+              rotation={t.rotation || 0}
               draggable
               onMouseDown={(e) => {
                 e.cancelBubble = true;
@@ -817,7 +841,13 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
               }}
               onDragEnd={(e) => {
                 e.cancelBubble = true;
-                onUpdateNodePos(t.id, Math.round(e.target.x()), Math.round(e.target.y()));
+                const newX = Math.round(e.target.x());
+                const newY = Math.round(e.target.y());
+                if (onUpdateNodeAttrs) {
+                  onUpdateNodeAttrs(t.id, { x: newX, y: newY });
+                } else {
+                  onUpdateNodePos(t.id, newX, newY);
+                }
               }}
               onMouseEnter={(e) => {
                 const container = e.target.getStage()?.container();
@@ -895,32 +925,6 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
                     </>
                   )}
                 </Group>
-              )}
-
-              {/* Selection Box Outline */}
-              {isSelected && !isExporting && !isShape && (
-                <Rect
-                  x={-4}
-                  y={-4}
-                  width={(t.text.length * t.fontSize * 0.9) + 8}
-                  height={t.fontSize + 8}
-                  stroke="#2563eb"
-                  strokeWidth={1.5}
-                  dash={[4, 3]}
-                  cornerRadius={3}
-                />
-              )}
-              {isSelected && !isExporting && isShape && (
-                <Rect
-                  x={-(halfW + 4)}
-                  y={-(halfH + 4)}
-                  width={effectiveW + 8}
-                  height={effectiveH + 8}
-                  stroke="#2563eb"
-                  strokeWidth={1.5}
-                  dash={[4, 3]}
-                  cornerRadius={3}
-                />
               )}
 
               {/* Render Shape or Text */}
@@ -1034,6 +1038,79 @@ const SingleSceneCanvas = forwardRef<any, SingleSceneCanvasProps>(({
             </Group>
           );
         })}
+
+        {/* Interactive Transformer for Resizing & Rotating Selected Shape or Text */}
+        {!isExporting && selectedId && editingId !== selectedId && (() => {
+          const selectedItem = nodes.find(n => n.id === selectedId);
+          if (!selectedItem) return null;
+          const isShape = selectedItem.type === 'circle' || selectedItem.type === 'shape';
+
+          return (
+            <Transformer
+              ref={trRef}
+              boundBoxFunc={(oldBox, newBox) => {
+                if (Math.abs(newBox.width) < 6 || Math.abs(newBox.height) < 6) return oldBox;
+                return newBox;
+              }}
+              rotateEnabled={true}
+              rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
+              rotationSnapTolerance={12}
+              keepRatio={!isShape}
+              enabledAnchors={
+                isShape
+                  ? ['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left']
+                  : ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+              }
+              borderStroke="#2563eb"
+              borderStrokeWidth={1.5 / dimensions.scale}
+              anchorStroke="#2563eb"
+              anchorFill="#ffffff"
+              anchorSize={8 / dimensions.scale}
+              anchorCornerRadius={2}
+              onTransformEnd={() => {
+                const stage = trRef.current?.getStage();
+                if (!stage) return;
+                const targetNode = stage.findOne(`#${selectedId}`);
+                if (!targetNode) return;
+
+                const sx = targetNode.scaleX();
+                const sy = targetNode.scaleY();
+                const rot = Math.round(targetNode.rotation());
+
+                targetNode.scaleX(1);
+                targetNode.scaleY(1);
+
+                if (isShape) {
+                  const effectiveW = selectedItem.width || (selectedItem.radius ? selectedItem.radius * 2 : 30);
+                  const effectiveH = selectedItem.height || (selectedItem.radius ? selectedItem.radius * 2 : 30);
+                  const newW = Math.max(6, Math.round(effectiveW * Math.abs(sx)));
+                  const newH = Math.max(6, Math.round(effectiveH * Math.abs(sy)));
+                  if (onUpdateNodeAttrs) {
+                    onUpdateNodeAttrs(selectedId, {
+                      x: Math.round(targetNode.x()),
+                      y: Math.round(targetNode.y()),
+                      rotation: rot,
+                      width: newW,
+                      height: newH,
+                      radius: Math.round(Math.min(newW, newH) / 2),
+                    });
+                  }
+                } else {
+                  const curFontSize = selectedItem.fontSize || 16;
+                  const newFontSize = Math.max(8, Math.round(curFontSize * Math.abs(sx)));
+                  if (onUpdateNodeAttrs) {
+                    onUpdateNodeAttrs(selectedId, {
+                      x: Math.round(targetNode.x()),
+                      y: Math.round(targetNode.y()),
+                      rotation: rot,
+                      fontSize: newFontSize,
+                    });
+                  }
+                }
+              }}
+            />
+          );
+        })()}
       </Layer>
     </Stage>
   );
@@ -2107,14 +2184,23 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
     });
   };
 
+  const handleUpdateNodeAttrs = (sId: string, id: string, attrs: Partial<OverlayNode>) => {
+    const currentList = sceneNodesMap[sId] || [];
+    const current = currentList.find(t => t.id === id);
+    if (!current) return;
+    pushHistory({
+      ...sceneNodesMap,
+      [sId]: currentList.map(t => (t.id === id ? { ...t, ...attrs } : t)),
+    });
+  };
+
   const handleUpdateNodePos = (sId: string, id: string, x: number, y: number) => {
-    const current = sceneNodesMap[sId]?.find(t => t.id === id);
-    if (current && (current.x !== x || current.y !== y)) {
-      pushHistory({
-        ...sceneNodesMap,
-        [sId]: (sceneNodesMap[sId] || []).map(t => (t.id === id ? { ...t, x, y } : t)),
-      });
-    }
+    handleUpdateNodeAttrs(sId, id, { x, y });
+  };
+
+  const handleUpdateSelectedRotation = (deg: number) => {
+    if (!selectedId) return;
+    handleUpdateNodeAttrs(activeSceneId, selectedId, { rotation: Math.round(deg) });
   };
 
   const FEEDBACK_FORM_URL = 'https://forms.gle/fujpm76eSrSao8549';
@@ -2725,6 +2811,7 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                       setEditingNodeId(id);
                     }}
                     onUpdateNodePos={(nodeId, x, y) => handleUpdateNodePos(sc.sceneId, nodeId, x, y)}
+                    onUpdateNodeAttrs={(nodeId, attrs) => handleUpdateNodeAttrs(sc.sceneId, nodeId, attrs)}
                     onCanvasDblClick={(docX, docY) => {
                       setActiveSceneIdx(idx);
                       handleAddText('新規テキスト', docX, docY, 22, true);
@@ -2768,6 +2855,8 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                           position: 'absolute',
                           left: `${editingNode.x * dimensions.scale}px`,
                           top: `${editingNode.y * dimensions.scale}px`,
+                          transform: editingNode.rotation ? `rotate(${editingNode.rotation}deg)` : undefined,
+                          transformOrigin: 'top left',
                           fontSize: `${Math.max(12, editingNode.fontSize * dimensions.scale)}px`,
                           lineHeight: 1.25,
                           width: `${Math.max(130, (editingNode.text.length * editingNode.fontSize * 0.95 + 32) * dimensions.scale)}px`,
@@ -3035,8 +3124,42 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                       </div>
                     )}
 
+                    {/* Rotation Angle Slider & Reset Button */}
+                    <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                          <RotateCw className="w-3.5 h-3.5 text-[#007AFF]" />
+                          <span>回転角度:</span>
+                        </label>
+                        <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                          {Math.round(selectedNode.rotation || 0)}°
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          step={1}
+                          value={Math.round(selectedNode.rotation || 0)}
+                          onChange={(e) => handleUpdateSelectedRotation(Number(e.target.value))}
+                          className="flex-1 accent-[#007AFF] cursor-pointer"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateSelectedRotation(0)}
+                          className="px-2 py-0.5 text-[10px] font-bold rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 cursor-pointer"
+                          title="角度を0°にリセット"
+                        >
+                          0°
+                        </button>
+                      </div>
+                    </div>
+
                     <p className="text-[10px] text-slate-500 leading-tight space-y-0.5">
-                      <span>※キャンバス上の{isShape ? '図形' : '文字'}を直接ドラッグして移動できます。</span>
+                      <span>※キャンバス上の四隅ハンドルをドラッグして拡大縮小、上部丸ハンドルで自由に回転できます。</span>
+                      <br />
+                      <span>※{isShape ? '図形' : '文字'}を直接ドラッグして移動できます。</span>
                       <br />
                       <span className="text-slate-600 font-medium">※選択中にBackspaceまたはDeleteキーで削除できます。</span>
                     </p>
