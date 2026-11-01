@@ -10,10 +10,6 @@ from .primitives import PrimitivesCollection, CharPrimitive, VectorClusterPrimit
 from .roi_filter import StageRoiInfo, is_instruction_or_caution_text, is_dummy_aggregation_or_selection_table
 from .config import cfg
 
-# ==============================================================================
-# Mode A: Table Parser with Hungarian Role Assignment
-# ==============================================================================
-
 def get_span_text(sp: Dict[str, Any]) -> str:
     if "text" in sp and sp["text"]:
         return sp["text"]
@@ -27,443 +23,281 @@ class TableCell:
         self.rasters: List[RasterPrimitive] = []
         self.chars: List[CharPrimitive] = []
 
-class TableCandidate:
-    def __init__(self, rows: List[List[TableCell]]):
-        self.rows = rows  # rows[r][c]
+# ==============================================================================
+# Mode A: Strictly Limited to Physical Solid Line Grid Tables
+# ==============================================================================
 
 def parse_mode_a_tables(page: fitz.Page, prims: PrimitivesCollection, stage_info: StageRoiInfo) -> List[ExtractedLegendItem]:
+    """
+    Mode A ONLY operates on tables with explicit physical grid lines (horizontal and vertical lines
+    forming closed/bounded grid cells). All borderless or whitespace aligned text is left for Mode B.
+    """
     items: List[ExtractedLegendItem] = []
-    
-    # 1. Collect text lines outside the stage ROI
-    # Group rawdict characters into lines and words
-    raw = page.get_text("rawdict")
-    raw_lines: List[Dict[str, Any]] = []
-    for block in raw.get("blocks", []):
-        if block.get("type") == 0:
-            for l in block.get("lines", []):
-                line_rect = fitz.Rect(l["bbox"])
-                # Exclude lines strictly inside stage ROI
-                if stage_info.is_inside_stage(line_rect):
-                    continue
-                line_text = "".join(get_span_text(s) for s in l.get("spans", [])).strip()
-                if not line_text:
-                    continue
-                if is_instruction_or_caution_text(line_text):
-                    continue
-                raw_lines.append({
-                    "rect": line_rect,
-                    "text": line_text,
-                    "spans": l.get("spans", [])
-                })
+    page_rect = fitz.Rect(page.rect)
 
-    if not raw_lines:
-        return items
-
-    # Check for dummy aggregation tables (e.g. ひな壇, 1列目〜6列目, 要不要)
-    all_table_text = [l["text"] for l in raw_lines]
-    if is_dummy_aggregation_or_selection_table(all_table_text):
-        # Filter out lines belonging to aggregation tables
-        filtered_lines = []
-        for l in raw_lines:
-            t = l["text"]
-            if any(h in t for h in cfg.exclude_table_headers):
-                continue
-            filtered_lines.append(l)
-        raw_lines = filtered_lines
-
-    # 2. Extract drawing lines / rects that define grid tables outside stage ROI
+    # 1. Detect physical horizontal and vertical lines from page drawings
     drawings = page.get_drawings()
     h_lines: List[Tuple[float, float, float]] = []  # (y, x0, x1)
     v_lines: List[Tuple[float, float, float]] = []  # (x, y0, y1)
-    table_rects: List[fitz.Rect] = []
 
     for d in drawings:
         d_rect = fitz.Rect(d["rect"])
+        # Exclude drawings strictly inside stage ROI
         if stage_info.is_inside_stage(d_rect):
             continue
         for it in d.get("items", []):
             cmd = it[0]
             if cmd == "l":
                 p1, p2 = it[1], it[2]
-                if abs(p1.y - p2.y) < 1.0 and abs(p1.x - p2.x) >= 20.0:
+                if abs(p1.y - p2.y) < 1.0 and abs(p1.x - p2.x) >= 25.0:
                     h_lines.append(((p1.y + p2.y) / 2.0, min(p1.x, p2.x), max(p1.x, p2.x)))
                 elif abs(p1.x - p2.x) < 1.0 and abs(p1.y - p2.y) >= 20.0:
                     v_lines.append(((p1.x + p2.x) / 2.0, min(p1.y, p2.y), max(p1.y, p2.y)))
             elif cmd == "re":
                 r = fitz.Rect(it[1])
-                if r.width >= 40.0 and r.height >= 30.0 and r.width * r.height < page.rect.width * page.rect.height * 0.4:
-                    table_rects.append(r)
+                # Border line rectangles
+                if r.width >= 25.0 and r.height <= 2.0:
+                    h_lines.append(((r.y0 + r.y1) / 2.0, r.x0, r.x1))
+                elif r.height >= 20.0 and r.width <= 2.0:
+                    v_lines.append(((r.x0 + r.x1) / 2.0, r.y0, r.y1))
 
-    # 3. Form Table Candidate Blocks (from explicit borders or whitespace alignment)
-    # Group lines by Y clusters (rows)
-    # Sort lines by Y0
-    raw_lines.sort(key=lambda l: (round(l["rect"].y0 / 4.0), l["rect"].x0))
+    # A physical grid table requires at least 3 horizontal lines and at least 3 vertical lines
+    if len(h_lines) < 3 or len(v_lines) < 3:
+        return []
 
-    # Cluster lines that are vertically aligned or spatially proximate
-    line_clusters: List[List[Dict[str, Any]]] = []
-    current_cluster: List[Dict[str, Any]] = []
+    # Cluster H lines by Y (within 2pt)
+    h_clusters: Dict[int, List[Tuple[float, float, float]]] = {}
+    for y, x0, x1 in h_lines:
+        ky = round(y / 2.0)
+        h_clusters.setdefault(ky, []).append((y, x0, x1))
 
-    for l in raw_lines:
-        if not current_cluster:
-            current_cluster.append(l)
+    # Cluster V lines by X (within 2pt)
+    v_clusters: Dict[int, List[Tuple[float, float, float]]] = {}
+    for x, y0, y1 in v_lines:
+        kx = round(x / 2.0)
+        v_clusters.setdefault(kx, []).append((x, y0, y1))
+
+    if len(h_clusters) < 3 or len(v_clusters) < 3:
+        return []
+
+    # Get distinct sorted Y levels and X levels
+    y_levels = sorted([sum(l[0] for l in group)/len(group) for group in h_clusters.values()])
+    x_levels = sorted([sum(l[0] for l in group)/len(group) for group in v_clusters.values()])
+
+    # Find contiguous grid regions
+    grid_y_spans: List[List[float]] = []
+    curr_y_span = [y_levels[0]]
+    for i in range(1, len(y_levels)):
+        gap = y_levels[i] - y_levels[i-1]
+        if 10.0 <= gap <= 55.0:  # reasonable row height
+            curr_y_span.append(y_levels[i])
         else:
-            prev_y1 = max(item["rect"].y1 for item in current_cluster)
-            curr_y0 = l["rect"].y0
-            if (curr_y0 - prev_y1) < 25.0:  # reasonable row gap
-                current_cluster.append(l)
-            else:
-                if len(current_cluster) >= 2:
-                    line_clusters.append(current_cluster)
-                current_cluster = [l]
-    if len(current_cluster) >= 2:
-        line_clusters.append(current_cluster)
+            if len(curr_y_span) >= 3:
+                grid_y_spans.append(curr_y_span)
+            curr_y_span = [y_levels[i]]
+    if len(curr_y_span) >= 3:
+        grid_y_spans.append(curr_y_span)
 
-    for cluster in line_clusters:
-        # Check Multi-column separation via repeating headers or empty channel gap
-        tokens_in_cluster = []
-        for l in cluster:
-            for sp in l.get("spans", []):
-                stext = get_span_text(sp).strip()
-                if stext:
-                    tokens_in_cluster.append({"text": stext, "rect": fitz.Rect(sp.get("bbox"))})
+    if not grid_y_spans:
+        return []
 
-        if not tokens_in_cluster:
+    for y_span in grid_y_spans:
+        table_top, table_bottom = y_span[0], y_span[-1]
+        # Find V lines covering this Y span
+        v_in_span = []
+        for x in x_levels:
+            # Check if there is a vertical line spanning table_top to table_bottom
+            matching_v = any(abs(l[0] - x) < 3.0 and l[1] <= table_top + 5.0 and l[2] >= table_bottom - 5.0 for l in v_lines)
+            if matching_v:
+                v_in_span.append(x)
+
+        if len(v_in_span) < 3:
             continue
 
-        header_keywords = ["備品名", "品名", "名称", "備品", "楽器名", "no", "no.", "№", "番号", "記号"]
-        keyword_positions: Dict[str, List[float]] = {}
-        for t in tokens_in_cluster:
-            tl = t["text"].lower()
-            for hk in header_keywords:
-                if hk in tl:
-                    keyword_positions.setdefault(hk, []).append(t["rect"].x0)
-                    break
+        table_rect = fitz.Rect(v_in_span[0] - 2.0, table_top - 2.0, v_in_span[-1] + 2.0, table_bottom + 2.0)
 
-        cuts = []
-        # A multi-column table has repeating header columns (e.g. 備品名 appears 2+ times, or 記号 appears 2+ times)
-        for hk, pos_list in keyword_positions.items():
-            pos_list.sort()
-            for i in range(len(pos_list) - 1):
-                if pos_list[i+1] - pos_list[i] > 70.0:
-                    left_x1 = max([t["rect"].x1 for t in tokens_in_cluster if t["rect"].x1 <= pos_list[i+1]], default=pos_list[i])
-                    cuts.append((left_x1 + pos_list[i+1]) / 2.0)
+        # Collect text and primitives inside this physical grid table
+        raw = page.get_text("rawdict", clip=table_rect)
+        table_texts: List[str] = []
+        for b in raw.get("blocks", []):
+            if b.get("type") == 0:
+                for l in b.get("lines", []):
+                    lt = "".join(get_span_text(s) for s in l.get("spans", [])).strip()
+                    if lt:
+                        table_texts.append(lt)
 
-        valid_cuts = []
-        for c in cuts:
-            left_cols = set(round(t["rect"].x0 / 12.0) for t in tokens_in_cluster if t["rect"].x0 < c)
-            right_cols = set(round(t["rect"].x0 / 12.0) for t in tokens_in_cluster if t["rect"].x0 >= c)
-            if len(left_cols) >= 2 and len(right_cols) >= 2:
-                valid_cuts.append(c)
+        # REJECT if dummy aggregation or selection table
+        if is_dummy_aggregation_or_selection_table(table_texts):
+            continue
 
-        sub_clusters = []
-        if valid_cuts:
-            x_cuts = [-1.0] + sorted(list(set(valid_cuts))) + [999999.0]
-            for c_idx in range(len(x_cuts) - 1):
-                x_lo, x_hi = x_cuts[c_idx], x_cuts[c_idx + 1]
-                sub = [l for l in cluster if x_lo <= (l["rect"].x0 + l["rect"].x1)/2.0 < x_hi]
-                if len(sub) >= 2:
-                    sub_clusters.append(sub)
-        else:
-            sub_clusters.append(cluster)
+        # WHITELIST REQUIREMENT: The table MUST contain at least 2 distinct equipment keywords
+        matched_equip_count = sum(1 for kw in cfg.equipment_keywords if any(kw in t for t in table_texts))
+        if matched_equip_count < 2:
+            continue
 
-        for sub in sub_clusters:
-            parsed = parse_single_table_block(sub, prims, stage_info)
-            items.extend(parsed)
+        # Construct cells from grid intersections
+        num_rows = len(y_span) - 1
+        num_cols = len(v_in_span) - 1
+        grid_cells: List[List[TableCell]] = []
 
-    return items
+        for r_idx in range(num_rows):
+            row_cells: List[TableCell] = []
+            cy0, cy1 = y_span[r_idx], y_span[r_idx + 1]
+            for c_idx in range(num_cols):
+                cx0, cx1 = v_in_span[c_idx], v_in_span[c_idx + 1]
+                c_rect = fitz.Rect(cx0, cy0, cx1, cy1)
+                cell = TableCell(c_rect, "")
 
-def parse_single_table_block(
-    lines: List[Dict[str, Any]],
-    prims: PrimitivesCollection,
-    stage_info: StageRoiInfo
-) -> List[ExtractedLegendItem]:
-    items: List[ExtractedLegendItem] = []
+                # Assign chars
+                for ch in prims.chars:
+                    if c_rect.contains(fitz.Point((ch.rect.x0 + ch.rect.x1)/2.0, (ch.rect.y0 + ch.rect.y1)/2.0)):
+                        cell.chars.append(ch)
+                        cell.text += ch.norm_char
 
-    # Decompose lines into tokens (cells) by spans or char gaps
-    row_groups: Dict[int, List[Dict[str, Any]]] = {}
-    for l in lines:
-        ry = round(l["rect"].y0 / 6.0)
-        row_groups.setdefault(ry, []).append(l)
+                # Assign vectors (excluding table borders)
+                for v in prims.vectors:
+                    if c_rect.contains(fitz.Point((v.rect.x0 + v.rect.x1)/2.0, (v.rect.y0 + v.rect.y1)/2.0)):
+                        # Ensure v is not the cell border
+                        if v.rect.width < (cx1 - cx0 - 2.0) and v.rect.height < (cy1 - cy0 - 2.0):
+                            cell.vectors.append(v)
 
-    # Sort row keys
-    sorted_ry = sorted(row_groups.keys())
-    if len(sorted_ry) < 2:
-        return items
+                # Assign rasters
+                for img in prims.rasters:
+                    if c_rect.contains(fitz.Point((img.rect.x0 + img.rect.x1)/2.0, (img.rect.y0 + img.rect.y1)/2.0)):
+                        cell.rasters.append(img)
 
-    # Analyze column positions across all rows
-    all_token_rects: List[fitz.Rect] = []
-    rows_data: List[List[Dict[str, Any]]] = []
+                row_cells.append(cell)
+            grid_cells.append(row_cells)
 
-    for ry in sorted_ry:
-        r_lines = row_groups[ry]
-        # Split tokens inside each line if spans or spaces separate them
-        tokens_in_row = []
-        for l in r_lines:
-            for sp in l.get("spans", []):
-                stext = get_span_text(sp).strip()
-                if not stext:
+        # Score columns for Hungarian role assignment
+        ROLES = ['no', 'name', 'symbol', 'quantity']
+        score_matrix = np.zeros((len(ROLES), num_cols), dtype=float)
+
+        for c_idx in range(num_cols):
+            col_cells = [grid_cells[r][c_idx] for r in range(num_rows)]
+            col_texts = [cell.text.strip() for cell in col_cells if cell.text.strip()]
+            header_text = col_texts[0].lower() if col_texts else ""
+            data_texts = col_texts[1:] if len(col_texts) > 1 else col_texts
+
+            # No score
+            s_no = 0.0
+            for hint in cfg.column_header_hints.get("no", []):
+                if hint in header_text:
+                    s_no += 15.0
+            int_count = sum(1 for t in data_texts if t.isdigit())
+            if int_count >= max(1, len(data_texts) * 0.6):
+                s_no += 10.0
+            score_matrix[0, c_idx] = s_no
+
+            # Name score
+            s_name = 0.0
+            for hint in cfg.column_header_hints.get("name", []):
+                if hint in header_text:
+                    s_name += 15.0
+            kw_hits = sum(1 for t in data_texts if any(kw in t for kw in cfg.equipment_keywords))
+            s_name += kw_hits * 6.0
+            score_matrix[1, c_idx] = s_name
+
+            # Symbol score
+            s_sym = 0.0
+            for hint in cfg.column_header_hints.get("symbol", []):
+                if hint in header_text:
+                    s_sym += 15.0
+            vec_count = sum(len(c.vectors) + len(c.rasters) for c in col_cells[1:])
+            s_sym += vec_count * 6.0
+            sym_char_count = sum(1 for t in data_texts if any(ch in cfg.standard_symbols for ch in t))
+            s_sym += sym_char_count * 5.0
+            if int_count >= max(2, len(data_texts) * 0.7) and vec_count == 0:
+                s_sym -= 30.0  # strictly penalize numbers
+            score_matrix[2, c_idx] = s_sym
+
+            # Quantity score
+            s_qty = 0.0
+            for hint in cfg.column_header_hints.get("quantity", []):
+                if hint in header_text:
+                    s_qty += 15.0
+            score_matrix[3, c_idx] = s_qty
+
+        # Hungarian assignment
+        dim = max(len(ROLES), num_cols)
+        cost = np.zeros((dim, dim), dtype=float)
+        for r in range(len(ROLES)):
+            for c in range(num_cols):
+                cost[r, c] = -score_matrix[r, c]
+
+        row_ind, col_ind = linear_sum_assignment(cost)
+        role_map = {}
+        for r_idx, c_idx in zip(row_ind, col_ind):
+            if r_idx < len(ROLES) and c_idx < num_cols:
+                role_map[ROLES[r_idx]] = c_idx
+
+        name_c = role_map.get('name')
+        sym_c = role_map.get('symbol')
+
+        if name_c is not None and sym_c is not None and name_c != sym_c:
+            for r_idx in range(1, num_rows):
+                name_cell = grid_cells[r_idx][name_c]
+                sym_cell = grid_cells[r_idx][sym_c]
+
+                raw_name = name_cell.text.strip()
+                # STRICT WHITELIST CHECK: must match an equipment keyword
+                matched_kw = next((kw for kw in cfg.equipment_keywords if kw in raw_name), None)
+                if not matched_kw:
                     continue
-                srect = fitz.Rect(sp.get("bbox"))
-                tokens_in_row.append({"text": stext, "rect": srect})
-                all_token_rects.append(srect)
-        if tokens_in_row:
-            tokens_in_row.sort(key=lambda t: t["rect"].x0)
-            rows_data.append(tokens_in_row)
 
-    if len(rows_data) < 2:
-        return items
+                # Find symbol box
+                sym_box: Optional[Box] = None
+                sym_type = SymbolType.VECTOR_DRAWING.value
+                raw_sym = sym_cell.text.strip()
 
-    # Group tokens into column intervals by X0 (left-alignment clustering)
-    col_x_centers: List[float] = []
-    for r in rows_data:
-        for t in r:
-            x0 = t["rect"].x0
-            # Match to existing col left-edge
-            matched = False
-            for i, cc in enumerate(col_x_centers):
-                if abs(x0 - cc) < 22.0:
-                    col_x_centers[i] = (cc + x0) / 2.0
-                    matched = True
-                    break
-            if not matched:
-                col_x_centers.append(x0)
+                if sym_cell.vectors:
+                    u_v = fitz.Rect(sym_cell.vectors[0].rect)
+                    for v in sym_cell.vectors[1:]:
+                        u_v |= v.rect
+                    sym_box = Box.from_fitz_rect(u_v)
+                    sym_type = SymbolType.VECTOR_DRAWING.value
+                elif sym_cell.rasters:
+                    u_r = fitz.Rect(sym_cell.rasters[0].rect)
+                    for img in sym_cell.rasters[1:]:
+                        u_r |= img.rect
+                    sym_box = Box.from_fitz_rect(u_r)
+                    sym_type = SymbolType.RASTER_IMAGE.value
+                elif sym_cell.chars:
+                    chosen_ch = next((ch for ch in sym_cell.chars if ch.is_symbol), sym_cell.chars[0])
+                    sym_box = Box.from_fitz_rect(chosen_ch.rect)
+                    sym_type = SymbolType.TEXT_GLYPH.value
+                    raw_sym = chosen_ch.norm_char
+                elif sym_cell.rect.width > 0:
+                    # Inner cell region with inset to exclude cell borders
+                    inner_rect = fitz.Rect(sym_cell.rect.x0 + 2.0, sym_cell.rect.y0 + 2.0, sym_cell.rect.x1 - 2.0, sym_cell.rect.y1 - 2.0)
+                    sym_box = Box.from_fitz_rect(inner_rect)
+                    sym_type = SymbolType.VECTOR_DRAWING.value
 
-    col_x_centers.sort()
-    num_cols = len(col_x_centers)
-    if num_cols < 2:
-        return items
-
-    # Construct grid matrix of cells: grid[row_idx][col_idx]
-    grid_cells: List[List[TableCell]] = []
-    for r_tokens in rows_data:
-        row_cells = [TableCell(fitz.Rect(0, 0, 0, 0), "") for _ in range(num_cols)]
-        for t in r_tokens:
-            x0 = t["rect"].x0
-            # assign to nearest col
-            best_col = min(range(num_cols), key=lambda c: abs(x0 - col_x_centers[c]))
-            cell = row_cells[best_col]
-            if not cell.text:
-                cell.text = t["text"]
-                cell.rect = fitz.Rect(t["rect"])
-            else:
-                cell.text += " " + t["text"]
-                cell.rect |= fitz.Rect(t["rect"])
-        grid_cells.append(row_cells)
-
-    # Attach vectors and rasters to cells
-    for r_idx, row in enumerate(grid_cells):
-        row_cells_with_rect = [c for c in row if c.rect.height > 0]
-        ry0 = min((c.rect.y0 for c in row_cells_with_rect), default=0.0)
-        ry1 = max((c.rect.y1 for c in row_cells_with_rect), default=0.0)
-
-        for c_idx, cell in enumerate(row):
-            if cell.rect.width > 0:
-                exp_rect = fitz.Rect(cell.rect.x0 - 4.0, cell.rect.y0 - 2.0, cell.rect.x1 + 4.0, cell.rect.y1 + 2.0)
-            elif row_cells_with_rect:
-                cx = col_x_centers[c_idx]
-                prev_cx = col_x_centers[c_idx - 1] if c_idx > 0 else (cx - 40.0)
-                next_cx = col_x_centers[c_idx + 1] if c_idx < num_cols - 1 else (cx + 40.0)
-                col_x0 = (prev_cx + cx) / 2.0
-                col_x1 = (cx + next_cx) / 2.0
-                exp_rect = fitz.Rect(col_x0, ry0 - 4.0, col_x1, ry1 + 4.0)
-            else:
-                continue
-
-            for v in prims.vectors:
-                if exp_rect.intersects(v.rect):
-                    cell.vectors.append(v)
-                    if cell.rect.width <= 0:
-                        cell.rect = fitz.Rect(v.rect)
-                    else:
-                        cell.rect |= v.rect
-
-            for img in prims.rasters:
-                if exp_rect.intersects(img.rect):
-                    cell.rasters.append(img)
-                    if cell.rect.width <= 0:
-                        cell.rect = fitz.Rect(img.rect)
-                    else:
-                        cell.rect |= img.rect
-
-            for ch in prims.chars:
-                if exp_rect.intersects(ch.rect):
-                    cell.chars.append(ch)
-
-    # 4. Hungarian Algorithm Role Assignment
-    # Roles: 0: 'no', 1: 'name', 2: 'symbol', 3: 'quantity'
-    ROLES = ['no', 'name', 'symbol', 'quantity']
-    num_roles = len(ROLES)
-
-    # Compute scores for each column
-    score_matrix = np.zeros((num_roles, num_cols), dtype=float)
-
-    for c_idx in range(num_cols):
-        col_cells = [grid_cells[r_idx][c_idx] for r_idx in range(len(grid_cells))]
-        col_texts = [cell.text.strip() for cell in col_cells if cell.text.strip()]
-        header_text = col_texts[0].lower() if col_texts else ""
-        data_texts = col_texts[1:] if len(col_texts) > 1 else col_texts
-
-        # --- Role 'no' scoring ---
-        s_no = 0.0
-        for hint in cfg.column_header_hints.get("no", []):
-            if hint in header_text:
-                s_no += 12.0
-                break
-        # Check if data cells are integers (1, 2, 3...)
-        int_count = sum(1 for t in data_texts if t.isdigit())
-        if int_count >= max(1, len(data_texts) * 0.6):
-            s_no += 10.0
-            # Check sequential increase
-            nums = [int(t) for t in data_texts if t.isdigit()]
-            if len(nums) >= 2 and all(nums[i] <= nums[i+1] for i in range(len(nums)-1)):
-                s_no += 8.0
-        score_matrix[0, c_idx] = s_no
-
-        # --- Role 'name' scoring ---
-        s_name = 0.0
-        for hint in cfg.column_header_hints.get("name", []):
-            if hint in header_text:
-                s_name += 12.0
-                break
-        kw_count = sum(1 for t in data_texts if any(kw in t for kw in cfg.equipment_keywords))
-        s_name += kw_count * 5.0
-        # Japanese noun length >= 2
-        jp_count = sum(1 for t in data_texts if len(re.findall(r'[\u3040-\u30ff\u4e00-\u9faf]', t)) >= 2)
-        s_name += jp_count * 2.0
-        score_matrix[1, c_idx] = s_name
-
-        # --- Role 'symbol' scoring ---
-        s_sym = 0.0
-        for hint in cfg.column_header_hints.get("symbol", []):
-            if hint in header_text:
-                s_sym += 12.0
-                break
-        # Vector / Raster elements present
-        vector_count = sum(len(cell.vectors) + len(cell.rasters) for cell in col_cells[1:])
-        s_sym += vector_count * 5.0
-        # Character symbols
-        sym_char_count = 0
-        for t in data_texts:
-            if any(ch in cfg.standard_symbols for ch in t):
-                sym_char_count += 1
-            elif any(ch in stage_info.layout_symbol_set for ch in t):
-                sym_char_count += 1
-        s_sym += sym_char_count * 4.0
-
-        # PENALTY: strictly penalize pure digit numbers from being symbol column!
-        if int_count >= max(2, len(data_texts) * 0.7) and vector_count == 0:
-            s_sym -= 25.0
-
-        score_matrix[2, c_idx] = s_sym
-
-        # --- Role 'quantity' scoring ---
-        s_qty = 0.0
-        for hint in cfg.column_header_hints.get("quantity", []):
-            if hint in header_text:
-                s_qty += 12.0
-                break
-        qty_unit_count = sum(1 for t in data_texts if any(u in t for u in ["脚", "台", "本", "個", "式", "要", "不要"]))
-        s_qty += qty_unit_count * 4.0
-        score_matrix[3, c_idx] = s_qty
-
-    # Hungarian assignment: we want to maximize total score -> minimize negative score
-    # Create square cost matrix of size max(num_roles, num_cols)
-    dim = max(num_roles, num_cols)
-    cost = np.zeros((dim, dim), dtype=float)
-    # Fill actual scores
-    for r in range(num_roles):
-        for c in range(num_cols):
-            cost[r, c] = -score_matrix[r, c]
-
-    row_ind, col_ind = linear_sum_assignment(cost)
-    role_to_col: Dict[str, int] = {}
-    for r_idx, c_idx in zip(row_ind, col_ind):
-        if r_idx < num_roles and c_idx < num_cols:
-            role_to_col[ROLES[r_idx]] = c_idx
-
-    name_col = role_to_col.get('name')
-    sym_col = role_to_col.get('symbol')
-
-    if name_col is None or sym_col is None or name_col == sym_col:
-        return items
-
-    # Ensure symbol column actually has positive score
-    if score_matrix[2, sym_col] <= 0.0 and score_matrix[1, name_col] <= 0.0:
-        return items
-
-    # Determine whether row 0 is header
-    start_row = 0
-    header_check = grid_cells[0][name_col].text.lower()
-    if any(h in header_check for h in cfg.column_header_hints.get("name", [])) or \
-       any(h in grid_cells[0][sym_col].text.lower() for h in cfg.column_header_hints.get("symbol", [])) or \
-       "no" in grid_cells[0][role_to_col.get("no", sym_col)].text.lower():
-        start_row = 1
-
-    for r_idx in range(start_row, len(grid_cells)):
-        name_cell = grid_cells[r_idx][name_col]
-        sym_cell = grid_cells[r_idx][sym_col]
-
-        raw_name = name_cell.text.strip()
-        if not raw_name:
-            continue
-
-        # Clean name
-        clean_name = re.sub(r'[\r\n\t]+', ' ', raw_name).strip()
-        if not clean_name or clean_name.isdigit():
-            continue
-
-        # Determine symbol box & type
-        sym_box: Optional[Box] = None
-        sym_type = SymbolType.VECTOR_DRAWING.value
-        raw_sym = sym_cell.text.strip()
-
-        # Check vectors
-        if sym_cell.vectors:
-            u_vec = fitz.Rect(sym_cell.vectors[0].rect)
-            for v in sym_cell.vectors[1:]:
-                u_vec |= v.rect
-            sym_box = Box.from_fitz_rect(u_vec)
-            sym_type = SymbolType.VECTOR_DRAWING.value
-        elif sym_cell.rasters:
-            u_ras = fitz.Rect(sym_cell.rasters[0].rect)
-            for r in sym_cell.rasters[1:]:
-                u_ras |= r.rect
-            sym_box = Box.from_fitz_rect(u_ras)
-            sym_type = SymbolType.RASTER_IMAGE.value
-        elif sym_cell.chars:
-            # Look for standard symbol chars
-            chosen_ch = next((ch for ch in sym_cell.chars if ch.is_symbol), None)
-            if not chosen_ch:
-                chosen_ch = next((ch for ch in sym_cell.chars if ch.norm_char in stage_info.layout_symbol_set), None)
-            if not chosen_ch:
-                chosen_ch = sym_cell.chars[0]
-
-            sym_box = Box.from_fitz_rect(chosen_ch.rect)
-            sym_type = SymbolType.TEXT_GLYPH.value
-            raw_sym = chosen_ch.norm_char
-        elif sym_cell.rect.width > 0:
-            sym_box = Box.from_fitz_rect(sym_cell.rect)
-            sym_type = SymbolType.TEXT_GLYPH.value
-
-        if sym_box is not None:
-            # Label box
-            label_box = Box.from_fitz_rect(name_cell.rect) if name_cell.rect.width > 0 else sym_box
-            items.append(ExtractedLegendItem(
-                name=clean_name,
-                symbol_box=sym_box,
-                label_box=label_box,
-                symbol_type=sym_type,
-                confidence=0.95,
-                source_mode="table",
-                raw_symbol_text=raw_sym
-            ))
+                if sym_box is not None:
+                    items.append(ExtractedLegendItem(
+                        name=raw_name,
+                        symbol_box=sym_box,
+                        label_box=Box.from_fitz_rect(name_cell.rect),
+                        symbol_type=sym_type,
+                        confidence=0.98,
+                        source_mode="table",
+                        raw_symbol_text=raw_sym,
+                        priority=3
+                    ))
 
     return items
 
 
 # ==============================================================================
-# Mode B: Inline Notation & Margin Miniature Vector Figures
+# Mode B: Space-Transparent Chunking & Local Pair Parser
 # ==============================================================================
+
+class CharSpanGroup:
+    def __init__(self, chars: List[CharPrimitive]):
+        self.chars = chars
+        self.rect = fitz.Rect(chars[0].rect)
+        for c in chars[1:]:
+            self.rect |= c.rect
 
 def parse_mode_b_inlines_and_margins(
     page: fitz.Page,
@@ -472,149 +306,391 @@ def parse_mode_b_inlines_and_margins(
 ) -> List[ExtractedLegendItem]:
     items: List[ExtractedLegendItem] = []
 
-    # 1. Parse Inline notation
-    raw = page.get_text("rawdict")
-    for block in raw.get("blocks", []):
-        if block.get("type") == 0:
-            for l in block.get("lines", []):
-                line_rect = fitz.Rect(l["bbox"])
-                if stage_info.is_inside_stage(line_rect):
-                    continue
-                line_text = "".join(get_span_text(s) for s in l.get("spans", [])).strip()
-                if not line_text or is_instruction_or_caution_text(line_text):
-                    continue
+    # Detect vertical drawing lines for chunk boundary splitting
+    drawings = page.get_drawings()
+    v_line_segments: List[Tuple[float, float, float]] = []  # (x, y0, y1)
+    for d in drawings:
+        for it in d.get("items", []):
+            if it[0] == "l":
+                p1, p2 = it[1], it[2]
+                if abs(p1.x - p2.x) < 1.0 and abs(p1.y - p2.y) >= 12.0:
+                    v_line_segments.append(((p1.x + p2.x)/2.0, min(p1.y, p2.y), max(p1.y, p2.y)))
 
-                # Check if this line has inline legend candidates
-                parsed_inlines = parse_single_inline_line(l, prims, stage_info)
-                items.extend(parsed_inlines)
+    # Step 1: Group chars into lines by vertical alignment
+    all_chars = sorted(prims.chars, key=lambda c: (c.rect.y0, c.rect.x0))
+    raw_lines: List[List[CharPrimitive]] = []
 
-    # 2. Parse Margin Miniature Vector Drawings
-    # Standalone vectors in margins with nearby labels
-    parsed_margins = parse_margin_miniatures(page, prims, stage_info)
-    items.extend(parsed_margins)
+    for c in all_chars:
+        # Exclude whitespace
+        if not c.norm_char or c.norm_char.isspace():
+            continue
+
+        cy = (c.rect.y0 + c.rect.y1) / 2.0
+        ch_h = max(2.0, c.rect.height)
+
+        matched_line: Optional[List[CharPrimitive]] = None
+        for l in raw_lines:
+            line_y = sum((ch.rect.y0 + ch.rect.y1)/2.0 for ch in l) / len(l)
+            line_h = sum(ch.rect.height for ch in l) / len(l)
+            if abs(cy - line_y) <= 0.60 * line_h:
+                matched_line = l
+                break
+
+        if matched_line is not None:
+            matched_line.append(c)
+        else:
+            raw_lines.append([c])
+
+    # Step 2: Split lines into Local Chunks
+    chunks: List[List[CharPrimitive]] = []
+    max_chunk_gap = float(cfg.thresholds.get("max_line_chunk_gap_pt", 80.0))
+
+    for l in raw_lines:
+        l.sort(key=lambda c: c.rect.x0)
+        curr_chunk: List[CharPrimitive] = []
+
+        for c in l:
+            if not curr_chunk:
+                curr_chunk.append(c)
+            else:
+                prev_c = curr_chunk[-1]
+                gap = c.rect.x0 - prev_c.rect.x1
+
+                # Check if a vertical line segment crosses between prev_c and c
+                crosses_vline = False
+                for vx, vy0, vy1 in v_line_segments:
+                    if prev_c.rect.x1 < vx < c.rect.x0:
+                        y_mid = (c.rect.y0 + c.rect.y1) / 2.0
+                        if vy0 - 2.0 <= y_mid <= vy1 + 2.0:
+                            crosses_vline = True
+                            break
+
+                if gap > max_chunk_gap or crosses_vline:
+                    if curr_chunk:
+                        chunks.append(curr_chunk)
+                    curr_chunk = [c]
+                else:
+                    curr_chunk.append(c)
+
+        if curr_chunk:
+            chunks.append(curr_chunk)
+
+    # Step 3 & 4 & 5: Parse each local chunk
+    for chunk in chunks:
+        chunk_items = parse_single_chunk(chunk, prims, stage_info)
+        items.extend(chunk_items)
+
+    # Margin standalone vector miniatures (outside stage ROI)
+    margin_items = parse_margin_miniatures(page, prims, stage_info)
+    items.extend(margin_items)
 
     return items
 
-def parse_single_inline_line(
-    line_dict: Dict[str, Any],
+def parse_single_chunk(
+    chunk_chars: List[CharPrimitive],
     prims: PrimitivesCollection,
     stage_info: StageRoiInfo
 ) -> List[ExtractedLegendItem]:
     items: List[ExtractedLegendItem] = []
-    spans = line_dict.get("spans", [])
-    if not spans:
+    if not chunk_chars:
         return items
 
-    # Collect chars in line with normalized representation
-    line_chars: List[CharPrimitive] = []
-    for sp in spans:
-        for c in sp.get("chars", []):
-            ch = c.get("c", "")
-            if not ch:
-                continue
-            r = fitz.Rect(c.get("bbox"))
-            line_chars.append(CharPrimitive(ch, cfg.normalization_map.get(ch, ch), r))
+    raw_text = "".join(c.norm_char for c in chunk_chars)
 
-    full_text = "".join(ch.norm_char for ch in line_chars)
-    if not full_text:
+    # Filter out caution / instruction / quantity-entry lines
+    if is_instruction_or_caution_text(raw_text):
         return items
 
-    # Check for equipment keywords in line
-    matched_kws: List[Tuple[int, int, str]] = []  # (start_idx, end_idx, kw)
+    # Filter out dummy aggregation headers (1段目, 2段目, 有無, 借持, etc.)
+    for hdr in cfg.exclude_table_headers:
+        if hdr in raw_text:
+            return items
+
+    # Build space-transparent representation with char_idx_map
+    # Characters separated by <= 55pt are concatenated into space_stripped_text
+    space_stripped_text = ""
+    char_idx_map: List[int] = []  # index in chunk_chars
+
+    max_justified_gap = float(cfg.thresholds.get("max_char_gap_for_justified_pt", 55.0))
+
+    for i, c in enumerate(chunk_chars):
+        if not space_stripped_text:
+            space_stripped_text += c.norm_char
+            char_idx_map.append(i)
+        else:
+            prev_idx = char_idx_map[-1]
+            prev_c = chunk_chars[prev_idx]
+            gap = c.rect.x0 - prev_c.rect.x1
+            if gap <= max_justified_gap:
+                space_stripped_text += c.norm_char
+                char_idx_map.append(i)
+            else:
+                # Large gap: insert a separator space in text
+                space_stripped_text += " " + c.norm_char
+                char_idx_map.append(-1)  # sentinel for space
+                char_idx_map.append(i)
+
+    # Match equipment keywords against space_stripped_text
+    matched_spans: List[Tuple[int, int, str]] = []  # (start_idx, end_idx, kw) in space_stripped_text
     for kw in cfg.equipment_keywords:
-        idx = 0
+        pos = 0
         while True:
-            pos = full_text.find(kw, idx)
-            if pos == -1:
+            idx = space_stripped_text.find(kw, pos)
+            if idx == -1:
                 break
-            matched_kws.append((pos, pos + len(kw), kw))
-            idx = pos + 1
+            matched_spans.append((idx, idx + len(kw), kw))
+            pos = idx + 1
 
-    if not matched_kws:
+    if not matched_spans:
         return items
 
     # Expand compound nouns (e.g. ピアノ + 椅子 -> ピアノ椅子, 合奏用 + 椅子 -> 合奏用椅子)
-    expanded_kws: List[Tuple[int, int, str]] = []
-    for start, end, kw in matched_kws:
-        # expand backwards (kanji / katakana / alphanum)
-        exp_start = start
-        while exp_start > 0:
-            prev_ch = full_text[exp_start - 1]
-            if re.match(r'[\u4e00-\u9faf\u30a0-\u30ffA-Za-z0-9]', prev_ch) and prev_ch not in cfg.standard_symbols:
-                exp_start -= 1
+    expanded_spans: List[Tuple[int, int, str]] = []
+    for s, e, kw in matched_spans:
+        exp_s = s
+        while exp_s > 0:
+            prev_ch = space_stripped_text[exp_s - 1]
+            if prev_ch not in " 　→⇒➡＝=…‥.:・()（）[]［］" and prev_ch not in cfg.standard_symbols:
+                exp_s -= 1
             else:
                 break
-        # expand forwards
-        exp_end = end
-        while exp_end < len(full_text):
-            next_ch = full_text[exp_end]
-            if re.match(r'[\u4e00-\u9faf\u30a0-\u30ffA-Za-z0-9]', next_ch) and next_ch not in cfg.standard_symbols:
-                exp_end += 1
+
+        exp_e = e
+        while exp_e < len(space_stripped_text):
+            next_ch = space_stripped_text[exp_e]
+            if next_ch not in " 　→⇒➡＝=…‥.:・()（）[]［］" and next_ch not in cfg.standard_symbols:
+                exp_e += 1
             else:
                 break
-        expanded_kws.append((exp_start, exp_end, full_text[exp_start:exp_end]))
+
+        full_kw = space_stripped_text[exp_s:exp_e].strip()
+        # Ensure not an excluded phrase
+        if not is_instruction_or_caution_text(full_kw):
+            expanded_spans.append((exp_s, exp_e, full_kw))
 
     # Longest Match NMS
-    expanded_kws.sort(key=lambda t: (t[1] - t[0]), reverse=True)
+    expanded_spans.sort(key=lambda t: (t[1] - t[0]), reverse=True)
     kept_nouns: List[Tuple[int, int, str]] = []
-    for s, e, text in expanded_kws:
-        overlap = False
-        for ks, ke, _ in kept_nouns:
-            if max(s, ks) < min(e, ke):
-                overlap = True
-                break
+    for s, e, text in expanded_spans:
+        overlap = any(max(s, ks) < min(e, ke) for ks, ke, _ in kept_nouns)
         if not overlap:
             kept_nouns.append((s, e, text))
 
     kept_nouns.sort(key=lambda t: t[0])
+    if not kept_nouns:
+        return items
 
-    # Now look for paired symbols (either left or right of each noun)
-    # Search for delimiter: … ‥ : = ( )
-    delims_pattern = r'[…‥\.:=＝・\(\)（）\-\s]+'
+    # For each equipment noun, search for its paired symbol
+    for i, (n_s, n_e, noun) in enumerate(kept_nouns):
+        # Resolve character range for noun
+        noun_char_indices = [char_idx_map[k] for k in range(n_s, n_e) if k < len(char_idx_map) and char_idx_map[k] != -1]
+        if not noun_char_indices:
+            continue
 
-    for n_start, n_end, noun in kept_nouns:
-        name_rect = fitz.Rect(line_chars[n_start].rect)
-        for c in line_chars[n_start+1:n_end]:
-            name_rect |= c.rect
+        label_chars = [chunk_chars[idx] for idx in noun_char_indices]
+        lbl_rect = fitz.Rect(label_chars[0].rect)
+        for lc in label_chars[1:]:
+            lbl_rect |= lc.rect
 
-        # Try Right Pairing: [Noun] [Delim] [Symbol]
-        right_sub = full_text[n_end:]
-        m_right = re.match(r'^' + delims_pattern + r'([○●×□■△▲☆★◎◇◆①-⑩A-Za-z0-9])', right_sub)
-        if m_right:
-            sym_char = m_right.group(1)
-            # Find char pos
-            sym_idx = n_end + m_right.start(1)
-            if sym_idx < len(line_chars):
-                sym_r = line_chars[sym_idx].rect
-                items.append(ExtractedLegendItem(
-                    name=noun,
-                    symbol_box=Box.from_fitz_rect(sym_r),
-                    label_box=Box.from_fitz_rect(name_rect),
-                    symbol_type=SymbolType.TEXT_GLYPH.value,
-                    confidence=0.92,
-                    source_mode="inline",
-                    raw_symbol_text=sym_char
-                ))
-                continue
+        kw_x0 = lbl_rect.x0
+        kw_x1 = lbl_rect.x1
 
-        # Try Left Pairing: [Symbol] [Delim] [Noun]
-        left_sub = full_text[:n_start]
-        m_left = re.search(r'([○●×□■△▲☆★◎◇◆①-⑩A-Za-z0-9])' + delims_pattern + r'$', left_sub)
-        if m_left:
-            sym_char = m_left.group(1)
-            sym_idx = m_left.start(1)
-            if sym_idx < len(line_chars):
-                sym_r = line_chars[sym_idx].rect
-                items.append(ExtractedLegendItem(
-                    name=noun,
-                    symbol_box=Box.from_fitz_rect(sym_r),
-                    label_box=Box.from_fitz_rect(name_rect),
-                    symbol_type=SymbolType.TEXT_GLYPH.value,
-                    confidence=0.92,
-                    source_mode="inline",
-                    raw_symbol_text=sym_char
-                ))
-                continue
+        # Determine right search boundary: next keyword's start, or chunk end
+        if i + 1 < len(kept_nouns):
+            next_indices = [char_idx_map[k] for k in range(kept_nouns[i+1][0], kept_nouns[i+1][1]) if k < len(char_idx_map) and char_idx_map[k] != -1]
+            next_kw_x0 = chunk_chars[next_indices[0]].rect.x0 if next_indices else (kw_x1 + 130.0)
+            max_search_x = next_kw_x0 - 1.0
+        else:
+            chunk_x1 = max(c.rect.x1 for c in chunk_chars)
+            max_search_x = min(chunk_x1 + 1.0, kw_x1 + 130.0)
+
+        # Characters strictly in the right search window
+        right_chars = [c for c in chunk_chars if kw_x1 <= c.rect.x0 <= max_search_x]
+        right_text = "".join(c.norm_char for c in right_chars)
+
+        pair_item: Optional[ExtractedLegendItem] = None
+
+        # ----------------------------------------------------------------------
+        # Priority 1: Bracket Pattern 名称(記号)
+        # ----------------------------------------------------------------------
+        m_br = re.search(r'[\(（]([^\)）]+)[\)）]', right_text)
+        if m_br and not pair_item:
+            inside_str = m_br.group(1).strip()
+            # Must NOT be a quantity unit or blank
+            if not any(u in inside_str for u in ["個", "脚", "本", "台", "枚", "人", "持参", "借用"]):
+                # Case 1a: Exactly 1 symbol character
+                sym_cand = inside_str[0] if inside_str else ""
+                # Map X/x/O/o to ×/○
+                if sym_cand in ("X", "x"):
+                    sym_cand = "×"
+                elif sym_cand in ("O", "o"):
+                    sym_cand = "○"
+
+                if sym_cand in cfg.standard_symbols:
+                    # Locate the char primitive inside the brackets
+                    # Find opening bracket char index
+                    open_br_idx = right_text.find(m_br.group(0))
+                    # Char index inside
+                    inside_char_idx = open_br_idx + 1 + m_br.group(0)[1:].find(inside_str[0])
+                    if inside_char_idx < len(right_chars):
+                        target_c = right_chars[inside_char_idx]
+                        pair_item = ExtractedLegendItem(
+                            name=noun,
+                            symbol_box=Box.from_fitz_rect(target_c.rect),
+                            label_box=Box.from_fitz_rect(lbl_rect),
+                            symbol_type=SymbolType.TEXT_GLYPH.value,
+                            confidence=0.96,
+                            source_mode="inline",
+                            raw_symbol_text=sym_cand,
+                            target_char_rect=target_c.rect,
+                            priority=2
+                        )
+
+                # Case 1b: Small vector inside the bracket (e.g. ピアノ椅子(■))
+                if not pair_item:
+                    # Look for small vector rect inside bracket bounds
+                    br_x0 = right_chars[0].rect.x0 if right_chars else kw_x1
+                    for v in prims.vectors:
+                        if (kw_x1 <= v.rect.x0 <= max_search_x) and (lbl_rect.y0 - 5.0 <= v.rect.y0 <= lbl_rect.y1 + 5.0):
+                            if 3.0 <= v.rect.width <= 30.0 and 3.0 <= v.rect.height <= 30.0:
+                                pair_item = ExtractedLegendItem(
+                                    name=noun,
+                                    symbol_box=Box.from_fitz_rect(v.rect),
+                                    label_box=Box.from_fitz_rect(lbl_rect),
+                                    symbol_type=SymbolType.VECTOR_DRAWING.value,
+                                    confidence=0.95,
+                                    source_mode="inline",
+                                    priority=2
+                                )
+                                break
+
+        # ----------------------------------------------------------------------
+        # Priority 2: Explicit Delimiter Pattern 名称 [区切り] 記号
+        # (→, ⇒, ➡, ＝, =, …, ‥, multiple ・, :, ：)
+        # ----------------------------------------------------------------------
+        if not pair_item:
+            delim_pattern = r'^\s*([→⇒➡＝=…‥:：]|・{2,})'
+            m_delim = re.search(delim_pattern, right_text)
+            if m_delim:
+                delim_len = len(m_delim.group(0))
+                # Search strictly to the right of delimiter
+                post_delim_chars = right_chars[delim_len:]
+                post_delim_text = "".join(c.norm_char for c in post_delim_chars)
+
+                # Look for symbol glyph (with optional 印)
+                m_sym = re.search(r'^\s*([○●×□■△▲☆★◎◇◆①-⑩XxOo])(印)?', post_delim_text)
+                if m_sym:
+                    raw_s = m_sym.group(1)
+                    if raw_s in ("X", "x"):
+                        raw_s = "×"
+                    elif raw_s in ("O", "o"):
+                        raw_s = "○"
+
+                    # Find char primitive of the symbol (exclude '印')
+                    char_offset = post_delim_text.find(m_sym.group(1))
+                    if char_offset < len(post_delim_chars):
+                        target_c = post_delim_chars[char_offset]
+                        pair_item = ExtractedLegendItem(
+                            name=noun,
+                            symbol_box=Box.from_fitz_rect(target_c.rect),
+                            label_box=Box.from_fitz_rect(lbl_rect),
+                            symbol_type=SymbolType.TEXT_GLYPH.value,
+                            confidence=0.98,
+                            source_mode="inline",
+                            raw_symbol_text=raw_s,
+                            target_char_rect=target_c.rect,
+                            priority=3
+                        )
+
+                # Look for small vector/raster drawing right after delimiter
+                if not pair_item:
+                    for v in prims.vectors:
+                        if (kw_x1 <= v.rect.x0 <= max_search_x) and (lbl_rect.y0 - 5.0 <= v.rect.y0 <= lbl_rect.y1 + 5.0):
+                            if 3.0 <= v.rect.width <= 35.0 and 3.0 <= v.rect.height <= 35.0:
+                                pair_item = ExtractedLegendItem(
+                                    name=noun,
+                                    symbol_box=Box.from_fitz_rect(v.rect),
+                                    label_box=Box.from_fitz_rect(lbl_rect),
+                                    symbol_type=SymbolType.VECTOR_DRAWING.value,
+                                    confidence=0.96,
+                                    source_mode="inline",
+                                    priority=3
+                                )
+                                break
+
+        # ----------------------------------------------------------------------
+        # Priority 3: Space-Delimited & 〜印 Pattern 名称   記号[印]
+        # ----------------------------------------------------------------------
+        if not pair_item:
+            m_space_sym = re.search(r'^\s*([○●×□■△▲☆★◎◇◆①-⑩XxOo])(印)?', right_text)
+            if m_space_sym:
+                raw_s = m_space_sym.group(1)
+                if raw_s in ("X", "x"):
+                    raw_s = "×"
+                elif raw_s in ("O", "o"):
+                    raw_s = "○"
+
+                has_in = bool(m_space_sym.group(2))
+                char_offset = right_text.find(m_space_sym.group(1))
+                if char_offset < len(right_chars):
+                    target_c = right_chars[char_offset]
+                    pair_item = ExtractedLegendItem(
+                        name=noun,
+                        symbol_box=Box.from_fitz_rect(target_c.rect),
+                        label_box=Box.from_fitz_rect(lbl_rect),
+                        symbol_type=SymbolType.TEXT_GLYPH.value,
+                        confidence=0.92,
+                        source_mode="inline",
+                        raw_symbol_text=raw_s,
+                        target_char_rect=target_c.rect,
+                        priority=2 if has_in else 1
+                    )
+
+            # Check vector in space gap
+            if not pair_item:
+                for v in prims.vectors:
+                    if (kw_x1 <= v.rect.x0 <= max_search_x) and (lbl_rect.y0 - 5.0 <= v.rect.y0 <= lbl_rect.y1 + 5.0):
+                        if 3.0 <= v.rect.width <= 35.0 and 3.0 <= v.rect.height <= 35.0:
+                            pair_item = ExtractedLegendItem(
+                                name=noun,
+                                symbol_box=Box.from_fitz_rect(v.rect),
+                                label_box=Box.from_fitz_rect(lbl_rect),
+                                symbol_type=SymbolType.VECTOR_DRAWING.value,
+                                confidence=0.90,
+                                source_mode="inline",
+                                priority=1
+                            )
+                            break
+
+        # ----------------------------------------------------------------------
+        # Priority 4: Left-Symbol Pattern 記号 [区切り] 名称
+        # (Only if 1~3 failed, and strictly within 40pt left)
+        # ----------------------------------------------------------------------
+        if not pair_item:
+            # Check characters to the left
+            prev_kw_x1 = kept_nouns[i-1][1] if i > 0 else (kw_x0 - 45.0)
+            left_chars = [c for c in chunk_chars if max(prev_kw_x1, kw_x0 - 45.0) <= c.rect.x1 <= kw_x0]
+            left_text = "".join(c.norm_char for c in left_chars)
+            m_left = re.search(r'([○●×□■△▲☆★◎◇◆①-⑩])\s*([＝=…‥:：・]|\s+)?$', left_text)
+            if m_left:
+                sym_char = m_left.group(1)
+                char_offset = left_text.rfind(sym_char)
+                if char_offset < len(left_chars):
+                    target_c = left_chars[char_offset]
+                    pair_item = ExtractedLegendItem(
+                        name=noun,
+                        symbol_box=Box.from_fitz_rect(target_c.rect),
+                        label_box=Box.from_fitz_rect(lbl_rect),
+                        symbol_type=SymbolType.TEXT_GLYPH.value,
+                        confidence=0.88,
+                        source_mode="inline",
+                        raw_symbol_text=sym_char,
+                        target_char_rect=target_c.rect,
+                        priority=1
+                    )
+
+        if pair_item is not None:
+            items.append(pair_item)
 
     return items
 
@@ -625,10 +701,10 @@ def parse_margin_miniatures(
 ) -> List[ExtractedLegendItem]:
     items: List[ExtractedLegendItem] = []
 
-    # Find standalone vector clusters in margins (outside stage ROI)
+    # Standalone vectors in margins (strictly outside stage ROI)
     margin_vectors = [v for v in prims.vectors if not stage_info.is_inside_stage(v.rect)]
 
-    # Collect word blocks outside stage ROI
+    # Collect text blocks outside stage ROI
     text_blocks = page.get_text("blocks")
     outside_blocks = []
     for b in text_blocks:
@@ -638,20 +714,18 @@ def parse_margin_miniatures(
             outside_blocks.append((r, t))
 
     for vec in margin_vectors:
-        # Look for adjacent label text block (within 15pt above, below, or to the right)
         vr = vec.rect
         best_label: Optional[str] = None
         best_dist = 999999.0
         best_label_box: Optional[Box] = None
 
         for br, bt in outside_blocks:
-            # Check if block contains equipment keyword
+            # STRICT WHITELIST: must match equipment keyword
             matched_kw = next((kw for kw in cfg.equipment_keywords if kw in bt), None)
             if not matched_kw:
                 continue
 
-            # Calculate distance
-            # Check below:
+            # Calculate distance: directly above or below
             if (vr.x0 - 15.0) <= br.x1 and vr.x1 >= (br.x0 - 15.0):
                 if 0 <= (br.y0 - vr.y1) < 25.0:  # directly below
                     dist = br.y0 - vr.y1
@@ -673,7 +747,8 @@ def parse_margin_miniatures(
                 label_box=best_label_box,
                 symbol_type=SymbolType.VECTOR_DRAWING.value,
                 confidence=0.88,
-                source_mode="margin_miniature"
+                source_mode="margin_miniature",
+                priority=1
             ))
 
     return items

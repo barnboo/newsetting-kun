@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, List
 import fitz
 import cv2
 import numpy as np
@@ -9,7 +9,9 @@ from .config import cfg
 
 def refine_tight_symbol_crop(
     page: fitz.Page,
-    raw_box: Box
+    raw_box: Box,
+    target_char_rect: Optional[fitz.Rect] = None,
+    all_page_chars: Optional[List[Any]] = None
 ) -> Box:
     page_rect = fitz.Rect(page.rect)
     thresh = cfg.thresholds
@@ -40,19 +42,38 @@ def refine_tight_symbol_crop(
         # Otsu thresholding with inversion (foreground = 255, white paper = 0)
         _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
+        # Non-target character masking:
+        # If target_char_rect is provided, mask out any other characters that fall into this window
+        # (e.g. leader dots "・", delimiters "…", "→", brackets "(", ")", "印", label text)
+        if target_char_rect is not None and all_page_chars:
+            for ch in all_page_chars:
+                cr = ch.rect
+                if ext_rect.intersects(cr):
+                    # Check if cr is concentric / overlapping with target_char_rect
+                    inter = fitz.Rect(cr) & fitz.Rect(target_char_rect)
+                    if inter.width * inter.height > 0.5 * (target_char_rect.width * target_char_rect.height):
+                        # This is the target symbol character, keep it!
+                        continue
+                    # Non-target character: mask out to 0 (black background)
+                    px0 = max(0, int((cr.x0 - ext_rect.x0) * scale) - 1)
+                    py0 = max(0, int((cr.y0 - ext_rect.y0) * scale) - 1)
+                    px1 = min(pix.width, int((cr.x1 - ext_rect.x0) * scale) + 1)
+                    py1 = min(pix.height, int((cr.y1 - ext_rect.y0) * scale) + 1)
+                    if px1 > px0 and py1 > py0:
+                        binary[py0:py1, px0:px1] = 0
+
         h, w = binary.shape
 
         # Penetrating line removal:
-        # Detect lines spanning >= 88% of window
-        kw = int(w * pen_ratio)
+        # Detect lines spanning >= 78% of window
+        kw = int(w * 0.78)
         if kw >= 8:
             h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kw, 1))
             h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
-            # Expand line thickness slightly to erase anti-aliasing edges
             h_lines = cv2.dilate(h_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3)))
             binary[h_lines > 0] = 0
 
-        kh = int(h * pen_ratio)
+        kh = int(h * 0.78)
         if kh >= 8:
             v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, kh))
             v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)

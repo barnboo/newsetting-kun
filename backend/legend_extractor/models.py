@@ -84,6 +84,8 @@ class ExtractedLegendItem:
     confidence: float = 1.0
     source_mode: str = "table"  # "table" | "inline" | "margin_miniature"
     raw_symbol_text: Optional[str] = None
+    target_char_rect: Optional[fitz.Rect] = None
+    priority: int = 1  # 3: explicit delim, 2: bracket/~印, 1: space delim
     extra_meta: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:

@@ -26,7 +26,7 @@ class Config:
         return self._data.get("equipment_keywords", [
             "椅子", "イス", "いす", "譜面台", "長机", "机", "指揮台", "ピアノ",
             "ティンパニ", "バスドラム", "スネアドラム", "シロフォン", "マリンバ",
-            "ビブラフォン", "チャイム", "シンバル", "コントラバス", "ひな段"
+            "ビブラフォン", "チャイム", "シンバル", "コントラバス", "ひな段", "電源"
         ])
 
     @property
@@ -36,13 +36,15 @@ class Config:
     @property
     def exclude_instruction_keywords(self) -> List[str]:
         return self._data.get("exclude_instruction_keywords", [
-            "下さい", "ください", "お願いします", "こと", "厳守", "固定", "提出", "記入", "禁止"
+            "下さい", "ください", "お願いします", "こと", "厳守", "固定", "提出", "記入", "禁止",
+            "囲む", "囲んで", "つける", "つけ,", "つけ", "丸で囲む", "〇で囲む", "○で囲む", "○をつける", "〇をつける"
         ])
 
     @property
     def exclude_table_headers(self) -> List[str]:
         return self._data.get("exclude_table_headers", [
-            "ひな壇", "ひな段", "1列目", "2列目", "上段", "下段", "する・しない", "要・不要", "有・無"
+            "ひな壇", "ひな段", "1段目", "一段目", "2段目", "二段目", "1列目", "2列目", "上段", "下段",
+            "する・しない", "要・不要", "有・無", "借・持", "借持", "使う・使わない", "全開", "半開"
         ])
 
     @property
@@ -56,7 +58,9 @@ class Config:
 
     @property
     def delimiters(self) -> List[str]:
-        return self._data.get("delimiters", ["…", "‥", "...", "..", "・", "＝", "=", "：", ":", "－", "-", " "])
+        return self._data.get("delimiters", [
+            "→", "⇒", "➡", "＝", "=", "…", "‥", "...", "..", "：", ":", "－", "-"
+        ])
 
     @property
     def bracket_pairs(self) -> List[List[str]]:
@@ -88,6 +92,9 @@ class Config:
             "max_symbol_size_pt": 85.0,
             "max_symbol_aspect_ratio": 5.0,
             "vector_cluster_distance_pt": 1.8,
+            "max_char_gap_for_justified_pt": 55.0,
+            "max_line_chunk_gap_pt": 105.0,
+            "max_pair_search_dist_pt": 80.0,
             "render_dpi": 300,
             "line_removal_penetration_ratio": 0.88,
             "tight_crop_margin_ratio": 0.08,
