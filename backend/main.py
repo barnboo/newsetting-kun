@@ -1,5 +1,11 @@
 import time
 import re
+_re = re
+import json
+import copy
+import base64
+import io
+import traceback
 import unicodedata
 import os
 import uuid
@@ -12,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from PIL import Image
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict, Any
 
 app = FastAPI()
 
@@ -978,10 +984,9 @@ async def extract_regions(req: ExtractRequest):
                 region_filename = f"{req.file_id}_icons_region_{cache_buster}.png"
                 region_path = os.path.join(STATIC_DIR, region_filename)
                 region_clean_path = os.path.join(STATIC_DIR, f"{req.file_id}_icons_region_notext_{cache_buster}.png")
-                if not is_auto_icons:
-                    pix_region.save(region_path)
-                    pix_region.save(region_clean_path)
-                    icons_region_url = f"/static/{region_filename}"
+                pix_region.save(region_path)
+                pix_region.save(region_clean_path)
+                icons_region_url = f"/static/{region_filename}"
 
                 # Convert pix_region to OpenCV for table grid removal and symbol cell analysis
                 img_data = np.frombuffer(pix_region.samples, dtype=np.uint8).reshape((pix_region.height, pix_region.width, pix_region.n))
