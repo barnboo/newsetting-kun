@@ -5,6 +5,12 @@ import fitz
 from .models import Box, SymbolType
 from .config import cfg
 
+# Unicode bidi formatting characters to strip
+BIDI_CHARS = {
+    '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
+    '\u2066', '\u2067', '\u2068', '\u2069', '\ufeff'
+}
+
 class CharPrimitive:
     def __init__(self, raw_char: str, norm_char: str, rect: fitz.Rect, span_flags: int = 0):
         self.raw_char = raw_char
@@ -59,13 +65,18 @@ class UnionFind:
             self.parent[root_i] = root_j
 
 def normalize_char(c: str) -> str:
-    nfkc = unicodedata.normalize("NFKC", c)
-    return cfg.normalization_map.get(nfkc, cfg.normalization_map.get(c, nfkc))
+    # Filter bidi control codes
+    clean_c = "".join(ch for ch in c if ch not in BIDI_CHARS)
+    if not clean_c:
+        return ""
+    nfkc = unicodedata.normalize("NFKC", clean_c)
+    return cfg.normalization_map.get(nfkc, cfg.normalization_map.get(clean_c, nfkc))
 
 def extract_primitives(page: fitz.Page) -> PrimitivesCollection:
     page_rect = fitz.Rect(page.rect)
     thresh = cfg.thresholds
-    min_sz = float(thresh.get("min_symbol_size_pt", 2.0))
+    min_sz = float(thresh.get("min_symbol_size_pt", 1.2))
+    min_line_len = float(thresh.get("min_vector_line_len_pt", 1.2))
     max_sz = float(thresh.get("max_symbol_size_pt", 85.0))
     cluster_dist = float(thresh.get("vector_cluster_distance_pt", 1.8))
 
@@ -81,13 +92,15 @@ def extract_primitives(page: fitz.Page) -> PrimitivesCollection:
                         ch = c_dict.get("c", "")
                         if not ch or ch.isspace():
                             continue
+                        norm_ch = normalize_char(ch)
+                        if not norm_ch:
+                            continue
                         bbox = c_dict.get("bbox")
                         if not bbox:
                             continue
                         r = fitz.Rect(bbox)
                         if r.width <= 0 or r.height <= 0:
                             continue
-                        norm_ch = normalize_char(ch)
                         chars.append(CharPrimitive(ch, norm_ch, r, flags))
 
     # --- 2. Decompose Drawings & Cluster Small Paths ---
@@ -100,9 +113,11 @@ def extract_primitives(page: fitz.Page) -> PrimitivesCollection:
         pad = max(0.2, w_stroke / 2.0)
 
         # Standalone small drawing path
+        # Exclude horizontal fill-in underlines (w > 26pt and h < 2.5pt)
         if min_sz <= d_rect.width <= max_sz and min_sz <= d_rect.height <= max_sz:
-            sub_rects.append(fitz.Rect(d_rect.x0 - pad, d_rect.y0 - pad, d_rect.x1 + pad, d_rect.y1 + pad))
-            continue
+            if not (d_rect.width > 26.0 and d_rect.height < 2.5):
+                sub_rects.append(fitz.Rect(d_rect.x0 - pad, d_rect.y0 - pad, d_rect.x1 + pad, d_rect.y1 + pad))
+                continue
 
         # Composite path: decompose items into basic commands
         items = d.get("items", [])
@@ -114,14 +129,25 @@ def extract_primitives(page: fitz.Page) -> PrimitivesCollection:
                 p1, p2 = item[1], item[2]
                 rx0, rx1 = min(p1.x, p2.x), max(p1.x, p2.x)
                 ry0, ry1 = min(p1.y, p2.y), max(p1.y, p2.y)
-                # Exclude long borders / grid lines
-                if (rx1 - rx0) > max_sz or (ry1 - ry0) > max_sz:
+                w_seg = rx1 - rx0
+                h_seg = ry1 - ry0
+                seg_len = max(w_seg, h_seg)
+
+                # Exclude long borders / grid lines (> max_sz) or sub-threshold tiny noise (< min_line_len)
+                if w_seg > max_sz or h_seg > max_sz or seg_len < min_line_len:
+                    continue
+                # Exclude horizontal fill-in underline vectors (w > 26pt and h < 2.5pt)
+                if w_seg > 26.0 and h_seg < 2.5:
                     continue
                 item_rect = fitz.Rect(rx0 - pad, ry0 - pad, rx1 + pad, ry1 + pad)
 
             elif cmd == "re":  # ("re", rect)
                 r = fitz.Rect(item[1])
+                # Exclude long lines or large rectangles
                 if r.width > max_sz or r.height > max_sz:
+                    continue
+                # Exclude horizontal fill-in underlines (w > 26pt and h < 2.5pt)
+                if r.width > 26.0 and r.height < 2.5:
                     continue
                 item_rect = fitz.Rect(r.x0 - pad, r.y0 - pad, r.x1 + pad, r.y1 + pad)
 
@@ -146,7 +172,7 @@ def extract_primitives(page: fitz.Page) -> PrimitivesCollection:
                 item_rect = fitz.Rect(rx0 - pad, ry0 - pad, rx1 + pad, ry1 + pad)
 
             if item_rect is not None:
-                if min_sz <= item_rect.width and min_sz <= item_rect.height:
+                if min_sz <= max(item_rect.width, item_rect.height):
                     sub_rects.append(item_rect)
 
     # Union-Find Clustering on sub_rects
@@ -178,6 +204,14 @@ def extract_primitives(page: fitz.Page) -> PrimitivesCollection:
         if min_sz <= w <= max_sz and min_sz <= h <= max_sz:
             aspect = max(w / max(0.1, h), h / max(0.1, w))
             if aspect <= max_aspect:
+                # Requirement 4.3: Merge composite symbol if a small vector (4pt~24pt)
+                # contains 1~2 characters (e.g. circle enclosing 'P' or brackets enclosing '||')
+                if 4.0 <= w <= 26.0 and 4.0 <= h <= 26.0:
+                    for ch in chars:
+                        inter = u_rect & ch.rect
+                        ch_area = ch.rect.width * ch.rect.height
+                        if u_rect.contains(ch.rect) or (not inter.is_empty and ch_area > 0 and (inter.width * inter.height) > 0.6 * ch_area):
+                            u_rect |= ch.rect
                 vectors.append(VectorClusterPrimitive(u_rect, sub_element_count=len(group)))
 
     # --- 3. Raster Image Extraction via get_image_info ---

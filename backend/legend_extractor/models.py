@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import fitz
 
 class SymbolType(str, Enum):
@@ -85,6 +85,8 @@ class ExtractedLegendItem:
     source_mode: str = "table"  # "table" | "inline" | "margin_miniature"
     raw_symbol_text: Optional[str] = None
     target_char_rect: Optional[fitz.Rect] = None
+    inner_clamp_rect: Optional[fitz.Rect] = None
+    bracket_rects: Optional[List[fitz.Rect]] = None
     priority: int = 1  # 3: explicit delim, 2: bracket/~印, 1: space delim
     extra_meta: Dict[str, Any] = field(default_factory=dict)
 

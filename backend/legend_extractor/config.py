@@ -24,9 +24,32 @@ class Config:
     @property
     def equipment_keywords(self) -> List[str]:
         return self._data.get("equipment_keywords", [
-            "椅子", "イス", "いす", "譜面台", "長机", "机", "指揮台", "ピアノ",
-            "ティンパニ", "バスドラム", "スネアドラム", "シロフォン", "マリンバ",
-            "ビブラフォン", "チャイム", "シンバル", "コントラバス", "ひな段", "電源"
+            "椅子", "イス", "いす", "合奏用椅子", "合奏椅子", "パイプ椅子", "折りたたみ椅子",
+            "ピアノ椅子", "背もたれ椅子", "高低自在椅子", "演奏用椅子", "丸椅子", "譜めくり椅子", "コントラバス椅子",
+            "譜面台", "卓上譜面台", "指揮者用譜面台", "木製譜面台", "合奏用譜面台",
+            "長机", "机", "会議机", "受付机", "作業台", "折りたたみ机",
+            "指揮台", "指揮者台", "演台", "司会台", "花台",
+            "ピアノ", "グランドピアノ", "アップライトピアノ", "電子ピアノ",
+            "ティンパニ", "バスドラム", "大太鼓", "スネアドラム", "小太鼓",
+            "シロフォン", "木琴", "マリンバ", "グロッケン", "鉄琴", "ビブラフォン", "ヴィブラフォン", "チャイム",
+            "ドラ", "タムタム", "ゴング", "シンバル", "サスペンドシンバル", "合わせシンバル",
+            "ひな段", "山台", "平台", "箱馬",
+            "マイク", "マイクスタンド", "ワイヤレスマイク",
+            "電源", "コンセント", "延長コード", "案内板", "看板", "時計", "スピーカー",
+            "Timp", "Timpani", "B.D", "BD", "S.D", "SD", "Dr.Set", "DrumSet", "Drums",
+            "Chime", "Gong", "Xylo", "Glocken", "Glock", "Marimba", "Marinba", "Vib", "Cym"
+        ])
+
+    @property
+    def circulation_keywords(self) -> List[str]:
+        return self._data.get("circulation_keywords", [
+            "入場", "退場", "花道", "搬入", "搬出", "客席", "動線", "袖"
+        ])
+
+    @property
+    def selection_table_keywords(self) -> List[str]:
+        return self._data.get("selection_table_keywords", [
+            "使う・使わない", "借用する・借用しない", "する・しない", "要・不要", "有・無", "有り・無し", "全開", "半開", "全開・半開", "閉じる"
         ])
 
     @property
@@ -59,7 +82,7 @@ class Config:
     @property
     def delimiters(self) -> List[str]:
         return self._data.get("delimiters", [
-            "→", "⇒", "➡", "＝", "=", "…", "‥", "...", "..", "：", ":", "－", "-"
+            "→", "⇒", "➡", "＝", "=", "…", "‥", "...", "..", "：", ":", "ー", "―", "－", "-", "—"
         ])
 
     @property
@@ -88,17 +111,18 @@ class Config:
     @property
     def thresholds(self) -> Dict[str, Any]:
         return self._data.get("thresholds", {
-            "min_symbol_size_pt": 2.0,
+            "min_symbol_size_pt": 1.2,
             "max_symbol_size_pt": 85.0,
             "max_symbol_aspect_ratio": 5.0,
+            "min_vector_line_len_pt": 1.2,
             "vector_cluster_distance_pt": 1.8,
             "max_char_gap_for_justified_pt": 55.0,
-            "max_line_chunk_gap_pt": 105.0,
+            "max_line_chunk_gap_pt": 42.0,
             "max_pair_search_dist_pt": 80.0,
             "render_dpi": 300,
             "line_removal_penetration_ratio": 0.88,
             "tight_crop_margin_ratio": 0.08,
-            "tight_crop_min_margin_pt": 1.5,
+            "tight_crop_min_margin_pt": 1.2,
             "iou_dedup_threshold": 0.40
         })
 

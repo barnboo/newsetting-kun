@@ -1,6 +1,6 @@
 from __future__ import annotations
 import re
-from typing import List, Set, Optional, Dict, Any
+from typing import List, Set, Optional, Dict, Any, Tuple
 import fitz
 from .models import Box
 from .primitives import PrimitivesCollection
@@ -51,8 +51,39 @@ def estimate_stage_roi_and_symbols(page: fitz.Page, prims: PrimitivesCollection)
 
     return StageRoiInfo(best_roi, layout_symbol_set)
 
-def is_quantity_entry_pattern(text: str) -> bool:
-    """Detect blank quantity entry fields like: (   ) 個, (  )脚, （   ）本, (   )台, （持参・借用 脚）"""
+def is_circulation_or_stage_structure(text: str) -> bool:
+    """Requirement 7.2: Exclude circulation and stage structure keywords."""
+    for kw in cfg.circulation_keywords:
+        if kw in text:
+            return True
+    return False
+
+def get_circling_instruction_mask_spans(text: str) -> List[Tuple[int, int]]:
+    """
+    Requirement 1.2: Locally mask circling instructions like:
+    赤○で囲んで, ○で囲む, ○印で囲む, ○をつける, （・を○で囲む）, (部は○で囲む), 下を〇で囲む
+    Returns list of (start_idx, end_idx) in text whose characters must NOT be used as symbol glyphs.
+    """
+    spans: List[Tuple[int, int]] = []
+    patterns = [
+        r'赤[○◯〇O0]\s*(?:で|を)?\s*囲[むんで]',
+        r'[（\(][^）\)]*?[○◯〇O0・]\s*(?:で|を)\s*囲[むんで][^）\)]*?[）\)]',
+        r'(?:[○◯〇O0]|・)\s*印?\s*(?:で|を)\s*囲[むんで]',
+        r'(?:[○◯〇O0]|・)\s*を\s*つけ[るた]',
+        r'下を[○◯〇O0]\s*(?:で|を)\s*囲[むんで]',
+        r'部は[○◯〇O0]\s*(?:で|を)\s*囲[むんで]',
+    ]
+    for pat in patterns:
+        for m in re.finditer(pat, text):
+            spans.append((m.start(), m.end()))
+    return spans
+
+def is_pure_quantity_aggregation(text: str) -> bool:
+    """
+    Requirement 2.1: Detect ONLY pure blank quantity entry fields lacking a symbol definition.
+    e.g. 椅子 (   ) 個, 【譜面台】[    ] 本, ○椅子（  ）脚 (where ○ is preceding noise)
+    Does NOT match '・譜面台  T  ____台' or '×…譜面台（最大70本）'.
+    """
     t = text.strip()
     # (   ) followed by unit
     if re.search(r'[\(（]\s*[\)）]\s*(個|脚|本|台|枚|人)', t):
@@ -61,36 +92,34 @@ def is_quantity_entry_pattern(text: str) -> bool:
         return True
     if re.search(r'[\(（]\s*(脚|本|台|個)\s*[\)）]', t):
         return True
-    return False
-
-def is_instruction_or_caution_text(text: str) -> bool:
-    s = text.strip()
-    if not s:
-        return False
-
-    # Check prefixes
-    for prefix in cfg.exclude_instruction_prefixes:
-        if s.startswith(prefix):
-            return True
-
-    # Check instruction keywords
-    for kw in cfg.exclude_instruction_keywords:
-        if kw in s:
-            return True
-
-    # Circle instruction: ○/〇 followed by を/で
-    if re.search(r'[○◯〇O0]\s*(を|で|に)', s):
+    # ○椅子（  ）脚
+    if re.search(r'^[○◯〇O0]?\s*[\u4e00-\u9fa5]+\s*[\(（]\s*[\)）]\s*(個|脚|本|台|枚|人|名)', t):
         return True
-
-    # Check quantity entry pattern
-    if is_quantity_entry_pattern(s):
-        return True
-
     return False
 
 def is_dummy_aggregation_or_selection_table(texts: List[str]) -> bool:
+    """Requirement 7.1: Exclude tables containing selection keywords or tiered headers."""
     all_text = " ".join(texts)
+    for kw in cfg.selection_table_keywords:
+        if kw in all_text:
+            return True
     for hdr in cfg.exclude_table_headers:
         if hdr in all_text:
             return True
     return False
+
+def normalize_equipment_name_for_dedup(name: str) -> str:
+    """
+    Requirement 6: Normalize name for page-wide deduplication.
+    Strips tiered/location prefixes: ベタ, 1〜4段目, 1段目, 上段/中段/下段, <例>, etc.
+    """
+    s = name.strip()
+    s = re.sub(
+        r'^(?:ベタ|[1-6一二三四五六]段目|[1-6]〜[1-6]段目|[1-6]~[1-6]段目|[1-6]-[1-6]段目|上段|中段|下段|前列|後列|床面|[<＜【(（]例[>＞】)）]|凡例|記号)\s*',
+        '',
+        s
+    )
+    if s.startswith("電源使用") or s in ("電源100V", "電源 100V"):
+        s = "電源"
+    s = s.replace(" ", "").replace("　", "")
+    return s
