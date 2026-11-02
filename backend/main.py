@@ -415,7 +415,7 @@ def classify_equipment_label(raw_text: str):
     """
     import re as _re
     t = clean_japanese_text(raw_text).strip()
-    if t.startswith(("※", "＊")) and not any(k in t for k in ["椅子", "譜面台", "ピアノ", "机", "台"]):
+    if t.startswith(("※", "＊")) and not any(k in t for k in ["椅子", "譜面台", "ピアノ", "机", "台", "電源", "コード", "コンセント"]):
         return None
     # Strip leading numbers, bullets, colons, equal signs, delimiters, and parentheses
     t = _re.sub(r'^[0-9０-９①-⑳・\*\-\s\.=＝:：→⇒←↔…‥\(\)（）\[\]［］【】「」『』~〜ー―‐/／]+', '', t).strip()
@@ -469,7 +469,7 @@ def classify_equipment_label(raw_text: str):
     if any(k in t for k in ["長机", "テーブル", "デスク", "机"]):
         return ("長机", "table")
     # 10. Extension cord / Power (延長コード / 電源 / コンセント)
-    if any(k in t for k in ["延長コード", "電源コード", "コードリール", "ドラムコード", "コンセント", "電源", "コード"]):
+    if any(k in t for k in ["延長コード", "電源コード", "コードリール", "ドラムコード", "電源ドラム", "コンセント", "電源設備", "電源使用", "電源", "コード"]):
         return ("延長コード", "cord")
     # 11. Microphone (マイク / マイクロフォン)
     if any(k in t for k in ["マイク", "マイクロフォン", "マイクロホン"]):
@@ -534,36 +534,58 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
         return False
 
     raw = page.get_text("rawdict", clip=clip_rect) if clip_rect else page.get_text("rawdict")
-    chars = []
+    h_chars = []
+    vert_line_groups = []
     for b in raw.get("blocks", []):
         if b.get("type") != 0:
             continue
         for l in b.get("lines", []):
+            ldir = l.get("dir", (1.0, 0.0))
+            is_vert = abs(ldir[1]) > 0.5
+            l_chars = []
             for s in l.get("spans", []):
                 for c in s.get("chars", []):
                     raw_c = c.get("c", "")
-                    if raw_c in ("\u3099", "\u309a", "゛", "゜", "ﾞ", "ﾟ") and chars:
+                    prev_list = l_chars if is_vert else h_chars
+                    if raw_c in ("\u3099", "\u309a", "゛", "゜", "ﾞ", "ﾟ") and prev_list:
                         comb = "\u3099" if raw_c in ("\u3099", "゛", "ﾞ") else "\u309a"
                         r_comb = fitz.Rect(c["bbox"])
-                        if abs(((r_comb.y0 + r_comb.y1) / 2.0) - chars[-1]["y_mid"]) < 10.0 and (r_comb.x0 - chars[-1]["rect"].x1) < 8.0:
-                            chars[-1]["ch"] = unicodedata.normalize("NFC", chars[-1]["ch"] + comb)
-                            chars[-1]["rect"] |= r_comb
-                            chars[-1]["w"] = max(1.0, chars[-1]["rect"].width)
+                        if abs(((r_comb.y0 + r_comb.y1) / 2.0) - prev_list[-1]["y_mid"]) < 10.0 and (r_comb.x0 - prev_list[-1]["rect"].x1) < 8.0:
+                            prev_list[-1]["ch"] = unicodedata.normalize("NFC", prev_list[-1]["ch"] + comb)
+                            prev_list[-1]["rect"] |= r_comb
+                            prev_list[-1]["w"] = max(1.0, prev_list[-1]["rect"].width)
                             continue
                     ch = clean_japanese_text(raw_c)
                     if ch and not ch.isspace():
                         r = fitz.Rect(c["bbox"])
                         if clip_rect is None or r.intersects(clip_rect):
-                            chars.append({
+                            c_item = {
                                 "rect": r,
                                 "ch": ch,
                                 "y_mid": (r.y0 + r.y1) / 2.0,
                                 "h": r.height,
                                 "w": max(1.0, r.width),
-                            })
+                                "is_vert": is_vert,
+                            }
+                            if is_vert:
+                                l_chars.append(c_item)
+                            else:
+                                h_chars.append(c_item)
+            if is_vert and l_chars:
+                if ldir[1] < -0.5:
+                    l_chars.sort(key=lambda x: -x["rect"].y0)
+                else:
+                    l_chars.sort(key=lambda x: x["rect"].y0)
+                vert_line_groups.append({
+                    "y_mid": sum(x["y_mid"] for x in l_chars) / len(l_chars),
+                    "avg_h": sum(x["h"] for x in l_chars) / len(l_chars),
+                    "chars": l_chars,
+                    "is_vert": True,
+                    "x_mid": sum((x["rect"].x0 + x["rect"].x1) / 2.0 for x in l_chars) / len(l_chars),
+                })
 
     lines = []
-    for c in sorted(chars, key=lambda x: (x["y_mid"], x["rect"].x0)):
+    for c in sorted(h_chars, key=lambda x: (x["y_mid"], x["rect"].x0)):
         placed = False
         for line in lines:
             if abs(line["y_mid"] - c["y_mid"]) < max(5.5, min(line["avg_h"], c["h"]) * 0.55):
@@ -574,11 +596,14 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
                 placed = True
                 break
         if not placed:
-            lines.append({"y_mid": c["y_mid"], "avg_h": c["h"], "chars": [c]})
+            lines.append({"y_mid": c["y_mid"], "avg_h": c["h"], "chars": [c], "is_vert": False})
 
+    lines.extend(vert_line_groups)
     lines.sort(key=lambda l: l["y_mid"])
     for line in lines:
-        line["chars"].sort(key=lambda c: c["rect"].x0)
+        is_v = line.get("is_vert", False)
+        if not is_v:
+            line["chars"].sort(key=lambda c: c["rect"].x0)
         n_chars = len(line["chars"])
         tokens = []
         for c_idx, c in enumerate(line["chars"]):
@@ -587,37 +612,47 @@ def tokenize_pdf_region(page, clip_rect: Optional[fitz.Rect] = None):
             ttype = "SYMBOL" if ch in SYMBOL_CHARS else ("DELIM" if ch in DELIM_CHARS else "WORD")
             if tokens and ttype == "WORD" and tokens[-1]["type"] == "WORD":
                 prev = tokens[-1]
-                gap = r.x0 - prev["rect"].x1
-                if not has_v_line_between(prev["rect"].x1, r.x0, line["y_mid"]):
-                    can_merge = False
-                    tight_thresh = max(prev["avg_w"] * 0.45, 4.0)
-                    if gap <= tight_thresh and prev["text"] != "蓋":
-                        can_merge = True
-                    elif gap <= 24.0 and prev["text"] not in STANDALONE_STOP_WORDS and ch not in STANDALONE_STOP_WORDS:
-                        # Only merge across wide justification gaps if BOTH sides are single spaced characters
-                        next_is_tight = False
-                        if c_idx + 1 < n_chars:
-                            next_c = line["chars"][c_idx + 1]
-                            next_ttype = "SYMBOL" if next_c["ch"] in SYMBOL_CHARS else ("DELIM" if next_c["ch"] in DELIM_CHARS else "WORD")
-                            if next_ttype == "WORD" and (next_c["rect"].x0 - r.x1) <= max(c["w"] * 0.45, 4.0):
-                                next_is_tight = True
-                        prev_eligible = (len(prev["chars"]) == 1) or (prev.get("is_justified", False) and abs(gap - prev.get("last_gap", gap)) <= 6.0)
-                        if prev_eligible and not next_is_tight:
-                            can_merge = True
-                            prev["is_justified"] = True
-                            prev["last_gap"] = gap
-                    if can_merge:
+                if is_v:
+                    gap = abs(r.y0 - prev["rect"].y1)
+                    if gap <= max(prev.get("avg_h", 10.0) * 0.45, 6.0):
                         prev["text"] += ch
                         prev["rect"] = prev["rect"] | r
                         prev["chars"].append(c)
                         prev["avg_w"] = sum(x["w"] for x in prev["chars"]) / len(prev["chars"])
                         continue
+                else:
+                    gap = r.x0 - prev["rect"].x1
+                    if not has_v_line_between(prev["rect"].x1, r.x0, line["y_mid"]):
+                        can_merge = False
+                        tight_thresh = max(prev["avg_w"] * 0.45, 4.0)
+                        if gap <= tight_thresh and prev["text"] != "蓋":
+                            can_merge = True
+                        elif gap <= 24.0 and prev["text"] not in STANDALONE_STOP_WORDS and ch not in STANDALONE_STOP_WORDS:
+                            # Only merge across wide justification gaps if BOTH sides are single spaced characters
+                            next_is_tight = False
+                            if c_idx + 1 < n_chars:
+                                next_c = line["chars"][c_idx + 1]
+                                next_ttype = "SYMBOL" if next_c["ch"] in SYMBOL_CHARS else ("DELIM" if next_c["ch"] in DELIM_CHARS else "WORD")
+                                if next_ttype == "WORD" and (next_c["rect"].x0 - r.x1) <= max(c["w"] * 0.45, 4.0):
+                                    next_is_tight = True
+                            prev_eligible = (len(prev["chars"]) == 1) or (prev.get("is_justified", False) and abs(gap - prev.get("last_gap", gap)) <= 6.0)
+                            if prev_eligible and not next_is_tight:
+                                can_merge = True
+                                prev["is_justified"] = True
+                                prev["last_gap"] = gap
+                        if can_merge:
+                            prev["text"] += ch
+                            prev["rect"] = prev["rect"] | r
+                            prev["chars"].append(c)
+                            prev["avg_w"] = sum(x["w"] for x in prev["chars"]) / len(prev["chars"])
+                            continue
             tokens.append({
                 "type": ttype,
                 "text": ch,
                 "rect": fitz.Rect(r),
                 "chars": [c],
                 "avg_w": c["w"],
+                "avg_h": c["h"],
                 "is_justified": False,
                 "last_gap": 0.0,
             })
@@ -1770,8 +1805,8 @@ EQUIPMENT_STD_DEFS = [
     },
     {
         "key": "cord",
-        "names": ["延長コード", "電源コード", "コード", "電源"],
-        "tmpls": ["tmpl_extensionCord"],
+        "names": ["延長コード", "電源コード", "コードリール", "ドラムコード", "電源ドラム", "コンセント", "電源設備", "電源使用", "電源", "コード"],
+        "tmpls": ["tmpl_extensionCord", "tmpl_cord", "tmpl_power", "tmpl_outlet"],
         "neg": [],
     },
     {
@@ -1809,8 +1844,14 @@ def update_cached_nodes_with_tallies(cached_nodes: list, tallies: list, piano_li
         source = getattr(t, 'source', None)
         is_tmpl_rep = getattr(t, 'is_template_replaced', None)
 
+        is_cord_item = (
+            iid in ("tmpl_extensionCord", "tmpl_cord", "tmpl_power", "tmpl_outlet")
+            or any(k in lbl for k in ["電源", "コード", "コンセント"])
+        )
+
         if has_extracted_pdf_icons and source == 'template' and not is_tmpl_rep:
-            continue
+            if not is_cord_item:
+                continue
 
         best_def = None
         for d in EQUIPMENT_STD_DEFS:
@@ -1925,8 +1966,14 @@ async def preview_bg(req: PreviewRequest):
             # 【重要】PDFからパーツが抽出されているプロジェクトでは、
             # テンプレート置換されていないスタンドアロンのテンプレートはPDF紙面の備品欄（切り抜かれなかった欄など）に
             # 勝手に自動マッピング・自動記入しない！
+            # ただし、電源（延長コード）はPDF抽出アイコンが存在しないことが殆どであるため、絶対にスキップせず集計する！
+            is_cord_item = (
+                iid in ("tmpl_extensionCord", "tmpl_cord", "tmpl_power", "tmpl_outlet")
+                or any(k in lbl for k in ["電源", "コード", "コンセント"])
+            )
             if has_extracted_pdf_icons and source == 'template' and not is_tmpl_rep:
-                continue
+                if not is_cord_item:
+                    continue
 
             pos_list = []
             if t.positions:
@@ -2044,9 +2091,9 @@ async def preview_bg(req: PreviewRequest):
                 "radius": round(rad * 2.0),
             })
 
-        def circle_yo_or_fuyo_chars(cell_chars, is_yo, name_id):
+        def circle_yo_or_fuyo_chars(cell_chars, is_yo, name_id, positions=None):
             """
-            Context-aware '要・不要' / '有・無' / '使用・不使用' / '使う・使わない' / '借用する・借用しない'
+            Context-aware '要・不要' / '有・無' / 'あり・なし' / 'する・しない' / '使用・不使用' / '使う・使わない' / '借用する・借用しない'
             detector using character-level rects.
             Locks negative phrases first so split characters never accidentally circle positive substrings.
             """
@@ -2054,12 +2101,12 @@ async def preview_bg(req: PreviewRequest):
                 return False
             joined = "".join(c["ch"] for c in cell_chars)
             # Skip column header strings like '使用有無' or '要・不要/個数等'
-            if "有無" in joined or "個数" in joined or "数量" in joined:
+            if ("有無" in joined and any(hdr in joined for hdr in ("使用", "借用", "確認", "欄", "項目"))) or "個数" in joined or "数量" in joined:
                 return False
             locked = [False] * len(cell_chars)
 
             neg_spans = []
-            for neg_kw in ("借用しない", "使用しない", "使わない", "不要", "不使用", "無"):
+            for neg_kw in ("借用しない", "使用しない", "使わない", "不要", "不使用", "無し", "なし", "しない", "無"):
                 start = 0
                 while True:
                     idx = joined.find(neg_kw, start)
@@ -2078,11 +2125,11 @@ async def preview_bg(req: PreviewRequest):
                     r_neg = fitz.Rect(cell_chars[idx]["rect"])
                     for k_i in range(idx + 1, end_idx):
                         r_neg |= cell_chars[k_i]["rect"]
-                    neg_spans.append((idx, r_neg))
+                    neg_spans.append((idx, r_neg, neg_kw))
                     start = end_idx
 
             pos_spans = []
-            for pos_kw in ("借用する", "使用する", "使う", "要", "使用", "有"):
+            for pos_kw in ("借用する", "使用する", "使う", "要", "使用", "有る", "あり", "する", "借用", "有", "上手", "中央", "下手", "借"):
                 start = 0
                 while True:
                     idx = joined.find(pos_kw, start)
@@ -2095,24 +2142,42 @@ async def preview_bg(req: PreviewRequest):
                     if pos_kw == "有" and end_idx < len(joined) and joined[end_idx] in ("線", "料", "効"):
                         start = end_idx
                         continue
+                    if pos_kw == "借" and end_idx < len(joined) and joined[end_idx] in ("線", "料", "効", "用"):
+                        start = end_idx
+                        continue
                     for k_i in range(idx, end_idx):
                         locked[k_i] = True
                     r_pos = fitz.Rect(cell_chars[idx]["rect"])
                     for k_i in range(idx + 1, end_idx):
                         r_pos |= cell_chars[k_i]["rect"]
-                    pos_spans.append((idx, r_pos))
+                    pos_spans.append((idx, r_pos, pos_kw))
                     start = end_idx
 
             if not neg_spans and not pos_spans:
                 return False
 
             if is_yo and pos_spans:
-                add_auto_circle(pos_spans[0][1], f"{name_id}_yo")
+                chosen_span = pos_spans[0]
+                loc_spans = [s for s in pos_spans if s[2] in ("上手", "中央", "下手")]
+                if loc_spans:
+                    if positions:
+                        avg_x = sum(p[0] for p in positions) / len(positions)
+                        if avg_x < 320:
+                            target_loc = "下手" if any(s[2] == "下手" for s in loc_spans) else "上手"
+                        elif avg_x > 520:
+                            target_loc = "上手" if any(s[2] == "上手" for s in loc_spans) else "下手"
+                        else:
+                            target_loc = "中央"
+                        matched_loc = [s for s in loc_spans if s[2] == target_loc]
+                        chosen_span = matched_loc[0] if matched_loc else loc_spans[0]
+                    else:
+                        chosen_span = loc_spans[0]
+                add_auto_circle(chosen_span[1], f"{name_id}_yo")
                 return True
             elif not is_yo and neg_spans:
                 add_auto_circle(neg_spans[0][1], f"{name_id}_fuyo")
                 return True
-            return True
+            return False
 
         # Detect standalone quantity column headers (for tables where cells have no printed unit)
         qty_col_headers = []
@@ -2162,7 +2227,8 @@ async def preview_bg(req: PreviewRequest):
 
         piano_lid_setting = clean_japanese_text(req.piano_lid or "半開").strip()
         matched_lid = False
-        UNIT_CHARS = ("脚", "本", "台", "個", "枚", "組", "式", "張", "対")
+        UNIT_CHARS = ("脚", "本", "台", "個", "枚", "組", "式", "張", "対", "口")
+        UNIT_WORDS = ("箇所", "カ所", "ヶ所", "か所", "回線", "口")
         slots_by_key = {}
 
         # Step 2: 各行内の備品アンカーを検出し、全ての有効スロットを収集
@@ -2273,8 +2339,8 @@ async def preview_bg(req: PreviewRequest):
                 after_anchor_tokens = [t for t in cell_tokens if t["rect"].x0 >= a["x_end"] - 1.0]
                 before_anchor_tokens = [t for t in toks if t["rect"].x1 <= a["x_start"] + 1.0 and (a["x_start"] - t["rect"].x1) < 35.0]
                 has_unit_or_yo = (
-                    any(any(u in t["text"] for u in UNIT_CHARS) for t in after_anchor_tokens)
-                    or any(any(kw in t["text"] for kw in ("要", "使", "借用", "有", "無")) for t in after_anchor_tokens)
+                    any(any(u in t["text"] for u in UNIT_CHARS) or any(uw in t["text"] for uw in UNIT_WORDS) for t in after_anchor_tokens)
+                    or any(any(kw in t["text"] for kw in ("要", "使", "借用", "有", "無", "あり", "なし", "する", "しない")) for t in after_anchor_tokens)
                 )
                 is_fwd_legend = (
                     len(after_anchor_tokens) >= 2
@@ -2292,7 +2358,8 @@ async def preview_bg(req: PreviewRequest):
                     and after_anchor_tokens[1]["type"] == "SYMBOL"
                     and after_anchor_tokens[2]["text"] in (")", "）")
                 )
-                if (is_fwd_legend or is_rev_legend or is_paren_legend) and not has_unit_or_yo:
+                has_circle_instruction = any(cw in full_line_text for cw in ("○で囲む", "〇で囲む", "◯で囲む", "丸で囲む", "赤で○", "下を", "囲む"))
+                if (is_fwd_legend or is_rev_legend or is_paren_legend) and not has_unit_or_yo and not has_circle_instruction:
                     continue
 
                 # ピアノ蓋の処理
@@ -2361,7 +2428,23 @@ async def preview_bg(req: PreviewRequest):
                     slot_info["num_mode"] = "centered"
                     slot_info["num_pos"] = (cx_pt, cy0_pt)
 
-                # 2) Tier 2: 助数詞（脚・本・台・個・枚・組など）の手前への記入
+                # 2) Tier 2: 助数詞（脚・本・台・個・枚・組・箇所・口など）の手前への記入
+                if slot_info["num_mode"] is None:
+                    # Check multi-character unit words first
+                    for uw in UNIT_WORDS:
+                        joined_after_check = "".join(c["ch"] for c in cell_chars if c["rect"].x0 >= a["x_end"] - 1.0)
+                        if uw in joined_after_check:
+                            for c_idx, c in enumerate(cell_chars):
+                                if c["rect"].x0 < a["x_end"] - 1.0:
+                                    continue
+                                cand_w = "".join(cell_chars[k_u]["ch"] for k_u in range(c_idx, min(len(cell_chars), c_idx + len(uw))))
+                                if cand_w == uw:
+                                    slot_info["num_mode"] = "before_unit"
+                                    slot_info["num_pos"] = c["rect"]
+                                    break
+                            if slot_info["num_mode"] is not None:
+                                break
+
                 if slot_info["num_mode"] is None:
                     for c_idx, c in enumerate(cell_chars):
                         if c["rect"].x0 < a["x_end"] - 1.0:
@@ -2382,10 +2465,101 @@ async def preview_bg(req: PreviewRequest):
                             slot_info["num_pos"] = ((qx0 + qx1) / 2.0, a["rect"].y0)
                             break
 
+                # 4) Tier 4: コロン・等号区切りの空欄（例: '電源：　　', 'イス：　　'）
+                if slot_info["num_mode"] is None and not has_circle_instruction:
+                    colon_tok = None
+                    if a["name"].endswith(("：", ":", "＝", "=")):
+                        colon_x1 = a["rect"].x1
+                        colon_y0 = a["rect"].y0
+                        colon_tok = a
+                    else:
+                        for t in after_anchor_tokens:
+                            if t["text"] in ("：", ":", "＝", "="):
+                                colon_x1 = t["rect"].x1
+                                colon_y0 = t["rect"].y0
+                                colon_tok = t
+                                break
+                    if colon_tok is not None:
+                        first_after = [t for t in after_anchor_tokens if t["rect"].x0 >= colon_x1 - 0.5 and t != colon_tok]
+                        if first_after and (first_after[0]["type"] == "SYMBOL" or first_after[0]["text"] in SYMBOL_CHARS):
+                            colon_tok = None
+                    if colon_tok is not None:
+                        next_tok_x0 = x_max
+                        for t in after_anchor_tokens:
+                            if t["rect"].x0 > colon_x1 + 0.5:
+                                next_tok_x0 = min(next_tok_x0, t["rect"].x0)
+                                break
+                        gap = next_tok_x0 - colon_x1
+                        if gap >= 14.0:
+                            slot_info["num_mode"] = "centered"
+                            slot_info["num_pos"] = (colon_x1 + min(22.0, gap / 2.0), colon_y0)
+
                 # Check if this cell has any valid output mechanism (number slot, yo/fuyo, or bullet circle)
                 joined_after = "".join(c["ch"] for c in slot_info["after_chars"])
-                has_yo_fuyo = any(kw in joined_after for kw in ("借用", "使用", "使う", "使わない", "要", "不要", "有", "無")) and "有無" not in joined_after and "個数" not in joined_after and "数量" not in joined_after
-                if slot_info["num_mode"] is not None or has_yo_fuyo or (circle_mark_mode and slot_info["has_bullet"]):
+                has_yo_fuyo = (
+                    any(kw in joined_after for kw in ("借用", "使用", "使う", "使わない", "要", "不要", "有", "無", "あり", "なし", "する", "しない"))
+                    and ("有無" not in joined_after or len(joined_after) > 4)
+                    and "個数" not in joined_after and "数量" not in joined_after
+                )
+
+                # If no slot or yo/fuyo found on the same line, check adjacent lines below or columns to the right
+                if slot_info["num_mode"] is None and not has_yo_fuyo:
+                    cand_adjacent_chars = []
+                    # A) Search lines below the anchor
+                    for l_below in tokenized_lines:
+                        dy = l_below["y_mid"] - a["rect"].y1
+                        if 1.0 <= dy <= 38.0:
+                            matching_chars = [
+                                c for c in l_below["chars"]
+                                if max(x_min, a["x_start"] - 25.0) <= c["rect"].x0 < min(x_max, a["x_end"] + 160.0)
+                            ]
+                            if matching_chars:
+                                cand_adjacent_chars.extend(matching_chars)
+
+                    # B) Search vertical lines/columns to the right of the anchor
+                    for l_side in tokenized_lines:
+                        dx = l_side.get("x_mid", l_side["chars"][0]["rect"].x0 if l_side["chars"] else 0.0) - a["rect"].x1
+                        if 1.0 <= dx <= 38.0:
+                            matching_chars = [
+                                c for c in l_side["chars"]
+                                if max(a["rect"].y0 - 25.0, 0.0) <= c["rect"].y1 and c["rect"].y0 <= a["rect"].y1 + 45.0
+                            ]
+                            if matching_chars:
+                                cand_adjacent_chars.extend(matching_chars)
+
+                    if cand_adjacent_chars:
+                        joined_adj = "".join(c["ch"] for c in cand_adjacent_chars)
+                        adj_has_yo_fuyo = (
+                            any(kw in joined_adj for kw in ("借用", "使用", "使う", "使わない", "要", "不要", "有", "無", "あり", "なし", "する", "しない", "持参"))
+                            and ("有無" not in joined_adj or len(joined_adj) > 4)
+                            and "個数" not in joined_adj and "数量" not in joined_adj
+                        )
+                        if adj_has_yo_fuyo:
+                            slot_info["after_chars"] = cand_adjacent_chars
+                            has_yo_fuyo = True
+                        else:
+                            for uw in UNIT_WORDS:
+                                if uw in joined_adj:
+                                    for c in cand_adjacent_chars:
+                                        if c["ch"] == uw[0]:
+                                            slot_info["num_mode"] = "before_unit"
+                                            slot_info["num_pos"] = c["rect"]
+                                            break
+                                    if slot_info["num_mode"]:
+                                        break
+                            if slot_info["num_mode"] is None:
+                                for c in cand_adjacent_chars:
+                                    if c["ch"] in UNIT_CHARS:
+                                        slot_info["num_mode"] = "before_unit"
+                                        slot_info["num_pos"] = c["rect"]
+                                        break
+
+                # Hokkaido / Circle instruction fallback: if line (or anchor) contains '○で囲む' and no slot was found
+                if slot_info["num_mode"] is None and not has_yo_fuyo:
+                    if any(cw in full_line_text for cw in ("○で囲む", "〇で囲む", "◯で囲む", "丸で囲む", "赤で○", "○をつける")):
+                        slot_info["circle_anchor_on_positive"] = True
+
+                if slot_info["num_mode"] is not None or has_yo_fuyo or slot_info.get("circle_anchor_on_positive") or (circle_mark_mode and slot_info["has_bullet"]):
                     slots_by_key.setdefault(k, []).append(slot_info)
 
         # Step 3: 収集したスロットに対して単一スロットまたは複数スロット（ひな壇段別＋合計）の値を解決して出力
@@ -2433,8 +2607,14 @@ async def preview_bg(req: PreviewRequest):
                     add_auto_num(slot["num_pos"], cnt_val, suffix_id)
                     has_emitted = True
 
-            if circle_yo_or_fuyo_chars(slot["after_chars"], cnt_val > 0, suffix_id):
+            pos_list = assigned_positions.get(slot["key"], [])
+            if circle_yo_or_fuyo_chars(slot["after_chars"], cnt_val > 0, suffix_id, positions=pos_list):
                 has_emitted = True
+
+            if slot.get("circle_anchor_on_positive") and not has_emitted:
+                if cnt_val > 0:
+                    add_auto_circle(slot["anchor_rect"], f"{suffix_id}_item")
+                    has_emitted = True
 
             if circle_mark_mode and slot["has_bullet"] and not has_emitted and slot["num_mode"] is None:
                 if cnt_val > 0:

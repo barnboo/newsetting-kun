@@ -2500,7 +2500,14 @@ const StageBuilder: React.FC<Props> = ({
       else if (lbl.includes('椅子') || lbl.includes('イス') || iid.includes('Chair')) countsByKey['chair'] = (countsByKey['chair'] || 0) + c;
       else if (lbl.includes('ピアノ') && !lbl.includes('蓋')) countsByKey['piano'] = (countsByKey['piano'] || 0) + c;
       else if (lbl.includes('机') || lbl.includes('テーブル')) countsByKey['table'] = (countsByKey['table'] || 0) + c;
-      else if (lbl.includes('コード') || lbl.includes('電源')) countsByKey['cord'] = (countsByKey['cord'] || 0) + c;
+      else if (
+        lbl.includes('コード') ||
+        lbl.includes('電源') ||
+        lbl.includes('コンセント') ||
+        iid.includes('extensionCord') ||
+        iid.includes('cord') ||
+        iid.includes('power')
+      ) countsByKey['cord'] = (countsByKey['cord'] || 0) + c;
       else if (lbl.includes('マイク')) countsByKey['mic'] = (countsByKey['mic'] || 0) + c;
       else if (lbl.includes('チャイム')) countsByKey['chime'] = (countsByKey['chime'] || 0) + c;
       else if (lbl.includes('ドラ') || lbl.includes('銅鑼')) countsByKey['gong'] = (countsByKey['gong'] || 0) + c;
