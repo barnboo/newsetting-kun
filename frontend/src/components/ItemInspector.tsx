@@ -10,11 +10,9 @@ import {
   X,
   ArrowLeft,
   ArrowRight,
-  RotateCw,
   Move,
   ChevronDown,
-  ChevronRight,
-  Palette
+  ChevronRight
 } from 'lucide-react';
 import type { PlacedItem } from './StageCanvas';
 import type { CurveObject, CurveItem } from '../utils/bezierUtils';
@@ -186,13 +184,13 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
 
         {/* Order Controls */}
         {onMoveOrder && (
-          <div className="p-3 liquid-card rounded-2xl space-y-1.5">
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">層（重なり順）:</span>
-            <div className="grid grid-cols-4 gap-1 text-xs">
+          <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100 dark:border-slate-700">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">重なり順:</span>
+            <div className="flex gap-1">
               <button
                 type="button"
                 onClick={() => onMoveOrder('forward')}
-                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
+                className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-600 cursor-pointer"
                 title="1段階前面へ"
               >
                 ▲
@@ -200,26 +198,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <button
                 type="button"
                 onClick={() => onMoveOrder('backward')}
-                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
+                className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-600 cursor-pointer"
                 title="1段階背面へ"
               >
                 ▼
-              </button>
-              <button
-                type="button"
-                onClick={() => onMoveOrder('front')}
-                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
-                title="最前面へ"
-              >
-                ⇈
-              </button>
-              <button
-                type="button"
-                onClick={() => onMoveOrder('back')}
-                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
-                title="最背面へ"
-              >
-                ⇊
               </button>
             </div>
           </div>
@@ -299,8 +281,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
     const isStand = selectedItem.templateType === 'ensembleStand' ||
                     selectedItem.templateType === 'conductorStand' ||
                     selectedItem.templateType === 'ensembleChairAndStand';
-    const isPianoChair = selectedItem.templateType === 'pianoChair' ||
-                         selectedItem.templateType === 'turnerChair';
+    const isPianoChair = selectedItem.templateType === 'pianoChair';
     const lidChoices = pianoLidOptions && pianoLidOptions.length > 0
       ? pianoLidOptions
       : ['閉', '蒲鉾板', '半開', '全開'];
@@ -389,17 +370,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
             />
           </label>
-          <label className="flex flex-col gap-1 col-span-2">
-            <span className="text-xs text-slate-500 font-medium">回転角度 (度)</span>
-            <input
-              type="number"
-              step="1"
-              value={Math.round(selectedItem.rotation)}
-              onChange={(e) => handleNumberChange('rotation', e.target.value)}
-              className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
-            />
-          </label>
-
           {/* Quick Size Slider and Presets for Placed Items */}
           <div className="flex flex-col gap-1.5 col-span-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
             <div className="flex items-center justify-between">
@@ -429,93 +399,18 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               }}
               className="w-full accent-[#007AFF] cursor-pointer"
             />
-            <div className="flex items-center gap-1 mt-1">
-              {[
-                { label: '小', size: 24 },
-                { label: '標準', size: 36 },
-                { label: '大', size: 48 },
-                { label: '特大', size: 64 },
-              ].map(preset => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => {
-                    const currentW = Math.max(1, selectedItem.width * (selectedItem.scaleX || 1));
-                    const currentH = Math.max(1, selectedItem.height * (selectedItem.scaleY || 1));
-                    const ratio = currentH / currentW;
-                    onUpdateItem(selectedItem.id, {
-                      width: preset.size,
-                      height: Math.round(preset.size * ratio),
-                      scaleX: 1,
-                      scaleY: 1,
-                    });
-                  }}
-                  className="flex-1 py-1 px-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
-                >
-                  {preset.label} ({preset.size})
-                </button>
-              ))}
-            </div>
           </div>
-        </div>
 
-        {/* Color Palette for PlacedItem */}
-        <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1">
-              <Palette className="w-3.5 h-3.5 text-[#007AFF]" />
-              <span>表示色 (カラー)</span>
-            </span>
-            <div className="flex items-center gap-1.5">
-              <span
-                className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-2xs"
-                style={{ backgroundColor: selectedItem.color || '#111827' }}
-              />
-              <span className="font-mono text-[10px] text-slate-500">
-                {selectedItem.color || '#111827'}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {[
-              { label: '黒', value: '#111827' },
-              { label: '青', value: '#2563eb' },
-              { label: '赤', value: '#dc2626' },
-              { label: '緑', value: '#16a34a' },
-              { label: '紫', value: '#9333ea' },
-              { label: '橙', value: '#ea580c' },
-              { label: '水', value: '#0284c7' },
-              { label: '桃', value: '#db2777' },
-            ].map(col => {
-              const isSelected = (selectedItem.color || '#111827').toLowerCase() === col.value.toLowerCase();
-              return (
-                <button
-                  key={col.value}
-                  type="button"
-                  onClick={() => onUpdateItem(selectedItem.id, { color: col.value })}
-                  className={`w-6 h-6 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
-                    isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 border-white' : 'border-black/10 hover:scale-105'
-                  }`}
-                  style={{ backgroundColor: col.value }}
-                  title={`${col.label} (${col.value})`}
-                >
-                  {isSelected && <span className="text-[10px] font-bold text-white drop-shadow-xs">✓</span>}
-                </button>
-              );
-            })}
-            <label
-              className="w-6 h-6 rounded-full border border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden transition-all relative"
-              title="自由なカスタム色を選択"
-            >
-              <input
-                type="color"
-                value={selectedItem.color || '#111827'}
-                onChange={(e) => onUpdateItem(selectedItem.id, { color: e.target.value })}
-                className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
-              />
-              <span className="text-[11px] font-bold leading-none text-slate-500">+</span>
-            </label>
-          </div>
+          <label className="flex flex-col gap-1 col-span-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+            <span className="text-xs text-slate-500 font-medium">回転角度 (度)</span>
+            <input
+              type="number"
+              step="1"
+              value={Math.round(selectedItem.rotation)}
+              onChange={(e) => handleNumberChange('rotation', e.target.value)}
+              className="px-2 py-1 border border-slate-300 rounded text-sm w-full"
+            />
+          </label>
         </div>
 
         {onMoveOrder && (
@@ -548,9 +443,11 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <span className="flex items-center gap-1">
                 <span>♪</span> 譜面台アイコン表示
               </span>
-              <span className="text-[10px] text-slate-400 font-normal">
-                {selectedItem.customIconStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
-              </span>
+              {selectedItem.templateType !== 'ensembleChairAndStand' && (
+                <span className="text-[10px] text-slate-400 font-normal">
+                  {selectedItem.customIconStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
+                </span>
+              )}
             </h4>
             <div className="grid grid-cols-2 gap-1.5">
               <button
@@ -599,15 +496,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <span className="flex items-center gap-1">
                 <Square className="w-3.5 h-3.5 text-[#007AFF]" /> 椅子の種類
               </span>
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
-                {selectedItem.chairType === 'pianoChairSvg'
-                  ? 'ピアノ椅子 (角型)'
-                  : selectedItem.chairType === 'pianoChair'
-                  ? 'ピアノ椅子 (◎)'
-                  : selectedItem.chairType === 'pianoChairPi'
-                  ? 'ピアノ椅子 (ピ)'
-                  : '合奏用椅子 (○)'}
-              </span>
             </h4>
 
             {/* 1. 椅子の分類選択 (合奏用椅子 vs ピアノ椅子) */}
@@ -647,27 +535,12 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               </div>
             </div>
 
-            {/* 2. それに連続してスタイルの選択 */}
-            <div className="pt-1">
-              <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1.5 block">
-                2. 表示スタイルを選択:
-              </span>
-              {(selectedItem.chairType || 'normal') === 'normal' ? (
-                /* 合奏用椅子のスタイル: 丸 */
-                <div className="p-2.5 liquid-card rounded-xl flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-7 h-7 rounded-lg bg-[#007AFF]/15 text-[#007AFF] font-bold flex items-center justify-center text-sm shadow-2xs">
-                      ○
-                    </span>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">丸 (○)</span>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400">通常の合奏用丸椅子として表示・集計</span>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-[#007AFF] bg-[#007AFF]/10 px-2 py-0.5 rounded-full">選択中</span>
-                </div>
-              ) : (
-                /* ピアノ椅子のスタイル: ピアノ椅子の画像 か 二重丸 か 丸の中にピ */
+            {/* 2. ピアノ椅子選択時のみ表示スタイルの選択を表示 */}
+            {(selectedItem.chairType === 'pianoChair' || selectedItem.chairType === 'pianoChairSvg' || selectedItem.chairType === 'pianoChairPi') && (
+              <div className="pt-1">
+                <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1.5 block">
+                  2. 表示スタイルを選択:
+                </span>
                 <div className="grid grid-cols-3 gap-1.5">
                   <button
                     type="button"
@@ -706,14 +579,8 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                     <span className="text-[10px]">丸ピ (ピ)</span>
                   </button>
                 </div>
-              )}
-            </div>
-
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-              {(selectedItem.chairType || 'normal') === 'normal'
-                ? '※ 提出書類の集計欄では「合奏用椅子」として自動カウントされます。'
-                : '※「ピアノ椅子画像」「二重丸」「丸ピ」を選択すると、提出書類の集計欄でも「ピアノ椅子」として自動カウントされます。'}
-            </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -1120,94 +987,34 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               className="px-2 py-1 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 rounded text-sm w-full font-mono"
             />
           </label>
-        </div>
-
-        {/* Rotation Controls */}
-        <div className="flex flex-col gap-1.5 p-2.5 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-              <RotateCw className="w-3.5 h-3.5 text-[#007AFF]" />
-              回転角度
-            </span>
-            <div className="flex items-center gap-1">
-              <input
-                type="number"
-                step="1"
-                min="-360"
-                max="360"
-                value={Math.round(selectedCurve.rotation || 0)}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  if (!isNaN(val)) {
-                    let norm = Math.round(val % 360);
-                    if (norm < 0) norm += 360;
-                    onUpdateCurve(selectedCurve.id, { rotation: norm });
-                  }
-                }}
-                className="w-16 px-1.5 py-0.5 text-xs border border-slate-300 dark:border-slate-600 dark:bg-slate-700 rounded text-right font-mono"
-              />
-              <span className="text-xs text-slate-500 dark:text-slate-400">度</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pt-0.5">
+          <label className="flex flex-col gap-1 col-span-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+            <span className="text-xs text-slate-500 font-medium">回転角度 (度)</span>
             <input
-              type="range"
-              min="0"
-              max="360"
+              type="number"
               step="1"
-              value={Math.round(((selectedCurve.rotation || 0) % 360 + 360) % 360)}
+              value={Math.round(selectedCurve.rotation || 0)}
               onChange={(e) => {
-                onUpdateCurve(selectedCurve.id, { rotation: parseFloat(e.target.value) });
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) {
+                  let norm = Math.round(val % 360);
+                  if (norm < 0) norm += 360;
+                  onUpdateCurve(selectedCurve.id, { rotation: norm });
+                }
               }}
-              className="w-full accent-[#007AFF] cursor-pointer"
+              className="px-2 py-1 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 rounded text-sm w-full font-mono"
             />
-          </div>
-
-          {/* Quick Rotation Buttons */}
-          <div className="grid grid-cols-5 gap-1 pt-0.5">
-            {[
-              { label: '-90°', delta: -90 },
-              { label: '-15°', delta: -15 },
-              { label: '0°', reset: 0 },
-              { label: '+15°', delta: 15 },
-              { label: '+90°', delta: 90 },
-            ].map((btn, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => {
-                  if (btn.reset !== undefined) {
-                    onUpdateCurve(selectedCurve.id, { rotation: 0 });
-                  } else if (btn.delta !== undefined) {
-                    const cur = selectedCurve.rotation || 0;
-                    let next = Math.round((cur + btn.delta) % 360);
-                    if (next < 0) next += 360;
-                    onUpdateCurve(selectedCurve.id, { rotation: next });
-                  }
-                }}
-                className={`py-1 rounded text-[11px] font-mono font-medium transition-all cursor-pointer ${
-                  btn.reset !== undefined && (selectedCurve.rotation || 0) === 0
-                    ? 'liquid-btn-primary shadow-xs'
-                    : 'liquid-btn text-slate-700 dark:text-slate-300 hover:text-slate-900'
-                }`}
-                title={btn.reset !== undefined ? '角度を0°にリセット' : `${btn.label} 回転`}
-              >
-                {btn.label}
-              </button>
-            ))}
-          </div>
+          </label>
         </div>
 
         {/* Order Controls */}
         {onMoveOrder && (
-          <div className="p-3 liquid-card rounded-2xl space-y-1.5">
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 block">層（重なり順）:</span>
-            <div className="grid grid-cols-4 gap-1 text-xs">
+          <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100 dark:border-slate-700">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">重なり順:</span>
+            <div className="flex gap-1">
               <button
                 type="button"
                 onClick={() => onMoveOrder('forward')}
-                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
+                className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-600 cursor-pointer"
                 title="1段階前面へ"
               >
                 ▲
@@ -1215,26 +1022,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               <button
                 type="button"
                 onClick={() => onMoveOrder('backward')}
-                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
+                className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-600 cursor-pointer"
                 title="1段階背面へ"
               >
                 ▼
-              </button>
-              <button
-                type="button"
-                onClick={() => onMoveOrder('front')}
-                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
-                title="最前面へ"
-              >
-                ⇈
-              </button>
-              <button
-                type="button"
-                onClick={() => onMoveOrder('back')}
-                className="py-1.5 px-1 bg-white dark:bg-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-500 rounded font-bold text-center text-slate-700 dark:text-slate-200"
-                title="最背面へ"
-              >
-                ⇊
               </button>
             </div>
           </div>
@@ -1258,7 +1049,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
               if (isEnsembleChairAndStand(it)) return false;
               const t = it.type || '';
               return t === 'pianoChair' ||
-                t === 'turnerChair' ||
                 Boolean(it.label && (it.label.includes('ピアノ') && (it.label.includes('椅子') || it.label.includes('イス'))));
             };
 
@@ -1314,7 +1104,7 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0"></span>
                         <span className="text-xs font-bold text-blue-900 dark:text-blue-200 truncate">
-                          選択中: {activeItemIndex + 1}. {activeItem.label || activeItem.type}
+                          {activeItem.label || activeItem.type}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1343,31 +1133,66 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       </div>
                     </div>
 
-                    {/* 左右への順序移動ボタン */}
-                    <div className="flex items-center justify-between pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70">
-                      <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                        並び順を移動:
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          disabled={activeItemIndex <= 0}
-                          onClick={() => onMoveCurveItemOrder?.(selectedCurve.id, activeItem.id, 'left')}
-                          className="w-8 h-7 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95"
-                          title="左隣（始点側）へ移動 ([ または Alt+←])"
-                        >
-                          <ArrowLeft className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={activeItemIndex >= curveItems.length - 1}
-                          onClick={() => onMoveCurveItemOrder?.(selectedCurve.id, activeItem.id, 'right')}
-                          className="w-8 h-7 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95"
-                          title="右隣（終点側）へ移動 (] または Alt+→)"
-                        >
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
+                    {/* この記号・アイテムの個別サイズ調整 */}
+                    <div className="pt-1.5 border-t border-blue-200/70 dark:border-blue-800/70 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          この記号のサイズ
+                        </span>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="10"
+                          max="120"
+                          value={Math.round(activeItem.size || selectedCurve.itemSize)}
+                          onChange={(e) => {
+                            const newSize = parseFloat(e.target.value);
+                            if (!isNaN(newSize) && newSize > 0) {
+                              const nextItems = curveItems.map(it => {
+                                if (it.id === activeItem.id) {
+                                  return { ...it, size: newSize };
+                                }
+                                return it;
+                              });
+                              onUpdateCurve(selectedCurve.id, { items: nextItems });
+                            }
+                          }}
+                          className="flex-1 accent-[#007AFF] cursor-pointer"
+                        />
+                        <input
+                          type="number"
+                          min="10"
+                          max="200"
+                          value={Math.round(activeItem.size || selectedCurve.itemSize)}
+                          onChange={(e) => {
+                            const s = parseFloat(e.target.value);
+                            if (!isNaN(s) && s > 0) {
+                              const nextItems = curveItems.map(it => {
+                                if (it.id === activeItem.id) {
+                                  return { ...it, size: s };
+                                }
+                                return it;
+                              });
+                              onUpdateCurve(selectedCurve.id, { items: nextItems });
+                            }
+                          }}
+                          className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const currentSize = activeItem.size || selectedCurve.itemSize;
+                          const nextItems = curveItems.map(it => ({ ...it, size: currentSize }));
+                          onUpdateCurve(selectedCurve.id, { itemSize: currentSize, items: nextItems });
+                        }}
+                        className="w-full py-1.5 px-2 rounded-xl text-[11px] font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
+                        title="この曲線上のすべてのアイテムにこのサイズを一括適用します"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>この曲線の全記号に適用</span>
+                      </button>
                     </div>
 
                     {/* 右隣との間隔 */}
@@ -1381,13 +1206,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                           <span className="text-blue-500 group-hover:text-blue-600 transition-colors">
                             {openCurveItemSections['gap'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                           </span>
-                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
-                            {activeItemIndex === curveItems.length - 1 ? '右の間隔（曲線の終点側）' : '右隣との間隔'}
+                          <span className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">
+                            間隔
                           </span>
                         </div>
-                        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-800/80 border border-blue-200/60 dark:border-blue-700/60 text-blue-800 dark:text-blue-200 font-semibold shadow-2xs">
-                          {Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}px
-                        </span>
                       </button>
 
                       {openCurveItemSections['gap'] && (
@@ -1407,38 +1229,21 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                             )}
                           </div>
 
-                          <div className="flex items-center justify-between gap-1 w-full min-w-0">
-                            <div className="flex items-center gap-1 shrink-0">
-                              <input
-                                type="number"
-                                min="0"
-                                max="500"
-                                value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value);
-                                  if (!isNaN(val) && val >= 0) {
-                                    handleUpdateItemGap(activeItem.id, val);
-                                  }
-                                }}
-                                className="w-12 px-1 py-0.5 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
-                              />
-                              <span className="text-[11px] text-slate-500 dark:text-slate-400">px</span>
-                            </div>
-                            <div className="flex items-center gap-0.5 shrink-0">
-                              {[-5, -1, 1, 5].map((delta) => (
-                                <button
-                                  key={delta}
-                                  type="button"
-                                  onClick={() => {
-                                    const cur = activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap;
-                                    handleUpdateItemGap(activeItem.id, Math.max(0, cur + delta));
-                                  }}
-                                  className="w-[23px] h-5.5 flex items-center justify-center text-[10px] font-mono bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-800 dark:text-blue-200 shadow-2xs cursor-pointer"
-                                >
-                                  {delta > 0 ? `+${delta}` : delta}
-                                </button>
-                              ))}
-                            </div>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min="0"
+                              max="500"
+                              value={Math.round(activeItem.gap !== undefined ? activeItem.gap : selectedCurve.itemGap)}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                if (!isNaN(val) && val >= 0) {
+                                  handleUpdateItemGap(activeItem.id, val);
+                                }
+                              }}
+                              className="w-16 px-1.5 py-0.5 text-xs border border-blue-300 dark:border-blue-700 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
+                            />
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">px</span>
                           </div>
 
                           <input
@@ -1449,12 +1254,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                             onChange={(e) => handleUpdateItemGap(activeItem.id, parseFloat(e.target.value))}
                             className="w-full accent-blue-600 mt-0.5 cursor-pointer"
                           />
-
-                          {activeItemIndex === curveItems.length - 1 && (
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                              ※ 右端のオブジェクトの右側に空ける間隔（余白）としてキャンバス上に直接反映されます
-                            </p>
-                          )}
                         </div>
                       )}
                     </div>
@@ -1502,19 +1301,10 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                 {openCurveItemSections['chairType'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                               </span>
                               <Square className="w-3.5 h-3.5 text-[#007AFF] shrink-0" />
-                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
-                                椅子の種類設定
+                              <span className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">
+                                椅子
                               </span>
                             </div>
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal shrink-0">
-                              {activeChairType === 'pianoChairSvg'
-                                ? 'ピアノ椅子 (画像)'
-                                : activeChairType === 'pianoChair'
-                                ? 'ピアノ椅子 (◎)'
-                                : activeChairType === 'pianoChairPi'
-                                ? 'ピアノ椅子 (ピ)'
-                                : '合奏用椅子 (○)'}
-                            </span>
                           </button>
 
                           {openCurveItemSections['chairType'] && (
@@ -1556,25 +1346,12 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                 </div>
                               </div>
 
-                              {/* 2. それに連続して表示スタイルの選択 */}
-                              <div>
-                                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">
-                                  2. 表示スタイル
-                                </span>
-                                {activeChairType === 'normal' ? (
-                                  <div className="p-2 liquid-card rounded-xl flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      <span className="w-6 h-6 rounded-lg bg-[#007AFF]/15 text-[#007AFF] font-bold flex items-center justify-center text-xs shadow-2xs">
-                                        ○
-                                      </span>
-                                      <div className="flex flex-col">
-                                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">丸 (○)</span>
-                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">通常の合奏用丸椅子として表示・集計</span>
-                                      </div>
-                                    </div>
-                                    <span className="text-[11px] font-bold text-[#007AFF] bg-[#007AFF]/10 px-2 py-0.5 rounded-full">選択中</span>
-                                  </div>
-                                ) : (
+                              {/* 2. ピアノ椅子選択時のみ表示スタイルの選択を表示 */}
+                              {activeChairType !== 'normal' && (
+                                <div>
+                                  <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">
+                                    2. 表示スタイル
+                                  </span>
                                   <div className="grid grid-cols-3 gap-1.5">
                                     <button
                                       type="button"
@@ -1613,8 +1390,8 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                       <span className="text-[10px]">丸ピ (ピ)</span>
                                     </button>
                                   </div>
-                                )}
-                              </div>
+                                </div>
+                              )}
 
                               {/* 全てに適応ボタン (ベジェ上のみ) */}
                               <button
@@ -1626,12 +1403,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                 <Sparkles className="w-3.5 h-3.5" />
                                 <span>この曲線のすべての合奏用椅子・譜面台に適用</span>
                               </button>
-
-                              <p className="text-[9.5px] text-slate-500 dark:text-slate-400 leading-tight">
-                                {activeChairType === 'normal'
-                                  ? '※ この椅子は「合奏用椅子」として自動カウントされます。'
-                                  : '※ この椅子は「ピアノ椅子」として自動カウントされます。'}
-                              </p>
                             </div>
                           )}
                         </div>
@@ -1809,13 +1580,15 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                                 {openCurveItemSections['standStyle'] ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                               </span>
                               <Music className="w-3.5 h-3.5 text-[#007AFF] shrink-0" />
-                              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
-                                譜面台の表示スタイル
+                              <span className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">
+                                譜面台
                               </span>
                             </div>
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal shrink-0">
-                              {activeStandStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
-                            </span>
+                            {!isEnsembleChairAndStand(activeItem) && (
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal shrink-0">
+                                {activeStandStyle === 'xMark' ? 'Xマーク' : '通常 (T字)'}
+                              </span>
+                            )}
                           </button>
 
                           {openCurveItemSections['standStyle'] && (
@@ -2020,156 +1793,29 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                       );
                     })()}
 
-                    {/* この記号・アイテムの個別サイズ調整 */}
-                    <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                          この記号のサイズ
-                        </span>
-                        <span className="font-mono text-xs font-bold text-blue-600 dark:text-sky-400">
-                          {Math.round(activeItem.size || selectedCurve.itemSize)} px
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="range"
-                          min="10"
-                          max="120"
-                          value={Math.round(activeItem.size || selectedCurve.itemSize)}
-                          onChange={(e) => {
-                            const newSize = parseFloat(e.target.value);
-                            if (!isNaN(newSize) && newSize > 0) {
-                              const nextItems = curveItems.map(it => {
-                                if (it.id === activeItem.id) {
-                                  return { ...it, size: newSize };
-                                }
-                                return it;
-                              });
-                              onUpdateCurve(selectedCurve.id, { items: nextItems });
-                            }
-                          }}
-                          className="flex-1 accent-[#007AFF] cursor-pointer"
-                        />
-                        <input
-                          type="number"
-                          min="10"
-                          max="200"
-                          value={Math.round(activeItem.size || selectedCurve.itemSize)}
-                          onChange={(e) => {
-                            const s = parseFloat(e.target.value);
-                            if (!isNaN(s) && s > 0) {
-                              const nextItems = curveItems.map(it => {
-                                if (it.id === activeItem.id) {
-                                  return { ...it, size: s };
-                                }
-                                return it;
-                              });
-                              onUpdateCurve(selectedCurve.id, { items: nextItems });
-                            }
-                          }}
-                          className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const currentSize = activeItem.size || selectedCurve.itemSize;
-                          const nextItems = curveItems.map(it => ({ ...it, size: currentSize }));
-                          onUpdateCurve(selectedCurve.id, { itemSize: currentSize, items: nextItems });
-                        }}
-                        className="w-full py-1.5 px-2 rounded-xl text-[11px] font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
-                        title="この曲線上のすべてのアイテムにこのサイズを一括適用します"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>この曲線の全記号に適用</span>
-                      </button>
-
-                      {/* この記号のカラー設定 */}
-                      <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/70 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1">
-                            <Palette className="w-3.5 h-3.5 text-[#007AFF]" />
-                            <span>この記号の表示色</span>
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-2xs"
-                              style={{ backgroundColor: activeItem.color || selectedCurve.color || '#000000' }}
-                            />
-                            <span className="font-mono text-[10px] text-slate-500">
-                              {activeItem.color || selectedCurve.color || '#000000'}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {[
-                            { label: '黒', value: '#111827' },
-                            { label: '青', value: '#2563eb' },
-                            { label: '赤', value: '#dc2626' },
-                            { label: '緑', value: '#16a34a' },
-                            { label: '紫', value: '#9333ea' },
-                            { label: '橙', value: '#ea580c' },
-                            { label: '水', value: '#0284c7' },
-                            { label: '桃', value: '#db2777' },
-                          ].map(col => {
-                            const isSelected = (activeItem.color || selectedCurve.color || '#000000').toLowerCase() === col.value.toLowerCase();
-                            return (
-                              <button
-                                key={col.value}
-                                type="button"
-                                onClick={() => {
-                                  const nextItems = curveItems.map(it => {
-                                    if (it.id === activeItem.id) {
-                                      return { ...it, color: col.value };
-                                    }
-                                    return it;
-                                  });
-                                  onUpdateCurve(selectedCurve.id, { items: nextItems });
-                                }}
-                                className={`w-6 h-6 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
-                                  isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 border-white' : 'border-black/10 hover:scale-105'
-                                }`}
-                                style={{ backgroundColor: col.value }}
-                                title={`${col.label} (${col.value})`}
-                              >
-                                {isSelected && <span className="text-[10px] font-bold text-white drop-shadow-xs">✓</span>}
-                              </button>
-                            );
-                          })}
-                          <label
-                            className="w-6 h-6 rounded-full border border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden transition-all relative"
-                            title="自由なカスタム色を選択"
-                          >
-                            <input
-                              type="color"
-                              value={activeItem.color || selectedCurve.color || '#000000'}
-                              onChange={(e) => {
-                                const newColor = e.target.value;
-                                const nextItems = curveItems.map(it => {
-                                  if (it.id === activeItem.id) {
-                                    return { ...it, color: newColor };
-                                  }
-                                  return it;
-                                });
-                                onUpdateCurve(selectedCurve.id, { items: nextItems });
-                              }}
-                              className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
-                            />
-                            <span className="text-[11px] font-bold leading-none text-slate-500">+</span>
-                          </label>
-                        </div>
+                    {/* 左右への順序移動ボタン */}
+                    <div className="flex items-center justify-between pt-2 border-t border-blue-200/70 dark:border-blue-800/70">
+                      <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        並び順を移動:
+                      </span>
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => {
-                            const currentColor = activeItem.color || selectedCurve.color || '#000000';
-                            const nextItems = curveItems.map(it => ({ ...it, color: currentColor }));
-                            onUpdateCurve(selectedCurve.id, { color: currentColor, items: nextItems });
-                          }}
-                          className="w-full py-1.5 px-2 rounded-xl text-[11px] font-semibold liquid-btn text-[#007AFF] hover:text-blue-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs hover:scale-[1.01] active:scale-[0.99]"
-                          title="この曲線上のすべての記号をこの色に一括統一します"
+                          disabled={activeItemIndex <= 0}
+                          onClick={() => onMoveCurveItemOrder?.(selectedCurve.id, activeItem.id, 'left')}
+                          className="w-8 h-7 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95"
+                          title="左隣（始点側）へ移動 ([ または Alt+←])"
                         >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>この曲線の全記号に適用</span>
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={activeItemIndex >= curveItems.length - 1}
+                          onClick={() => onMoveCurveItemOrder?.(selectedCurve.id, activeItem.id, 'right')}
+                          className="w-8 h-7 text-xs font-semibold rounded-lg liquid-btn text-slate-700 dark:text-slate-200 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95"
+                          title="右隣（終点側）へ移動 (] または Alt+→)"
+                        >
+                          <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -2187,7 +1833,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                   <div className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-slate-200 dark:border-slate-700 rounded-lg p-1.5 bg-slate-50/60 dark:bg-slate-900/40">
                     {curveItems.map((it, idx) => {
                       const isSelected = selectedCurveItemId === it.id;
-                      const isLast = idx === curveItems.length - 1;
                       return (
                         <div
                           key={it.id || idx}
@@ -2205,43 +1850,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                             <span className="truncate">{it.label || it.type}</span>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {/* 左右への順序移動ボタン */}
-                            <div className="flex items-center gap-0.5 mr-0.5">
-                              <button
-                                type="button"
-                                disabled={idx === 0}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onMoveCurveItemOrder?.(selectedCurve.id, it.id, 'left');
-                                }}
-                                className="p-1 rounded text-slate-400 hover:text-[#007AFF] dark:hover:text-blue-400 disabled:opacity-20 disabled:hover:text-slate-400 transition-colors cursor-pointer"
-                                title="左隣（始点側）へ移動"
-                              >
-                                <ArrowLeft className="w-3 h-3" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isLast}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onMoveCurveItemOrder?.(selectedCurve.id, it.id, 'right');
-                                }}
-                                className="p-1 rounded text-slate-400 hover:text-[#007AFF] dark:hover:text-blue-400 disabled:opacity-20 disabled:hover:text-slate-400 transition-colors cursor-pointer"
-                                title="右隣（終点側）へ移動"
-                              >
-                                <ArrowRight className="w-3 h-3" />
-                              </button>
-                            </div>
-
-                            {it.gap !== undefined ? (
-                              <span className="text-[10px] bg-blue-100 dark:bg-blue-850 text-blue-800 dark:text-blue-200 px-1 py-0.5 rounded font-mono font-semibold" title={isLast ? "個別設定の間隔 (末尾)" : "個別設定の間隔"}>
-                                間隔: {Math.round(it.gap)}px{isLast && ' (末尾)'}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-slate-400 font-mono" title={isLast ? "標準間隔 (末尾)" : "標準間隔"}>
-                                {Math.round(selectedCurve.itemGap)}px{isLast && ' (末尾)'}
-                              </span>
-                            )}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2330,32 +1938,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                   className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
                 />
               </div>
-              {/* Quick size presets for curve */}
-              <div className="flex items-center gap-1 mt-0.5">
-                {[
-                  { label: '小', size: 24 },
-                  { label: '標準', size: 36 },
-                  { label: '大', size: 48 },
-                  { label: '特大', size: 64 },
-                ].map(preset => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() => {
-                      const updatedItems = Array.isArray(selectedCurve.items)
-                        ? selectedCurve.items.map(it => ({ ...it, size: preset.size }))
-                        : undefined;
-                      onUpdateCurve(selectedCurve.id, {
-                        itemSize: preset.size,
-                        ...(updatedItems ? { items: updatedItems } : {}),
-                      });
-                    }}
-                    className="flex-1 py-1 px-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
-                  >
-                    {preset.label} ({preset.size})
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* 配置間隔（スライダ + 数値入力） */}
@@ -2386,82 +1968,6 @@ export const ItemInspector: React.FC<ItemInspectorProps> = ({
                   }}
                   className="w-16 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-mono text-right"
                 />
-              </div>
-            </div>
-
-            {/* 曲線全体のカラー設定 */}
-            <div className="flex flex-col gap-1.5 col-span-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                  <Palette className="w-3.5 h-3.5 text-[#007AFF]" />
-                  <span>曲線・記号の表示色</span>
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <span
-                    className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-2xs"
-                    style={{ backgroundColor: selectedCurve.color || '#000000' }}
-                  />
-                  <span className="font-mono text-[10px] text-slate-500">
-                    {selectedCurve.color || '#000000'}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {[
-                  { label: '黒', value: '#111827' },
-                  { label: '青', value: '#2563eb' },
-                  { label: '赤', value: '#dc2626' },
-                  { label: '緑', value: '#16a34a' },
-                  { label: '紫', value: '#9333ea' },
-                  { label: '橙', value: '#ea580c' },
-                  { label: '水', value: '#0284c7' },
-                  { label: '桃', value: '#db2777' },
-                ].map(col => {
-                  const isSelected = (selectedCurve.color || '#000000').toLowerCase() === col.value.toLowerCase();
-                  return (
-                    <button
-                      key={col.value}
-                      type="button"
-                      onClick={() => {
-                        const updatedItems = Array.isArray(selectedCurve.items)
-                          ? selectedCurve.items.map(it => ({ ...it, color: col.value }))
-                          : undefined;
-                        onUpdateCurve(selectedCurve.id, {
-                          color: col.value,
-                          ...(updatedItems ? { items: updatedItems } : {}),
-                        });
-                      }}
-                      className={`w-6 h-6 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
-                        isSelected ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 border-white' : 'border-black/10 hover:scale-105'
-                      }`}
-                      style={{ backgroundColor: col.value }}
-                      title={`${col.label} (${col.value})`}
-                    >
-                      {isSelected && <span className="text-[10px] font-bold text-white drop-shadow-xs">✓</span>}
-                    </button>
-                  );
-                })}
-                <label
-                  className="w-6 h-6 rounded-full border border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden transition-all relative"
-                  title="自由なカスタム色を選択"
-                >
-                  <input
-                    type="color"
-                    value={selectedCurve.color || '#000000'}
-                    onChange={(e) => {
-                      const newColor = e.target.value;
-                      const updatedItems = Array.isArray(selectedCurve.items)
-                        ? selectedCurve.items.map(it => ({ ...it, color: newColor }))
-                        : undefined;
-                      onUpdateCurve(selectedCurve.id, {
-                        color: newColor,
-                        ...(updatedItems ? { items: updatedItems } : {}),
-                      });
-                    }}
-                    className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
-                  />
-                  <span className="text-[11px] font-bold leading-none text-slate-500">+</span>
-                </label>
               </div>
             </div>
 

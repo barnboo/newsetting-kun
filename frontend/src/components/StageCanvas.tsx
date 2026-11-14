@@ -1470,7 +1470,7 @@ const CurveCanvas: React.FC<{
             x={pts[0]}
             y={pts[1]}
             radius={handleRadius}
-            hitStrokeWidth={36 / scale}
+            hitStrokeWidth={16 / scale}
             fill="#2563eb"
             stroke="#ffffff"
             strokeWidth={2 / scale}
@@ -1528,7 +1528,7 @@ const CurveCanvas: React.FC<{
             x={pts[4]}
             y={pts[5]}
             radius={handleRadius}
-            hitStrokeWidth={36 / scale}
+            hitStrokeWidth={16 / scale}
             fill="#2563eb"
             stroke="#ffffff"
             strokeWidth={2 / scale}
@@ -1602,7 +1602,7 @@ const CurveCanvas: React.FC<{
             x={pts[2]}
             y={pts[3]}
             radius={handleRadius}
-            hitStrokeWidth={36 / scale}
+            hitStrokeWidth={16 / scale}
             fill={(isSnappedToMid || (isSelected && isCtrlPointSnapped)) ? '#10b981' : '#ef4444'}
             stroke="#ffffff"
             strokeWidth={2.5 / scale}
@@ -1695,26 +1695,33 @@ const CurveCanvas: React.FC<{
             const bounds = getBezierCenter(pts);
             const { cx, cy, minY } = bounds;
             const rotateX = cx;
-            const handleDist = 34 / scale;
-            const rotateY = minY - handleDist;
+            // ベジェ曲線自体だけでなく、赤い制御点や両端点も含めた最上部を基準にして重なりを防ぐ
+            const topY = Math.min(minY, pts[1], pts[3], pts[5]);
+            const handleDist = 44 / scale;
+            const rotateY = topY - handleDist;
             const handleRadius = (isHoveredRotate || isRotating ? 12 : 10.5) / scale;
+            const isCtrlNearTopCenter =
+              Math.abs(pts[2] - rotateX) < 24 / scale && Math.abs(pts[3] - topY) < 24 / scale;
+            const guideStartY = isCtrlNearTopCenter ? pts[3] - 14 / scale : minY;
 
             return (
               <Group key="curve-rotation-handle-group">
-                {/* Anchor dot on top of the curve at geometric center X */}
-                <Circle
-                  x={rotateX}
-                  y={minY}
-                  radius={2.5 / scale}
-                  fill="#2563eb"
-                  stroke="#ffffff"
-                  strokeWidth={1 / scale}
-                  listening={false}
-                />
+                {/* Anchor dot on top of the curve at geometric center X (skip when red control point sits there) */}
+                {!isCtrlNearTopCenter && (
+                  <Circle
+                    x={rotateX}
+                    y={minY}
+                    radius={2.5 / scale}
+                    fill="#2563eb"
+                    stroke="#ffffff"
+                    strokeWidth={1 / scale}
+                    listening={false}
+                  />
+                )}
 
                 {/* Connecting dashed guide line */}
                 <Line
-                  points={[rotateX, minY, rotateX, rotateY + handleRadius]}
+                  points={[rotateX, guideStartY, rotateX, rotateY + handleRadius]}
                   stroke="#2563eb"
                   strokeWidth={1.6 / scale}
                   dash={[3 / scale, 2 / scale]}
@@ -1842,7 +1849,7 @@ const CurveCanvas: React.FC<{
                   {/* Clean white badge with iOS-style blue ring & soft glow shadow */}
                   <Circle
                     radius={handleRadius}
-                    hitStrokeWidth={40 / scale}
+                    hitStrokeWidth={16 / scale}
                     fill="#ffffff"
                     stroke="#2563eb"
                     strokeWidth={2 / scale}
@@ -3603,6 +3610,170 @@ const StageCanvas = forwardRef<StageCanvasRef, StageCanvasProps>((
             </Layer>
           )}
         </Stage>
+
+        {/* Canva-like Floating Toggle Menu for 椅子プラス譜面台 (ensembleChairAndStand) */}
+        {(() => {
+          let targetInfo: {
+            anchorX: number;
+            anchorTopY: number;
+            anchorBottomY: number;
+            isPianoChair: boolean;
+            isStandXMark: boolean;
+            onToggleChair: () => void;
+            onToggleStand: () => void;
+          } | null = null;
+
+          if (activeItemIds.length === 1 && activeCurveIds.length === 0 && !selectedCurveItemId) {
+            const item = placedItems.find(it => it.id === activeItemIds[0]);
+            if (item && item.templateType === 'ensembleChairAndStand') {
+              const halfH = (item.height * Math.abs(item.scaleY || 1)) / 2;
+              const isPianoChair =
+                item.chairType === 'pianoChair' ||
+                item.chairType === 'pianoChairSvg' ||
+                item.chairType === 'pianoChairPi';
+              const isStandXMark = item.customIconStyle === 'xMark';
+
+              targetInfo = {
+                anchorX: item.x * stageDimensions.scale,
+                anchorTopY: (item.y - halfH) * stageDimensions.scale,
+                anchorBottomY: (item.y + halfH) * stageDimensions.scale,
+                isPianoChair,
+                isStandXMark,
+                onToggleChair: () => {
+                  onUpdateItem(item.id, { chairType: isPianoChair ? 'normal' : 'pianoChairSvg' });
+                },
+                onToggleStand: () => {
+                  onUpdateItem(item.id, { customIconStyle: isStandXMark ? 'default' : 'xMark' });
+                },
+              };
+            }
+          } else if (selectedCurveId && selectedCurveItemId) {
+            const curve = curveObjects.find(c => c.id === selectedCurveId);
+            const curveItems = curve?.items || [];
+            const curveItem = curveItems.find(it => it.id === selectedCurveItemId);
+            if (curve && curveItem && curveItem.type === 'ensembleChairAndStand') {
+              const distributed = distributeItemsAlongCurve(
+                curve.points,
+                curveItems,
+                curve.itemSize,
+                curve.itemGap,
+                curve.align
+              );
+              const placed = distributed.find(d => d.item.id === curveItem.id);
+              if (placed) {
+                const rad = ((curve.rotation || 0) * Math.PI) / 180;
+                const canvasX = curve.x + (placed.x * Math.cos(rad) - placed.y * Math.sin(rad));
+                const canvasY = curve.y + (placed.x * Math.sin(rad) + placed.y * Math.cos(rad));
+                const halfH = (curveItem.size || curve.itemSize) / 2;
+
+                const effectiveChairType = curveItem.chairType || curve.chairType || 'normal';
+                const isPianoChair =
+                  effectiveChairType === 'pianoChair' ||
+                  effectiveChairType === 'pianoChairSvg' ||
+                  effectiveChairType === 'pianoChairPi';
+                const effectiveStandStyle = curveItem.customIconStyle || curve.customIconStyle || 'default';
+                const isStandXMark = effectiveStandStyle === 'xMark';
+
+                targetInfo = {
+                  anchorX: canvasX * stageDimensions.scale,
+                  anchorTopY: (canvasY - halfH) * stageDimensions.scale,
+                  anchorBottomY: (canvasY + halfH) * stageDimensions.scale,
+                  isPianoChair,
+                  isStandXMark,
+                  onToggleChair: () => {
+                    const nextItems = curveItems.map(it =>
+                      it.id === curveItem.id
+                        ? { ...it, chairType: (isPianoChair ? 'normal' : 'pianoChairSvg') as CurveItem['chairType'] }
+                        : it
+                    );
+                    onUpdateCurve(curve.id, { items: nextItems });
+                  },
+                  onToggleStand: () => {
+                    const nextItems = curveItems.map(it =>
+                      it.id === curveItem.id
+                        ? { ...it, customIconStyle: (isStandXMark ? 'default' : 'xMark') as CurveItem['customIconStyle'] }
+                        : it
+                    );
+                    onUpdateCurve(curve.id, { items: nextItems });
+                  },
+                };
+              }
+            }
+          }
+
+          if (!targetInfo) return null;
+
+          const menuTop =
+            targetInfo.anchorTopY >= 96
+              ? targetInfo.anchorTopY - 88
+              : Math.min(stageDimensions.height - 44, targetInfo.anchorBottomY + 14);
+          const clampedLeft = Math.max(
+            135,
+            Math.min(stageDimensions.width - 135, targetInfo.anchorX)
+          );
+
+          return (
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                left: clampedLeft,
+                top: menuTop,
+                transform: 'translateX(-50%)',
+              }}
+              className="absolute z-30 flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-white/95 dark:bg-slate-800/95 backdrop-blur-md shadow-[0_6px_24px_rgba(15,23,42,0.16)] border border-slate-200/90 dark:border-slate-700/90 select-none whitespace-nowrap"
+            >
+              {/* 椅子アイコン切り替えトグル */}
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
+                <span>椅子</span>
+                <span className={`text-[11px] ${!targetInfo.isPianoChair ? 'text-[#007AFF]' : 'text-slate-400'}`}>○</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={targetInfo.isPianoChair}
+                  onClick={targetInfo.onToggleChair}
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                    targetInfo.isPianoChair ? 'bg-[#007AFF]' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                  title="合奏用椅子(○) / ピアノ椅子(■) を切り替え"
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                      targetInfo.isPianoChair ? 'translate-x-4.5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+                <span className={`text-[11px] ${targetInfo.isPianoChair ? 'text-[#007AFF]' : 'text-slate-400'}`}>■</span>
+              </div>
+
+              <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+
+              {/* 譜面台アイコン切り替えトグル */}
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
+                <span>譜面台</span>
+                <span className={`text-[11px] ${!targetInfo.isStandXMark ? 'text-[#007AFF]' : 'text-slate-400'}`}>⊥</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={targetInfo.isStandXMark}
+                  onClick={targetInfo.onToggleStand}
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                    targetInfo.isStandXMark ? 'bg-[#007AFF]' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                  title="通常譜面台(⊥) / Xマーク(✕) を切り替え"
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                      targetInfo.isStandXMark ? 'translate-x-4.5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+                <span className={`text-[11px] ${targetInfo.isStandXMark ? 'text-[#007AFF]' : 'text-slate-400'}`}>✕</span>
+              </div>
+            </div>
+          );
+        })()}
         </div>
       </div>
       </div>

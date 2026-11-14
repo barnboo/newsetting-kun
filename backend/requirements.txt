@@ -6,3 +6,4 @@ python-multipart==0.0.20
 opencv-python-headless==5.0.0.93
 numpy==2.0.2
 scipy==1.13.1
+rapidocr-onnxruntime==1.4.4

@@ -166,7 +166,7 @@ const PreviewContextMenu: React.FC<PreviewContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 liquid-context-menu rounded-2xl p-1.5 min-w-[210px] max-h-[calc(100vh-16px)] overflow-y-auto text-xs select-none shadow-2xl border border-slate-200/60 dark:border-white/10 animate-in fade-in zoom-in-95 duration-100"
+      className="fixed z-50 liquid-context-menu rounded-2xl p-1.5 min-w-[210px] overflow-visible text-xs select-none shadow-2xl border border-slate-200/60 dark:border-white/10 animate-in fade-in zoom-in-95 duration-100"
       style={{ left: adjustedPos.x, top: adjustedPos.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -2547,20 +2547,20 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           <button
             type="button"
             onClick={() => handleAddText()}
-            className="liquid-btn flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[#007AFF] text-xs font-bold transition-all shrink-0 cursor-pointer"
+            className="liquid-btn flex items-center gap-1.5 px-4 py-2 rounded-full text-[#007AFF] text-sm font-bold transition-all shrink-0 cursor-pointer"
             title="文字を追加して任意の場所に配置"
           >
-            <span className="font-bold">T</span>
+            <span className="font-bold text-base leading-none">T</span>
             <span className="hidden sm:inline">文字</span>
           </button>
 
           <button
             type="button"
             onClick={() => handleAddShape()}
-            className="liquid-btn flex items-center gap-1.5 px-3 py-1.5 rounded-full text-slate-800 text-xs font-bold transition-all shrink-0 cursor-pointer"
+            className="liquid-btn flex items-center gap-1.5 px-4 py-2 rounded-full text-slate-800 text-sm font-bold transition-all shrink-0 cursor-pointer"
             title="図形（丸・ばつ・四角・三角）を追加して配置"
           >
-            <span>◇</span>
+            <span className="text-base leading-none">◇</span>
             <span className="hidden sm:inline">図形</span>
           </button>
 
@@ -2568,14 +2568,14 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
           <button
             type="button"
             onClick={() => setShowCurveLines(prev => !prev)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold shadow-2xs transition-all shrink-0 cursor-pointer ${
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full border text-sm font-bold shadow-2xs transition-all shrink-0 cursor-pointer ${
               showCurveLines
                 ? 'bg-purple-500/15 border-purple-400/50 text-purple-700 hover:bg-purple-500/20'
                 : 'liquid-btn text-slate-600'
             }`}
             title="出力プレビュー内のベジェ曲線の線（ガイド線）の表示/非表示を切り替えます"
           >
-            <span className="font-bold">〜</span>
+            <span className="font-bold text-base leading-none">〜</span>
             <span>曲線線</span>
           </button>
 
@@ -2592,16 +2592,16 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                 return next;
               });
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold transition-all shrink-0 cursor-pointer ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-bold transition-all shrink-0 cursor-pointer ${
               highlightUserObjects
                 ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-md shadow-amber-500/30 ring-2 ring-amber-400/50'
                 : 'liquid-btn text-slate-700 dark:text-slate-200 border-slate-300/80 dark:border-white/10 hover:border-amber-400 hover:text-amber-600'
             }`}
             title="プレビュー上で入力・配置した文字や図形を枠線とバッジで強調表示（出力時は強調されません）"
           >
-            <Highlighter className="w-3.5 h-3.5" />
+            <Highlighter className="w-4 h-4" />
             <span className="hidden md:inline">強調</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+            <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
               highlightUserObjects ? 'bg-white/30 text-white' : 'bg-slate-200/80 dark:bg-slate-700 text-slate-500'
             }`}>
               {highlightUserObjects ? 'ON' : 'OFF'}
@@ -3230,25 +3230,6 @@ export const FullPageEditor: React.FC<FullPageEditorProps> = ({
                 );
               })()
             ) : null}
-
-            {/* 2. Automated Tally & Circles Verification Card */}
-            <div className="liquid-card bg-emerald-500/8 border-emerald-500/25 rounded-2xl p-3.5 space-y-2">
-              <div className="flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-[10px] shadow-2xs">
-                  ✓
-                </span>
-                <span className="font-bold text-emerald-950 text-xs">
-                  自動入力（数字・丸印）配置済み
-                </span>
-              </div>
-              <p className="text-[11px] text-emerald-800 leading-relaxed">
-                表内の「本・脚・台」の数字や「要・不要」の丸印は自動配置されています。キャンバス上でクリックして直接ドラッグ移動や編集・削除が可能です。
-              </p>
-              <div className="pt-1.5 border-t border-emerald-500/20 text-[10px] text-emerald-700 flex items-center gap-1 font-medium">
-                <span>※</span>
-                <span>下の各パーツ行をプレビューへドラッグ＆ドロップすると個数の数字を文字配置できます。</span>
-              </div>
-            </div>
 
             {/* 3. Tally Breakdown: PDF extracted items */}
             <div className="space-y-1.5">

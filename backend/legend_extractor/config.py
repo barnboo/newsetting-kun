@@ -26,18 +26,36 @@ class Config:
         return self._data.get("equipment_keywords", [
             "椅子", "イス", "いす", "合奏用椅子", "合奏椅子", "パイプ椅子", "折りたたみ椅子",
             "ピアノ椅子", "背もたれ椅子", "高低自在椅子", "演奏用椅子", "丸椅子", "譜めくり椅子", "コントラバス椅子",
-            "譜面台", "卓上譜面台", "指揮者用譜面台", "木製譜面台", "合奏用譜面台",
+            "譜面台", "卓上譜面台", "指揮者用譜面台", "木製譜面台", "合奏用譜面台", "指揮者譜面台",
             "長机", "机", "会議机", "受付机", "作業台", "折りたたみ机",
             "指揮台", "指揮者台", "演台", "司会台", "花台",
             "ピアノ", "グランドピアノ", "アップライトピアノ", "電子ピアノ",
+            "ひな段", "山台", "平台", "箱馬",
+            "マイク", "マイクスタンド", "ワイヤレスマイク",
+            "電源", "コンセント", "延長コード", "案内板", "看板", "時計", "スピーカー"
+        ])
+
+    @property
+    def percussion_keywords(self) -> List[str]:
+        return self._data.get("percussion_keywords", [
             "ティンパニ", "バスドラム", "大太鼓", "スネアドラム", "小太鼓",
             "シロフォン", "木琴", "マリンバ", "グロッケン", "鉄琴", "ビブラフォン", "ヴィブラフォン", "チャイム",
             "ドラ", "タムタム", "ゴング", "シンバル", "サスペンドシンバル", "合わせシンバル",
-            "ひな段", "山台", "平台", "箱馬",
-            "マイク", "マイクスタンド", "ワイヤレスマイク",
-            "電源", "コンセント", "延長コード", "案内板", "看板", "時計", "スピーカー",
-            "Timp", "Timpani", "B.D", "BD", "S.D", "SD", "Dr.Set", "DrumSet", "Drums",
-            "Chime", "Gong", "Xylo", "Glocken", "Glock", "Marimba", "Marinba", "Vib", "Cym"
+            "Timp", "Timpani", "B.D.", "B.D", "BD", "S.D.", "S.D", "SD", "Dr.Set", "DrumSet", "Drums",
+            "Chime", "Chime.", "Gong", "Xylo", "Xylo.", "Glocken", "Glocken.", "Glock", "Marimba", "Marinba", "Marinba.",
+            "Vib", "Cym"
+        ])
+
+    @property
+    def equipment_suffixes(self) -> List[str]:
+        return self._data.get("equipment_suffixes", [
+            "椅子", "イス", "いす", "チェアー", "譜面台", "指揮台", "長机", "机", "テーブル"
+        ])
+
+    @property
+    def explanatory_note_keywords(self) -> List[str]:
+        return self._data.get("explanatory_note_keywords", [
+            "準備します", "移動不可", "ご相談", "お借りします", "厳守", "遠慮", "禁止", "手伝い"
         ])
 
     @property

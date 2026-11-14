@@ -14,9 +14,10 @@ interface Props {
   onClose: () => void;
   onBack?: () => void;
   onSave: (newIcons: ExtractedIcon[], newLabels?: Record<string, string>) => void;
+  saveButtonLabel?: string;
 }
 
-const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, fileId, iconLabels, onClose, onBack, onSave }) => {
+const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, fileId, iconLabels, onClose, onBack, onSave, saveButtonLabel }) => {
   const [image] = useImage(iconsRegionUrl);
   const [rects, setRects] = useState<ExtractedIcon[]>([]);
   const [labels, setLabels] = useState<Record<string, string>>({});
@@ -899,13 +900,13 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
             </div>
 
             {/* View Switchers: Entire Page vs Focus Symbols */}
-            <div className="flex items-center gap-1 ml-2 liquid-segment-track p-0.5 rounded-full text-xs">
+            <div className="flex items-center gap-1.5 ml-3 liquid-segment-track p-1.5 rounded-full">
               <button
                 type="button"
                 onClick={handleZoomReset}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                className={`px-5 py-2 rounded-full text-sm font-extrabold transition-all cursor-pointer ${
                   zoomMultiplier === 1.0
-                    ? 'bg-white shadow-2xs text-[#007AFF]'
+                    ? 'bg-white shadow-sm text-[#007AFF]'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
                 title="用紙全体が枠内にぴったり収まるように表示します"
@@ -915,9 +916,9 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
               <button
                 type="button"
                 onClick={handleZoomToSymbols}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                className={`px-5 py-2 rounded-full text-sm font-extrabold transition-all cursor-pointer ${
                   zoomMultiplier > 1.0
-                    ? 'bg-white shadow-2xs text-indigo-600'
+                    ? 'bg-white shadow-sm text-indigo-600'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
                 title="検出された記号枠のあるエリアに拡大・スクロールします"
@@ -929,29 +930,18 @@ const IconAdjustModal: React.FC<Props> = ({ iconsRegionUrl, extractedIcons, file
 
           <div className="flex items-center gap-2.5">
             <button 
-              type="button"
-              onClick={onBack || onClose}
-              translate="no"
-              className="liquid-btn px-4 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 rounded-full transition-colors cursor-pointer flex items-center gap-1.5 notranslate"
-              disabled={isSaving}
-              title="変更を保存せずに前の画面に戻る"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>前の画面に戻る</span>
-            </button>
-            <button 
               onClick={saveAdjustments}
-              className="liquid-btn-primary px-5 py-2 text-white text-xs font-bold rounded-full transition-all cursor-pointer flex items-center gap-1.5"
+              className="liquid-btn-primary px-7 py-3 text-white text-sm sm:text-base font-extrabold rounded-full transition-all cursor-pointer flex items-center gap-2 shadow-md hover:scale-102 active:scale-98"
               disabled={isSaving}
             >
               {isSaving ? (
                 <>
-                  <span className="animate-spin inline-block text-xs font-bold">↻</span>
+                  <span className="animate-spin inline-block text-sm font-bold">↻</span>
                   <span>保存中...</span>
                 </>
               ) : (
                 <>
-                  <span>✓ 確定して再切り抜き</span>
+                  <span>{saveButtonLabel || '✓ 確定して再切り抜き'}</span>
                 </>
               )}
             </button>

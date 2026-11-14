@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, ArrowLeft, Crop } from 'lucide-react';
+import { Sparkles, ArrowLeft } from 'lucide-react';
 import {
   getTemplateDataUrl,
   matchIconsToTemplates,
@@ -28,6 +28,8 @@ interface TemplateMatchModalProps {
   onConfirm: (decisions: MatchingDecision[]) => void;
   onSkip: () => void;
   onOpenManualAdjust?: () => void;
+  confirmLabel?: string;
+  skipLabel?: string;
 }
 
 // テンプレートのカテゴリ別グループ定義
@@ -57,7 +59,7 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
   onBack,
   onConfirm,
   onSkip,
-  onOpenManualAdjust,
+  confirmLabel,
 }) => {
   const buildDecisions = (): MatchingDecision[] => {
     // 1. 全アイテムに対して重複なし・最適1対1マッチングを実行
@@ -177,61 +179,11 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
     );
   };
 
-  // すべて推奨テンプレートに置換
-  const handleAllTemplate = () => {
-    setDecisions(prev =>
-      prev.map(d => {
-        if (d.suggestedTemplate) {
-          return {
-            ...d,
-            choice: 'suggested',
-            selectedTemplate: d.suggestedTemplate,
-            matchedTemplate: d.suggestedTemplate,
-            useTemplate: true,
-          };
-        }
-        return {
-          ...d,
-          choice: 'pdf',
-          matchedTemplate: null,
-          useTemplate: false,
-        };
-      })
-    );
-  };
-
-  // すべてPDF画像のまま使う
-  const handleAllPdf = () => {
-    setDecisions(prev =>
-      prev.map(d => ({
-        ...d,
-        choice: 'pdf',
-        matchedTemplate: null,
-        useTemplate: false,
-      }))
-    );
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md animate-fadeIn">
       <div className="liquid-glass-heavy rounded-3xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden mx-4">
         {/* Header */}
         <div className="p-5 border-b border-slate-200/60 shrink-0 bg-white/40">
-          <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200/50">
-            <button
-              type="button"
-              onClick={onBack || onSkip}
-              className="liquid-btn px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 rounded-full transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs hover:scale-102 active:scale-98"
-              title="一つ前の画面に戻る"
-            >
-              <ArrowLeft className="w-4 h-4 text-[#007AFF]" />
-              <span>一つ前の画面に戻る</span>
-            </button>
-            <span className="text-[11px] text-slate-500 font-medium">
-              テンプレート置き換え
-            </span>
-          </div>
-
           <div className="flex items-start gap-3.5">
             <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#2e90fa] to-[#0055c0] text-white flex items-center justify-center shrink-0 shadow-sm border border-white/40">
               <Sparkles className="w-5 h-5 text-white" />
@@ -246,49 +198,6 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
               </p>
             </div>
           </div>
-
-          {/* Bulk Actions & Manual Adjust Button */}
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-4">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleAllTemplate}
-                className="liquid-btn-primary text-xs font-bold px-4 py-1.5 rounded-full text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <span>✓</span>
-                <span>おすすめテンプレートに一括置換</span>
-              </button>
-              {(() => {
-                const isAllPdf = decisions.every(d => d.choice === 'pdf');
-                return (
-                  <button
-                    type="button"
-                    onClick={handleAllPdf}
-                    className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer ${
-                      isAllPdf
-                        ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-sm ring-2 ring-amber-400/40'
-                        : 'liquid-btn text-slate-700 hover:text-slate-900'
-                    }`}
-                  >
-                    <span>📄</span>
-                    <span>すべてPDF画像のまま使う</span>
-                  </button>
-                );
-              })()}
-            </div>
-
-            {onOpenManualAdjust && (
-              <button
-                type="button"
-                onClick={onOpenManualAdjust}
-                className="liquid-btn text-xs font-bold px-4 py-1.5 rounded-full text-indigo-700 dark:text-indigo-300 hover:text-indigo-900 border border-indigo-200/90 dark:border-indigo-700/60 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100/90 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs hover:scale-102 active:scale-98"
-                title="切り取り範囲のずれ・欠けや、未抽出パーツを手動枠で修正します"
-              >
-                <Crop className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                <span>切り取り枠を手動調整</span>
-              </button>
-            )}
-          </div>
         </div>
 
         {/* Item List */}
@@ -300,18 +209,8 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
                 自動抽出された記号はありませんでした
               </p>
               <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                「切り取り枠を手動調整」を押すと、用紙全体から手動でパーツを囲んで登録できます。
+                「一つ前の画面に戻る」から用紙全体で手動でパーツを囲んで登録できます。
               </p>
-              {onOpenManualAdjust && (
-                <button
-                  type="button"
-                  onClick={onOpenManualAdjust}
-                  className="mt-3 liquid-btn-primary text-xs font-bold px-5 py-2 rounded-full text-white flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-102 active:scale-98 transition-all"
-                >
-                  <Crop className="w-4 h-4" />
-                  <span>パーツ枠を手動調整する</span>
-                </button>
-              )}
             </div>
           ) : (
             decisions.map(d => {
@@ -502,31 +401,13 @@ const TemplateMatchModal: React.FC<TemplateMatchModalProps> = ({
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>一つ前の画面に戻る</span>
             </button>
-            {onOpenManualAdjust && (
-              <button
-                type="button"
-                onClick={onOpenManualAdjust}
-                className="liquid-btn text-xs font-bold px-3.5 py-2 rounded-full text-indigo-700 dark:text-indigo-300 hover:text-indigo-900 border border-indigo-200/90 dark:border-indigo-700/60 bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-100/80 transition-colors flex items-center gap-1.5 cursor-pointer"
-                title="切り取り範囲を手動で調整"
-              >
-                <Crop className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                <span>パーツ枠を手動調整</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onSkip}
-              className="text-xs text-slate-500 hover:text-slate-800 font-medium px-3.5 py-1.5 rounded-full hover:bg-black/5 transition-colors cursor-pointer"
-            >
-              スキップ（すべてPDF画像で配置）
-            </button>
           </div>
           <button
             type="button"
             onClick={() => onConfirm(decisions)}
             className="liquid-btn-primary text-sm font-bold px-6 py-2.5 rounded-full text-white transition-all flex items-center gap-2 cursor-pointer"
           >
-            <span>確定してステージ配置へ進む</span>
+            <span>{confirmLabel || '確定してステージ配置へ進む'}</span>
             <span>→</span>
           </button>
         </div>

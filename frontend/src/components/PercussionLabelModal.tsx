@@ -505,8 +505,8 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
               <button
                 type="button"
                 onClick={() => { setOffsetX(0); setOffsetY(0); }}
-                className={`py-1 px-1 rounded-lg text-xs font-semibold liquid-btn flex flex-col items-center gap-0.5 transition-all cursor-pointer ${
-                  offsetX === 0 && offsetY === 0 ? 'liquid-btn-primary shadow-xs' : 'text-slate-700 dark:text-slate-300'
+                className={`py-1 px-1 rounded-lg text-xs font-semibold flex flex-col items-center gap-0.5 transition-all cursor-pointer ${
+                  offsetX === 0 && offsetY === 0 ? 'liquid-btn-primary shadow-xs' : 'liquid-btn text-slate-700 dark:text-slate-300'
                 }`}
                 title="中央に配置"
               >
@@ -574,31 +574,6 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
                 onChange={(e) => setRotation(parseInt(e.target.value, 10))}
                 className="w-full accent-[#007AFF] cursor-pointer"
               />
-              <div className="grid grid-cols-4 gap-1 pt-0.5">
-                {[
-                  { label: '-90°', delta: -90 },
-                  { label: '0°', reset: 0 },
-                  { label: '+90°', delta: 90 },
-                  { label: '180°', reset: 180 },
-                ].map((btn, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => {
-                      if (btn.reset !== undefined) {
-                        setRotation(btn.reset);
-                      } else if (btn.delta !== undefined) {
-                        let n = (rotation + btn.delta) % 360;
-                        if (n < 0) n += 360;
-                        setRotation(n);
-                      }
-                    }}
-                    className="py-1 rounded text-[10px] font-mono font-medium liquid-btn text-slate-700 dark:text-slate-300 hover:text-slate-900 cursor-pointer"
-                  >
-                    {btn.label}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Font Size Control */}
@@ -619,23 +594,6 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
                 onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
                 className="w-full accent-[#007AFF] cursor-pointer"
               />
-              <div className="grid grid-cols-4 gap-1 pt-0.5">
-                {[
-                  { label: '小 (10)', sz: 10 },
-                  { label: '中 (14)', sz: 14 },
-                  { label: '大 (20)', sz: 20 },
-                  { label: '特大 (28)', sz: 28 },
-                ].map((btn, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setFontSize(btn.sz)}
-                    className="py-1 rounded text-[10px] font-medium liquid-btn text-slate-700 dark:text-slate-300 hover:text-slate-900 cursor-pointer"
-                  >
-                    {btn.label}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Letter Spacing Control */}
@@ -656,23 +614,6 @@ export const PercussionLabelModal: React.FC<PercussionLabelModalProps> = ({
                 onChange={(e) => setLetterSpacing(parseInt(e.target.value, 10))}
                 className="w-full accent-[#007AFF] cursor-pointer"
               />
-              <div className="grid grid-cols-4 gap-1 pt-0.5">
-                {[
-                  { label: '標準 (0)', val: 0 },
-                  { label: '+2', val: 2 },
-                  { label: '+5', val: 5 },
-                  { label: '+10', val: 10 },
-                ].map((btn, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setLetterSpacing(btn.val)}
-                    className="py-1 rounded text-[10px] font-mono font-medium liquid-btn text-slate-700 dark:text-slate-300 hover:text-slate-900 cursor-pointer"
-                  >
-                    {btn.label}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         </div>

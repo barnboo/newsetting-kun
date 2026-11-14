@@ -9,7 +9,8 @@ import {
   Download, 
   Trash2, 
   Database,
-  Edit3
+  Edit3,
+  ExternalLink
 } from 'lucide-react';
 import { PdfUploader } from './components/PdfUploader';
 import { RegionSelector } from './components/RegionSelector';
@@ -120,6 +121,7 @@ function App() {
   const preloadedBackupRef = useRef<any>(null);
   const hasUserAdjustedIconsRef = useRef<boolean>(false);
   const isNewUploadRef = useRef<boolean>(false);
+  const isInitialUploadFlowRef = useRef<boolean>(false);
   const openedAdjustFromTemplateRef = useRef<boolean>(false);
 
   // Refresh and load all project backups and storage usage
@@ -219,6 +221,7 @@ function App() {
   }, [currentPhase]);
 
   const handleResumeProject = async (meta: BackupProjectMeta) => {
+    isInitialUploadFlowRef.current = false;
     // Check localStorage snapshot for this fileId
     let localBackup: any = null;
     try {
@@ -551,6 +554,7 @@ function App() {
     }
     // 新しいPDFを読み込んだ際は前回のセッション状態（ラベルやテンプレ置換設定）を完全にリセット
     isNewUploadRef.current = true;
+    isInitialUploadFlowRef.current = true;
     preloadedBackupRef.current = null;
     hasUserAdjustedIconsRef.current = false;
     setExtractedData(null);
@@ -610,7 +614,7 @@ function App() {
       const data = response.data as ExtractResponse;
       
       const keepCustomIcons = Boolean(
-        hasUserAdjustedIconsRef.current &&
+        !isFromUpload &&
         extractedData?.extractedIcons &&
         extractedData.extractedIcons.length > 0
       );
@@ -646,10 +650,18 @@ function App() {
         effectiveLabels = detectedLabels;
       }
 
-      // 新規PDF読込時はテンプレ置換モーダルを毎回確実に表示し、図面枠調整などの手動再調整時は直接配置画面へ進む
-      setShowIconAdjustModal(false);
-      setShowTemplateModal(isFromUpload);
-      setCurrentPhase(3);
+      // 新規PDF読込時は Step 1: 切り取り手動調整モーダルを開く
+      if (isFromUpload) {
+        setShowIconAdjustModal(true);
+        setShowTemplateModal(false);
+        setCurrentPhase(3);
+      } else {
+        // ステージ切り取り範囲（RegionSelector）完了時: メイン配置画面へ進む
+        isInitialUploadFlowRef.current = false;
+        setShowIconAdjustModal(false);
+        setShowTemplateModal(false);
+        setCurrentPhase(3);
+      }
 
       // Asynchronously cache session in IndexedDB with standalone DataURLs
       (async () => {
@@ -773,7 +785,12 @@ function App() {
     setTemplateReplacements(newReplacements);
     setIconLabels(newLabels);
     setShowTemplateModal(false);
-    setCurrentPhase(3);
+    if (isInitialUploadFlowRef.current) {
+      // Step 2完了 -> Step 3: ステージ切り取り範囲 (RegionSelector) へ進む
+      setCurrentPhase(2);
+    } else {
+      setCurrentPhase(3);
+    }
 
     // Persist to IndexedDB
     if (fileData?.file_id) {
@@ -797,7 +814,12 @@ function App() {
 
   const handleTemplateModalSkip = () => {
     setShowTemplateModal(false);
-    setCurrentPhase(3);
+    if (isInitialUploadFlowRef.current) {
+      // Step 2完了 -> Step 3: ステージ切り取り範囲 (RegionSelector) へ進む
+      setCurrentPhase(2);
+    } else {
+      setCurrentPhase(3);
+    }
   };
 
   const handleIconAdjustBack = () => {
@@ -805,11 +827,19 @@ function App() {
     if (openedAdjustFromTemplateRef.current) {
       openedAdjustFromTemplateRef.current = false;
       setShowTemplateModal(true);
+    } else if (isInitialUploadFlowRef.current) {
+      // Step 1での戻る: ホーム画面へ戻る（読込中断）
+      isInitialUploadFlowRef.current = false;
+      handleBackToHome();
     }
   };
 
   const handleTemplateModalBack = () => {
     setShowTemplateModal(false);
+    if (isInitialUploadFlowRef.current) {
+      // Step 2での戻る: Step 1 切り取り手動調整に戻る
+      setShowIconAdjustModal(true);
+    }
   };
 
 
@@ -866,6 +896,18 @@ function App() {
                   StaJet
                 </p>
               </div>
+              {(currentPhase === 1 || !fileData) && !isExtracting && (
+                <a
+                  href="https://setting-kun.netlify.app/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold text-[#007AFF] dark:text-sky-400 bg-blue-50/80 dark:bg-sky-950/50 hover:bg-blue-100 dark:hover:bg-sky-900/70 border border-blue-200/80 dark:border-sky-800/70 transition-all shadow-2xs hover:scale-[1.02] active:scale-[0.98]"
+                  title="セッティングくんを開く (外部サイト)"
+                >
+                  <span>セッティングくんはこちら</span>
+                  <ExternalLink className="w-3 h-3 shrink-0" />
+                </a>
+              )}
             </div>
 
             {/* Liquid Glass Pill Stepper Progress */}
@@ -1191,7 +1233,15 @@ function App() {
                 imageUrl={fileData.image_url}
                 initialRegions={selectedRegions}
                 onComplete={handleRegionsComplete}
-                onCancel={extractedData ? () => setCurrentPhase(3) : undefined}
+                onCancel={() => {
+                  if (isInitialUploadFlowRef.current) {
+                    setCurrentPhase(3);
+                    setShowTemplateModal(true);
+                  } else if (extractedData) {
+                    setCurrentPhase(3);
+                  }
+                }}
+                cancelLabel={isInitialUploadFlowRef.current ? "前の画面（テンプレ）に戻る" : "キャンセル"}
               />
             </div>
           ) : (
@@ -1237,6 +1287,8 @@ function App() {
                     if (openedAdjustFromTemplateRef.current) {
                       openedAdjustFromTemplateRef.current = false;
                       setShowTemplateModal(true);
+                    } else if (isInitialUploadFlowRef.current) {
+                      setShowTemplateModal(true);
                     }
                   }}
                   onSave={async (newIcons, newLabels) => {
@@ -1245,8 +1297,11 @@ function App() {
                     if (openedAdjustFromTemplateRef.current) {
                       openedAdjustFromTemplateRef.current = false;
                       setShowTemplateModal(true);
+                    } else if (isInitialUploadFlowRef.current) {
+                      setShowTemplateModal(true);
                     }
                   }}
+                  saveButtonLabel={isInitialUploadFlowRef.current ? "✓ 保存してテンプレ選択へ進む" : "✓ 確定して再切り抜き"}
                 />
               )}
               {/* Template replacement modal (opened independently from toolbar) */}
@@ -1263,6 +1318,8 @@ function App() {
                     setShowTemplateModal(false);
                     setShowIconAdjustModal(true);
                   }}
+                  confirmLabel={isInitialUploadFlowRef.current ? "確定してステージ切り取りへ進む" : "確定してステージ配置へ進む"}
+                  skipLabel={isInitialUploadFlowRef.current ? "スキップして次へ（ステージ切り取り）" : "スキップ（すべてPDF画像で配置）"}
                 />
               )}
             </>

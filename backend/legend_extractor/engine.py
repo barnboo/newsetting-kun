@@ -5,9 +5,10 @@ import fitz
 
 from .models import ExtractedLegendItem, Box
 from .primitives import extract_primitives
-from .roi_filter import estimate_stage_roi_and_symbols, normalize_equipment_name_for_dedup
+from .roi_filter import estimate_stage_roi_and_symbols, normalize_equipment_name_for_dedup, has_dimension_text_near_box
 from .parsers import parse_mode_a_tables, parse_mode_b_inlines_and_margins
 from .cropper import refine_tight_symbol_crop
+from .ocr_fallback import run_ocr_fallback
 from .config import cfg
 
 class LegendExtractor:
@@ -24,15 +25,29 @@ class LegendExtractor:
         # Step 3: Dual-Mode parsing
         candidates: List[ExtractedLegendItem] = []
 
-        # Mode A: Physical Grid Tables ONLY
-        items_a = parse_mode_a_tables(page, prims, stage_info)
+        # Mode A: Physical Grid Tables ONLY (returns items and claimed table bounding boxes)
+        items_a, claimed_tables = parse_mode_a_tables(page, prims, stage_info)
         candidates.extend(items_a)
 
-        # Mode B: Space-transparent Chunks & Local Pairs
-        items_b = parse_mode_b_inlines_and_margins(page, prims, stage_info)
+        # Mode B: Space-transparent Chunks & Local Pairs (excludes claimed table cells & stage interior)
+        items_b = parse_mode_b_inlines_and_margins(page, prims, stage_info, claimed_table_rects=claimed_tables)
         candidates.extend(items_b)
 
-        # Step 4: Page-wide Deduplication by Normalized Name & Symbol Signature (Requirement 6)
+        # Step 3.5: Local OCR Fallback (Requirement 5)
+        # Triggered when text primitives count < 15 (pure scanned/raster PDF), or margin has medium/large raster images
+        should_run_ocr = len(prims.chars) < 15
+        if not should_run_ocr and len(candidates) == 0:
+            # Check if there are medium/large raster images in margins without text
+            for r in prims.rasters:
+                if not stage_info.is_inside_stage(r.rect) and (r.rect.width >= 40.0 and r.rect.height >= 40.0):
+                    should_run_ocr = True
+                    break
+
+        if should_run_ocr:
+            ocr_items = run_ocr_fallback(page, prims, stage_info)
+            candidates.extend(ocr_items)
+
+        # Step 4: Page-wide Deduplication by Normalized Name & Symbol Signature (Requirement 6 & 3.4)
         # Groups items with identical normalized name and symbol
         dedup_groups: Dict[Tuple[str, str], List[ExtractedLegendItem]] = {}
         for it in candidates:
@@ -49,14 +64,22 @@ class LegendExtractor:
             # Sort group by priority descending, confidence descending
             group.sort(key=lambda x: (x.priority, x.confidence), reverse=True)
             best = group[0]
-            # Ensure representative item has cleaned name
-            if best.name != norm_name and norm_name in cfg.equipment_keywords:
-                best.name = norm_name
+            # Ensure representative item has cleaned normalized name
+            best.name = norm_name
             prioritized_items.append(best)
 
         # Step 5: OpenCV Penetrating Line Removal, Inset Masking and Tight Cropping (Requirement 5)
         refined_items: List[ExtractedLegendItem] = []
+        page_words = page.get_text("words")
+
         for it in prioritized_items:
+            # Final defensive check: exclude if symbol is near dimension text or inside stage
+            sym_rect = it.symbol_box.to_fitz_rect()
+            if has_dimension_text_near_box(sym_rect, page_words, 3.0):
+                continue
+            if it.source_mode != "table" and stage_info.is_inside_stage(sym_rect):
+                continue
+
             tight_sym_box = refine_tight_symbol_crop(
                 page,
                 it.symbol_box,

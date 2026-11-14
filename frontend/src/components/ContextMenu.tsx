@@ -182,7 +182,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 liquid-context-menu rounded-2xl p-1.5 min-w-[220px] max-h-[calc(100vh-16px)] overflow-y-auto text-xs select-none shadow-2xl border border-slate-200/60 dark:border-white/10 animate-in fade-in zoom-in-95 duration-100"
+      className="fixed z-50 liquid-context-menu rounded-2xl p-1.5 min-w-[220px] overflow-visible text-xs select-none shadow-2xl border border-slate-200/60 dark:border-white/10 animate-in fade-in zoom-in-95 duration-100"
       style={{ left: adjustedPos.x, top: adjustedPos.y }}
       onContextMenu={(e) => e.preventDefault()}
     >

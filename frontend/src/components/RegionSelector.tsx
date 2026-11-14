@@ -13,6 +13,7 @@ interface RegionSelectorProps {
   initialRegions?: Region[];
   onComplete: (regions: Region[]) => void;
   onCancel?: () => void;
+  cancelLabel?: string;
 }
 
 const MODES = [
@@ -31,7 +32,7 @@ const MODES = [
   },
 ];
 
-export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, initialRegions, onComplete, onCancel }) => {
+export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, initialRegions, onComplete, onCancel, cancelLabel }) => {
   const [crop, setCrop] = useState<Crop | undefined>(() => {
     const bg = initialRegions?.find(r => r.type === 'background');
     if (bg?.percentCrop) {
@@ -470,7 +471,7 @@ export const RegionSelector: React.FC<RegionSelectorProps> = ({ imageUrl, initia
                 className="px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1 shrink-0 liquid-btn text-slate-700 dark:text-slate-200 cursor-pointer"
                 title="変更せずに配置画面に戻る"
               >
-                <span>キャンセル</span>
+                <span>{cancelLabel || 'キャンセル'}</span>
               </button>
             )}
 
